@@ -5,3 +5,6 @@
 Package.resolved
 DerivedData/
 *.xcodeproj
+
+ProjectHub.app/
+ProjectHub.zip
