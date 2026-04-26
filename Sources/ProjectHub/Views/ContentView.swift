@@ -1,11 +1,12 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Root content view (3 tabs: Projects | Skills | Settings)
+// MARK: - Root content view (4 tabs: Projects | Skills | MCP | Settings)
 
 struct ContentView: View {
     @EnvironmentObject var projectStore: ProjectStore
     @EnvironmentObject var skillStore:   SkillStore
+    @EnvironmentObject var mcpStore:     MCPStore
     @State private var tab: Int = 0
 
     static let headerGrad = LinearGradient(
@@ -51,6 +52,11 @@ struct ContentView: View {
             statPill(value: "\(total)",
                      label: "project\(total == 1 ? "" : "s")",
                      icon: "folder.fill")
+
+            let serverCount = mcpStore.serverCount
+            if serverCount > 0 {
+                statPill(value: "\(serverCount)", label: "MCP", icon: "server.rack")
+            }
 
             Button(action: {
                 projectStore.scan()
@@ -134,7 +140,8 @@ struct ContentView: View {
         HStack(spacing: 5) {
             tabButton(title: "Projects", icon: "folder.fill",              tag: 0)
             tabButton(title: "Skills",   icon: "book.closed.fill",         tag: 1)
-            tabButton(title: "Settings", icon: "gearshape.fill",           tag: 2)
+            tabButton(title: "MCP",      icon: "server.rack",              tag: 2)
+            tabButton(title: "Settings", icon: "gearshape.fill",           tag: 3)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -182,6 +189,7 @@ struct ContentView: View {
         switch tab {
         case 0:  ProjectsView()
         case 1:  GlobalSkillsView()
+        case 2:  GlobalMCPView()
         default: SettingsView()
         }
     }

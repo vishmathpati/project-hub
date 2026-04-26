@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let projectStore  = ProjectStore()
     private let skillStore    = SkillStore()
     private let agentStore    = AgentStore()
+    private let mcpStore      = MCPStore()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -60,7 +61,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 DashboardWindow.shared.open(
                     projectStore: self.projectStore,
                     skillStore:   self.skillStore,
-                    agentStore:   self.agentStore
+                    agentStore:   self.agentStore,
+                    mcpStore:     self.mcpStore
                 )
             }
         }
@@ -150,6 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .environmentObject(projectStore)
                 .environmentObject(skillStore)
                 .environmentObject(agentStore)
+                .environmentObject(mcpStore)
         )
     }
 

@@ -14,7 +14,7 @@ final class DashboardWindow {
     private var window: NSWindow?
     private init() {}
 
-    func open(projectStore: ProjectStore, skillStore: SkillStore, agentStore: AgentStore) {
+    func open(projectStore: ProjectStore, skillStore: SkillStore, agentStore: AgentStore, mcpStore: MCPStore) {
         if let existing = window, existing.isVisible {
             existing.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -25,6 +25,7 @@ final class DashboardWindow {
             .environmentObject(projectStore)
             .environmentObject(skillStore)
             .environmentObject(agentStore)
+            .environmentObject(mcpStore)
 
         let hc = NSHostingController(rootView: AnyView(content))
         let w = NSWindow(contentViewController: hc)
