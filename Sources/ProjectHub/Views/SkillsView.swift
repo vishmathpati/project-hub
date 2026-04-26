@@ -9,6 +9,9 @@ struct SkillsView: View {
 
     @EnvironmentObject var skillStore: SkillStore
 
+    @State private var editingSkill: InstalledSkill? = nil
+    @State private var localTick: Int = 0
+
     var body: some View {
         let installed = skillStore.installedSkills(for: project.path)
         let globals   = skillStore.globalSkills
@@ -58,7 +61,16 @@ struct SkillsView: View {
             .frame(maxWidth: .infinity)
         }
         .frame(maxHeight: .infinity)
-        .id(reloadTick)   // force re-render when parent bumps tick
+        .id("\(reloadTick)-\(localTick)")   // force re-render when parent or local tick bumps
+        .sheet(item: $editingSkill) { skill in
+            SkillEditorSheet(
+                skillPath: skill.claudePath ?? skill.codexPath ?? "",
+                onSaved: {
+                    skillStore.refresh()
+                    localTick += 1
+                }
+            )
+        }
     }
 
     // MARK: - Section header
@@ -99,6 +111,13 @@ struct SkillsView: View {
                 }
             }
             Spacer()
+            Button(action: { editingSkill = skill }) {
+                Image(systemName: "pencil")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Edit skill")
             Button(action: {
                 skillStore.remove(skillName: skill.name, from: projectPath)
             }) {
