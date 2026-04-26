@@ -47,6 +47,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.popover.performClose(nil)
             }
         }
+
+        // Expand to window notification
+        NotificationCenter.default.addObserver(
+            forName: .projecthubExpandWindow,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.popover.performClose(nil)
+                DashboardWindow.shared.open(
+                    projectStore: self.projectStore,
+                    skillStore:   self.skillStore,
+                    agentStore:   self.agentStore
+                )
+            }
+        }
     }
 
     // Dock icon click → toggle popover

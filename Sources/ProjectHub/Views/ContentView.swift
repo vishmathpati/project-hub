@@ -25,7 +25,7 @@ struct ContentView: View {
             Divider()
             content
         }
-        .frame(width: 480)
+        .frame(minWidth: 480)
     }
 
     // MARK: - Header
@@ -69,6 +69,16 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .help("Refresh")
+
+            Button(action: {
+                NotificationCenter.default.post(name: .projecthubExpandWindow, object: nil)
+            }) {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.7))
+            }
+            .buttonStyle(.plain)
+            .help("Expand to window")
 
             Menu {
                 Toggle(isOn: Binding(
