@@ -24,6 +24,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let agentStore    = AgentStore()
     private let mcpStore      = MCPStore()
 
+    // Live Mode state (tracks menu item title)
+    private var liveModeEnabled: Bool = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         setDockIcon()
@@ -35,6 +38,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             UserDefaults.standard.set(true, forKey: "projecthub.didShowWelcome")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
                 self?.togglePopover()
+            }
+        }
+
+        // Live Mode close notification (panel X button)
+        NotificationCenter.default.addObserver(
+            forName: .projecthubLiveModeDidClose,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.liveModeEnabled = false
             }
         }
 
@@ -182,6 +196,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Refresh",            action: #selector(refreshFromMenu),     keyEquivalent: "r")
         menu.addItem(NSMenuItem.separator())
 
+        // Live Mode toggle
+        let liveModeTitle = liveModeEnabled ? "Hide Live Mode" : "Show Live Mode"
+        let liveItem = NSMenuItem(title: liveModeTitle, action: #selector(toggleLiveMode), keyEquivalent: "l")
+        liveItem.state = liveModeEnabled ? .on : .off
+        menu.addItem(liveItem)
+        menu.addItem(NSMenuItem.separator())
+
         let loginItem = NSMenuItem(title: "Launch at login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         loginItem.state = AppActions.launchAtLoginEnabled ? .on : .off
         menu.addItem(loginItem)
@@ -205,6 +226,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func aboutFromMenu()          { AppActions.about() }
     @objc private func openRepoFromMenu()       { AppActions.openRepo() }
     @objc private func toggleLaunchAtLogin()    { AppActions.launchAtLoginEnabled.toggle() }
+
+    @objc private func toggleLiveMode() {
+        liveModeEnabled.toggle()
+        LiveModeWindow.shared.toggle(skillStore: skillStore, mcpStore: mcpStore)
+    }
 }
 
 // MARK: - Notification names

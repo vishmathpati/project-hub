@@ -1195,3 +1195,48 @@ enum ConfigWriter {
         return out
     }
 }
+
+// MARK: - Project-scope MCP toggle (used by LiveModeView)
+
+extension ConfigWriter {
+
+    /// Toggle a server in the project's `.mcp.json` between enabled and disabled.
+    /// Returns `true` on success, `false` if the file doesn't exist or the server wasn't found.
+    @discardableResult
+    static func toggleProjectServer(projectPath: String, name: String, enable: Bool) -> Bool {
+        let jsonPath = (projectPath as NSString).appendingPathComponent(".mcp.json")
+        guard FileManager.default.fileExists(atPath: jsonPath) else { return false }
+
+        var root = loadJsonRoot(path: jsonPath)
+        let key = "mcpServers"
+        let disabledKey = "\(key)_disabled"
+
+        if enable {
+            // Move from disabled → enabled
+            guard var disabled = root[disabledKey] as? [String: Any],
+                  let config   = disabled[name] else { return false }
+            disabled.removeValue(forKey: name)
+            if disabled.isEmpty { root.removeValue(forKey: disabledKey) }
+            else { root[disabledKey] = disabled }
+            var enabled = root[key] as? [String: Any] ?? [:]
+            enabled[name] = config
+            root[key] = enabled
+        } else {
+            // Move from enabled → disabled
+            guard var enabled = root[key] as? [String: Any],
+                  let config  = enabled[name] else { return false }
+            enabled.removeValue(forKey: name)
+            root[key] = enabled
+            var disabled = root[disabledKey] as? [String: Any] ?? [:]
+            disabled[name] = config
+            root[disabledKey] = disabled
+        }
+
+        do {
+            try backupAndWrite(path: jsonPath, root: root)
+            return true
+        } catch {
+            return false
+        }
+    }
+}

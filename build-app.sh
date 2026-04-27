@@ -8,7 +8,7 @@ cd "$(dirname "$0")"
 MODE="${1:-debug}"
 [ "$MODE" = "release" ] && SWIFT_FLAGS="-c release" || SWIFT_FLAGS=""
 
-VERSION="0.2.0"
+VERSION="0.3.0"
 
 echo "→ Building Swift package ($MODE)…"
 swift build $SWIFT_FLAGS
