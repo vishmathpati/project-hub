@@ -141,7 +141,8 @@ struct ContentView: View {
             tabButton(title: "Projects", icon: "folder.fill",              tag: 0)
             tabButton(title: "Skills",   icon: "book.closed.fill",         tag: 1)
             tabButton(title: "MCP",      icon: "server.rack",              tag: 2)
-            tabButton(title: "Settings", icon: "gearshape.fill",           tag: 3)
+            tabButton(title: "Compat",   icon: "checklist.checked",        tag: 3)
+            tabButton(title: "Settings", icon: "gearshape.fill",           tag: 4)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -190,6 +191,7 @@ struct ContentView: View {
         case 0:  ProjectsView()
         case 1:  GlobalSkillsView()
         case 2:  GlobalMCPView()
+        case 3:  CompatibilityView()
         default: SettingsView()
         }
     }

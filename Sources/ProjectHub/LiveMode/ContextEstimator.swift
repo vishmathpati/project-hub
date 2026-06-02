@@ -30,7 +30,7 @@ struct ContextSnapshot {
 }
 
 struct SkillTokenItem: Identifiable {
-    let id: String       // skill dir name
+    let id: String       // canonical skill directory path
     let name: String
     let tokens: Int
     let path: String
@@ -77,39 +77,10 @@ enum ContextEstimator {
     // MARK: - Skills
 
     private static func estimateSkills(projectPath: String) -> [SkillTokenItem] {
-        let fm = FileManager.default
-        let skillsDir = (projectPath as NSString).appendingPathComponent(".claude/skills")
-
-        guard let entries = try? fm.contentsOfDirectory(atPath: skillsDir) else { return [] }
-
-        var items: [SkillTokenItem] = []
-
-        for entry in entries.sorted() {
-            let isDisabledParent = entry == "_disabled"
-            if isDisabledParent {
-                // Recurse into _disabled to show disabled skills
-                let disabledDir = (skillsDir as NSString).appendingPathComponent("_disabled")
-                if let disabledEntries = try? fm.contentsOfDirectory(atPath: disabledDir) {
-                    for dEntry in disabledEntries.sorted() {
-                        let skillDir = (disabledDir as NSString).appendingPathComponent(dEntry)
-                        if let item = skillItem(from: skillDir, name: dEntry, enabled: false) {
-                            items.append(item)
-                        }
-                    }
-                }
-                continue
+        SkillInventoryReader.installedSkills(for: projectPath)
+            .compactMap { skill in
+                skillItem(from: skill.path, name: skill.name, enabled: skill.isEnabled)
             }
-
-            let skillDir = (skillsDir as NSString).appendingPathComponent(entry)
-            var isDir: ObjCBool = false
-            guard fm.fileExists(atPath: skillDir, isDirectory: &isDir), isDir.boolValue else { continue }
-
-            if let item = skillItem(from: skillDir, name: entry, enabled: true) {
-                items.append(item)
-            }
-        }
-
-        return items
     }
 
     private static func skillItem(from skillDir: String, name: String, enabled: Bool) -> SkillTokenItem? {
@@ -145,44 +116,33 @@ enum ContextEstimator {
             displayName = name
         }
 
-        return SkillTokenItem(id: name, name: displayName, tokens: tokens, path: skillDir, enabled: enabled)
+        let id = URL(fileURLWithPath: (skillDir as NSString).expandingTildeInPath)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
+        return SkillTokenItem(id: id, name: displayName, tokens: tokens, path: skillDir, enabled: enabled)
     }
 
     // MARK: - MCPs
 
     private static func estimateMCPs(projectPath: String) -> [MCPTokenItem] {
-        // Read project-scope .mcp.json
-        let projectMcps = MCPReader.fromClaudeCode(projectPath)
-
-        // Also check for disabled servers in .mcp.json (under "mcpServers_disabled")
-        let disabledNames = readDisabledServerNames(projectPath: projectPath)
-
         var items: [MCPTokenItem] = []
         var seen: Set<String> = []
 
-        for info in projectMcps {
-            guard !seen.contains(info.name) else { continue }
-            seen.insert(info.name)
-            let enabled = !disabledNames.contains(info.name)
+        for server in MCPReader.servers(for: projectPath) {
+            let key = server.id
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
             items.append(MCPTokenItem(
-                id:      info.name,
-                name:    info.name,
+                id:      key,
+                name:    server.name,
                 tokens:  mcpServerOverhead,
-                toolID:  info.source.rawValue,
-                enabled: enabled
+                toolID:  server.source.rawValue,
+                enabled: !server.isDisabled
             ))
         }
 
         return items.sorted { $0.name < $1.name }
-    }
-
-    private static func readDisabledServerNames(projectPath: String) -> Set<String> {
-        let jsonPath = (projectPath as NSString).appendingPathComponent(".mcp.json")
-        guard let data = FileManager.default.contents(atPath: jsonPath),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let disabled = json["mcpServers_disabled"] as? [String: Any]
-        else { return [] }
-        return Set(disabled.keys)
     }
 
     // MARK: - CLAUDE.md

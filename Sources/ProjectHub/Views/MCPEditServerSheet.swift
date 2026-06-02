@@ -10,7 +10,7 @@ struct MCPEditServerSheet: View {
     let toolLabel: String
     let serverName: String
     /// When non-nil, edits land in the project-scope config under this folder
-    /// (e.g. `<projectRoot>/.cursor/mcp.json`) instead of the user-scope file.
+    /// (e.g. `<projectRoot>/.mcp.json`) instead of the user-scope file.
     let projectRoot: String?
     let onClose: () -> Void
 
@@ -26,6 +26,7 @@ struct MCPEditServerSheet: View {
     @State private var argsText: String  = ""
     @State private var url: String       = ""
     @State private var envPairs: [EnvPair] = []
+    @State private var originalConfig: [String: Any] = [:]
 
     struct EnvPair: Identifiable {
         let id = UUID()
@@ -233,6 +234,7 @@ struct MCPEditServerSheet: View {
             projectRoot: projectRoot,
             name: serverName
         ) ?? [:]
+        originalConfig = config
         if let u = config["url"] as? String {
             transport = "http"
             url = u
@@ -253,7 +255,7 @@ struct MCPEditServerSheet: View {
         saving = true
         errorMessage = nil
 
-        var config: [String: Any] = [:]
+        var config = originalConfig
         if transport == "stdio" {
             let trimmedCmd = command.trimmingCharacters(in: .whitespaces)
             guard !trimmedCmd.isEmpty else {
@@ -261,6 +263,7 @@ struct MCPEditServerSheet: View {
                 saving = false
                 return
             }
+            config.removeValue(forKey: "url")
             config["command"] = trimmedCmd
             let args = argsText
                 .components(separatedBy: .newlines)
@@ -274,6 +277,8 @@ struct MCPEditServerSheet: View {
                 saving = false
                 return
             }
+            config.removeValue(forKey: "command")
+            config.removeValue(forKey: "args")
             config["url"] = trimmedURL
         }
 
@@ -284,7 +289,11 @@ struct MCPEditServerSheet: View {
             if k.isEmpty { continue }
             env[k] = p.value
         }
-        if !env.isEmpty { config["env"] = env }
+        if env.isEmpty {
+            config.removeValue(forKey: "env")
+        } else {
+            config["env"] = env
+        }
 
         let result = mcpStore.replaceServerConfig(
             toolID: toolID,

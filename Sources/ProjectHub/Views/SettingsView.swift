@@ -68,8 +68,9 @@ struct SettingsView: View {
 
                     let paths = [
                         "~/.claude/skills/",
-                        "~/.codex/skills/",
-                        "~/.cursor/skills-cursor/",
+                        "~/.agents/skills/",
+                        "/etc/codex/skills/ (admin, read-only)",
+                        "~/.codex/skills/ (managed/legacy)",
                     ]
                     ForEach(paths, id: \.self) { path in
                         HStack(spacing: 6) {
@@ -80,6 +81,27 @@ struct SettingsView: View {
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundColor(.secondary)
                         }
+                    }
+                }
+                .padding(10)
+                .background(Color(NSColor.controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color(NSColor.separatorColor).opacity(0.4), lineWidth: 0.5))
+
+                // Compatibility matrix
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Image(systemName: "checklist.checked")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.accentColor)
+                        Text("Compatibility matrix")
+                            .font(.system(size: 12, weight: .semibold))
+                        Spacer()
+                    }
+
+                    ForEach(compatibilityGroups, id: \.tool.id) { group in
+                        compatibilityRow(tool: group.tool, surfaces: group.surfaces)
                     }
                 }
                 .padding(10)
@@ -145,5 +167,52 @@ struct SettingsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private var compatibilityGroups: [(tool: CompatibilityToolID, surfaces: [CompatibilityMatrixEntry])] {
+        let matrix = CompatibilityScanner.compatibilityMatrix(projectRoot: nil)
+        return CompatibilityToolID.allCases.map { tool in
+            (tool, matrix.filter { $0.toolID == tool })
+        }
+    }
+
+    private func compatibilityRow(tool: CompatibilityToolID, surfaces: [CompatibilityMatrixEntry]) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(tool.label)
+                    .font(.system(size: 11, weight: .semibold))
+                Spacer()
+                Text("\(surfaces.count) locations")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                capabilityLine("MCP", surfaces: surfaces.filter { $0.kind == .mcp })
+                capabilityLine("Skills", surfaces: surfaces.filter { $0.kind == .skills })
+                capabilityLine("Settings", surfaces: surfaces.filter { $0.kind == .settings || $0.kind == .auth })
+            }
+        }
+        .padding(.vertical, 5)
+    }
+
+    private func capabilityLine(_ label: String, surfaces: [CompatibilityMatrixEntry]) -> some View {
+        let writable = surfaces.contains { $0.canWriteSafely }
+        let firstPath = surfaces.first?.displayPath ?? "UI/runtime only"
+        return HStack(spacing: 6) {
+            Text(label)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundColor(writable ? .green : .secondary)
+                .frame(width: 46, alignment: .leading)
+            Text(firstPath)
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 0)
+            Text(writable ? "file" : "UI")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundColor(writable ? .green : .secondary)
+        }
     }
 }

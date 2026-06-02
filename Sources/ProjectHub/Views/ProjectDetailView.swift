@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Project detail: six sub-tabs across two rows
+// MARK: - Project detail: Claude/Codex sub-tabs across compact rows
 
 struct ProjectDetailView: View {
     let project: Project
@@ -79,7 +79,7 @@ struct ProjectDetailView: View {
                     .stroke(Color(NSColor.separatorColor).opacity(0.5), lineWidth: 0.5))
             }
             .buttonStyle(.plain)
-            .help("Copy skills, agents, and rules from another project")
+            .help("Copy Claude/Codex skills, agents, and MCP servers from another project")
 
             Button {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: project.path)])
@@ -108,14 +108,14 @@ struct ProjectDetailView: View {
     private var subTabBar: some View {
         VStack(spacing: 4) {
             HStack(spacing: 4) {
-                subTabButton(title: "Skills",   icon: "book.closed.fill",       tag: 0)
-                subTabButton(title: "Agents",   icon: "person.fill.viewfinder",  tag: 1)
-                subTabButton(title: "MCP",      icon: "server.rack",             tag: 2)
+                subTabButton(title: "Health",   icon: "stethoscope",             tag: 0)
+                subTabButton(title: "Skills",   icon: "book.closed.fill",        tag: 1)
+                subTabButton(title: "Agents",   icon: "person.fill.viewfinder",   tag: 2)
+                subTabButton(title: "MCP",      icon: "server.rack",              tag: 3)
             }
             HStack(spacing: 4) {
-                subTabButton(title: "Rules",    icon: "text.badge.checkmark",    tag: 3)
-                subTabButton(title: "Hooks",    icon: "bolt.fill",               tag: 4)
-                subTabButton(title: "CLAUDE.md",icon: "doc.text.fill",           tag: 5)
+                subTabButton(title: "Hooks",    icon: "bolt.fill",                tag: 4)
+                subTabButton(title: "CLAUDE.md",icon: "doc.text.fill",            tag: 5)
             }
         }
         .padding(.horizontal, 12)
@@ -154,10 +154,10 @@ struct ProjectDetailView: View {
     @ViewBuilder
     private var content: some View {
         switch subTab {
-        case 0: SkillsView(project: project, reloadTick: reloadTick)
-        case 1: AgentsView(project: project, reloadTick: $reloadTick)
-        case 2: MCPView(project: project)
-        case 3: CursorRulesView(project: project)
+        case 0: CompatibilityView(project: project)
+        case 1: SkillsView(project: project, reloadTick: reloadTick)
+        case 2: AgentsView(project: project, reloadTick: $reloadTick)
+        case 3: MCPView(project: project)
         case 4: HooksView(project: project)
         default: ClaudeMdView(project: project)
         }
