@@ -13,12 +13,26 @@ enum DiscoverySource: Equatable, Hashable, CaseIterable {
 // MARK: - Discovered project model
 
 struct DiscoveredProject: Identifiable, Equatable {
+    struct WorktreeInfo: Equatable {
+        let gitDir: String?
+        let mainRepositoryPath: String?
+
+        var mainRepositoryName: String? {
+            mainRepositoryPath.map(Project.folderName)
+        }
+    }
+
     let id: UUID
     let path: String
     let displayName: String
     let hasGit: Bool
     let detectedTools: [String]
     let sources: Set<DiscoverySource>
+    let worktreeInfo: WorktreeInfo?
+
+    var isWorktree: Bool {
+        worktreeInfo != nil
+    }
 
     var primarySource: DiscoverySource {
         if sources.contains(.codexCLI)   { return .codexCLI }
@@ -29,6 +43,11 @@ struct DiscoveredProject: Identifiable, Equatable {
     var orderedSources: [DiscoverySource] {
         [.claudeCode, .codexCLI, .filesystem].filter { sources.contains($0) }
     }
+}
+
+struct ProjectDiscoveryResult {
+    let projects: [DiscoveredProject]
+    let hiddenWorktrees: [DiscoveredProject]
 }
 
 // MARK: - Project model
@@ -62,6 +81,7 @@ struct Project: Codable, Identifiable, Equatable {
 final class ProjectStore: ObservableObject {
     @Published private(set) var projects:   [Project] = []
     @Published private(set) var discovered: [DiscoveredProject] = []
+    @Published private(set) var hiddenWorktrees: [DiscoveredProject] = []
     @Published private(set) var isScanning: Bool = false
 
     private let defaultsKey = "projecthub.projects.v1"
@@ -131,11 +151,12 @@ final class ProjectStore: ObservableObject {
         isScanning = true
         let existingPaths = Set(projects.map { $0.path })
         Task { [weak self] in
-            let found = await Task.detached(priority: .utility) {
+            let result = await Task.detached(priority: .utility) {
                 ProjectStore.findProjects(excluding: existingPaths)
             }.value
             guard let self else { return }
-            discovered = found
+            discovered = result.projects
+            hiddenWorktrees = result.hiddenWorktrees
             isScanning = false
         }
     }
@@ -149,14 +170,18 @@ final class ProjectStore: ObservableObject {
 
     // MARK: - Background scan helpers
 
-    nonisolated private static func findProjects(excluding existingPaths: Set<String>) -> [DiscoveredProject] {
+    nonisolated private static func findProjects(excluding existingPaths: Set<String>) -> ProjectDiscoveryResult {
         let claudeFound      = fromClaudeJson(excluding: existingPaths)
         let codexFound       = fromCodexSqlite(excluding: existingPaths)
         let codexConfigFound = fromCodexConfig(excluding: existingPaths)
         let fsFound          = fromFilesystem(excluding: existingPaths)
 
+        return mergeDiscoveryCandidates(claudeFound + codexFound + codexConfigFound + fsFound)
+    }
+
+    nonisolated static func mergeDiscoveryCandidates(_ candidates: [DiscoveredProject]) -> ProjectDiscoveryResult {
         var byPath: [String: DiscoveredProject] = [:]
-        for project in claudeFound + codexFound + codexConfigFound + fsFound {
+        for project in candidates {
             if let existing = byPath[project.path] {
                 byPath[project.path] = DiscoveredProject(
                     id:            existing.id,
@@ -164,16 +189,21 @@ final class ProjectStore: ObservableObject {
                     displayName:   existing.displayName,
                     hasGit:        existing.hasGit || project.hasGit,
                     detectedTools: Array(Set(existing.detectedTools + project.detectedTools)).sorted(),
-                    sources:       existing.sources.union(project.sources)
+                    sources:       existing.sources.union(project.sources),
+                    worktreeInfo:  existing.worktreeInfo ?? project.worktreeInfo
                 )
             } else {
                 byPath[project.path] = project
             }
         }
 
-        return byPath.values.sorted {
+        let sorted = byPath.values.sorted {
             $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
         }
+        return ProjectDiscoveryResult(
+            projects: sorted.filter { !$0.isWorktree },
+            hiddenWorktrees: sorted.filter(\.isWorktree)
+        )
     }
 
     nonisolated private static func fromClaudeJson(excluding existingPaths: Set<String>) -> [DiscoveredProject] {
@@ -192,7 +222,6 @@ final class ProjectStore: ObservableObject {
         for rawPath in projects.keys {
             let canonical = Project.canonicalize(rawPath)
             guard !seen.contains(canonical) else { continue }
-            guard !canonical.contains("/.claude/worktrees/") else { continue }
             guard !canonical.contains("/.paperclip/") else { continue }
             guard canonical != "/", canonical != home else { continue }
             var isDir: ObjCBool = false
@@ -200,6 +229,7 @@ final class ProjectStore: ObservableObject {
 
             let hasGit = fm.fileExists(atPath: (canonical as NSString).appendingPathComponent(".git"))
             let tools  = detectedTools(at: canonical, fm: fm)
+            let worktreeInfo = worktreeInfo(at: canonical, fm: fm)
 
             found.append(DiscoveredProject(
                 id:            UUID(),
@@ -207,7 +237,8 @@ final class ProjectStore: ObservableObject {
                 displayName:   Project.folderName(at: canonical),
                 hasGit:        hasGit,
                 detectedTools: tools,
-                sources:       [.claudeCode]
+                sources:       [.claudeCode],
+                worktreeInfo:  worktreeInfo
             ))
             seen.insert(canonical)
             if found.count >= 60 { break }
@@ -262,10 +293,12 @@ final class ProjectStore: ObservableObject {
             guard fm.fileExists(atPath: canonical, isDirectory: &isDir), isDir.boolValue else { continue }
             let hasGit = fm.fileExists(atPath: (canonical as NSString).appendingPathComponent(".git"))
             let tools = detectedTools(at: canonical, fm: fm)
+            let worktreeInfo = worktreeInfo(at: canonical, fm: fm)
             guard hasGit || !tools.isEmpty else { continue }
             found.append(DiscoveredProject(
                 id: UUID(), path: canonical, displayName: folderName,
-                hasGit: hasGit, detectedTools: tools, sources: [.codexCLI]
+                hasGit: hasGit, detectedTools: tools, sources: [.codexCLI],
+                worktreeInfo: worktreeInfo
             ))
             seen.insert(canonical)
             if found.count >= 40 { break }
@@ -294,6 +327,7 @@ final class ProjectStore: ObservableObject {
 
             let hasGit = fm.fileExists(atPath: (canonical as NSString).appendingPathComponent(".git"))
             let tools  = detectedTools(at: canonical, fm: fm)
+            let worktreeInfo = worktreeInfo(at: canonical, fm: fm)
 
             found.append(DiscoveredProject(
                 id:            UUID(),
@@ -301,7 +335,8 @@ final class ProjectStore: ObservableObject {
                 displayName:   Project.folderName(at: canonical),
                 hasGit:        hasGit,
                 detectedTools: tools,
-                sources:       [.codexCLI]
+                sources:       [.codexCLI],
+                worktreeInfo:  worktreeInfo
             ))
             seen.insert(canonical)
         }
@@ -365,6 +400,7 @@ final class ProjectStore: ObservableObject {
         let hasGit = fm.fileExists(atPath: (canonical as NSString).appendingPathComponent(".git"))
         let tools  = detectedTools(at: canonical, fm: fm)
         guard hasGit || !tools.isEmpty else { return nil }
+        let worktreeInfo = worktreeInfo(at: canonical, fm: fm)
 
         return DiscoveredProject(
             id:            UUID(),
@@ -372,8 +408,60 @@ final class ProjectStore: ObservableObject {
             displayName:   Project.folderName(at: canonical),
             hasGit:        hasGit,
             detectedTools: tools,
-            sources:       [.filesystem]
+            sources:       [.filesystem],
+            worktreeInfo:  worktreeInfo
         )
+    }
+
+    nonisolated static func worktreeInfo(at path: String, fm: FileManager) -> DiscoveredProject.WorktreeInfo? {
+        let gitPath = (path as NSString).appendingPathComponent(".git")
+        var isDir: ObjCBool = false
+        if fm.fileExists(atPath: gitPath, isDirectory: &isDir), !isDir.boolValue,
+           let content = try? String(contentsOfFile: gitPath, encoding: .utf8),
+           let gitDir = parseGitDir(from: content, relativeTo: path) {
+            guard let mainRepositoryPath = mainRepositoryPath(fromWorktreeGitDir: gitDir) else {
+                return nil
+            }
+            return DiscoveredProject.WorktreeInfo(
+                gitDir: gitDir,
+                mainRepositoryPath: mainRepositoryPath
+            )
+        }
+
+        if path.contains("/.codex/worktrees/") || path.contains("/.claude/worktrees/") {
+            return DiscoveredProject.WorktreeInfo(
+                gitDir: nil,
+                mainRepositoryPath: nil
+            )
+        }
+
+        return nil
+    }
+
+    nonisolated private static func parseGitDir(from content: String, relativeTo worktreePath: String) -> String? {
+        guard let line = content.components(separatedBy: .newlines).first(where: {
+            $0.trimmingCharacters(in: .whitespaces).hasPrefix("gitdir:")
+        }) else { return nil }
+        let value = line
+            .replacingOccurrences(of: "gitdir:", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+        let url: URL
+        if value.hasPrefix("/") || value.hasPrefix("~") {
+            url = URL(fileURLWithPath: (value as NSString).expandingTildeInPath)
+        } else {
+            url = URL(fileURLWithPath: worktreePath).appendingPathComponent(value)
+        }
+        return url.standardizedFileURL.resolvingSymlinksInPath().path
+    }
+
+    nonisolated private static func mainRepositoryPath(fromWorktreeGitDir gitDir: String) -> String? {
+        let gitDirURL = URL(fileURLWithPath: gitDir).standardizedFileURL
+        let worktreesURL = gitDirURL.deletingLastPathComponent()
+        guard worktreesURL.lastPathComponent == "worktrees" else { return nil }
+        let gitURL = worktreesURL.deletingLastPathComponent()
+        guard gitURL.lastPathComponent == ".git" else { return nil }
+        return gitURL.deletingLastPathComponent().path
     }
 
     nonisolated static func detectedTools(at path: String, fm: FileManager) -> [String] {

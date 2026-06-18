@@ -7,6 +7,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [2026-06-18] · Codex
 
+### Added
+- Added hidden Git worktree handling in project discovery, including collapsed Projects-tab access to related worktrees without showing them as normal projects.
+
+### Changed
+- Moved global skill install counts out of SwiftUI card rendering and into a cached background refresh in `SkillStore`.
+- Made Compatibility scans explicit and single-flight, with tab/input changes invalidating stale reports instead of auto-running expensive scans.
+
+### Fixed
+- Fixed the Skills-tab non-responsive path caused by scanning every tracked project from the SwiftUI body when global skills rendered.
+- Fixed Compatibility scan freezes caused by overlapping scan requests and repeated main-thread issue dedupe/canonicalization during result summary rendering.
+- Rebuilt and reinstalled the patched release app at `/Applications/ProjectHub.app`, leaving only one Project Hub app bundle in `/Applications`.
+
+## [2026-06-18] · Codex
+
 ### Fixed
 - Built a fresh release `ProjectHub.app`, installed it to `/Applications/ProjectHub.app`, verified the app bundle signature, and confirmed `/Applications` contains only one Project Hub app bundle.
 

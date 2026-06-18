@@ -272,6 +272,12 @@ struct GlobalSkillsView: View {
     @EnvironmentObject var skillStore: SkillStore
     @EnvironmentObject var projectStore: ProjectStore
 
+    private var installCountRefreshKey: String {
+        let skillKey = skillStore.globalSkills.map(\.name).sorted().joined(separator: "|")
+        let projectKey = projectStore.projects.map(\.path).sorted().joined(separator: "|")
+        return "\(skillKey)#\(projectKey)"
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             bar
@@ -284,13 +290,23 @@ struct GlobalSkillsView: View {
                 list
             }
         }
+        .task(id: installCountRefreshKey) {
+            skillStore.refreshGlobalSkillInstallCounts(for: projectStore.projects)
+        }
     }
 
     private var bar: some View {
-        HStack {
+        HStack(spacing: 8) {
             Text("\(skillStore.globalSkills.count) global skill\(skillStore.globalSkills.count == 1 ? "" : "s")")
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
+            if skillStore.isRefreshingInstallCounts {
+                ProgressView()
+                    .controlSize(.mini)
+                Text("Counting installs")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
             Spacer()
             Button(action: { skillStore.refresh() }) {
                 Image(systemName: "arrow.clockwise")
@@ -317,11 +333,7 @@ struct GlobalSkillsView: View {
     }
 
     private func globalSkillCard(_ skill: Skill) -> some View {
-        // Count how many projects have this skill installed
-        let installedCount = projectStore.projects.filter { project in
-            let installed = skillStore.installedSkills(for: project.path)
-            return installed.contains { $0.name == skill.name }
-        }.count
+        let installedCount = skillStore.globalSkillInstallCounts[skill.name] ?? 0
 
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {

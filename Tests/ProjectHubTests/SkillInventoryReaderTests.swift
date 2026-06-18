@@ -85,6 +85,41 @@ final class SkillInventoryReaderTests: XCTestCase {
         }
     }
 
+    func testGlobalSkillInstallCountsScanEachProjectOnce() {
+        let globalSkills = [
+            Skill(name: "deploy", description: "", triggers: [], source: .claudeGlobal, path: "/global/deploy"),
+            Skill(name: "lint", description: "", triggers: [], source: .codexGlobal, path: "/global/lint"),
+        ]
+        let projects = [
+            Project(id: UUID(), path: "/projects/one", displayName: "one", addedAt: Date(), lastOpenedAt: Date()),
+            Project(id: UUID(), path: "/projects/two", displayName: "two", addedAt: Date(), lastOpenedAt: Date()),
+        ]
+        var scannedPaths: [String] = []
+
+        let counts = SkillStore.installedProjectCounts(
+            globalSkills: globalSkills,
+            projects: projects
+        ) { path in
+            scannedPaths.append(path)
+            if path.hasSuffix("/one") {
+                return [
+                    installedSkill(name: "deploy", path: "\(path)/.claude/skills/deploy"),
+                    installedSkill(name: "deploy", path: "\(path)/.agents/skills/deploy"),
+                    installedSkill(name: "local-only", path: "\(path)/.claude/skills/local-only"),
+                ]
+            }
+            return [
+                installedSkill(name: "deploy", path: "\(path)/.claude/skills/deploy"),
+                installedSkill(name: "lint", path: "\(path)/.agents/skills/lint"),
+            ]
+        }
+
+        XCTAssertEqual(scannedPaths, projects.map(\.path))
+        XCTAssertEqual(counts["deploy"], 2)
+        XCTAssertEqual(counts["lint"], 1)
+        XCTAssertNil(counts["local-only"])
+    }
+
     func testInventoryCarriesDuplicateAndVersionDiagnostics() throws {
         let root = try makeTempProject()
         let app = root.appendingPathComponent("packages/app", isDirectory: true)
@@ -165,6 +200,27 @@ final class SkillInventoryReaderTests: XCTestCase {
         }
         """.write(to: pluginRoot.appendingPathComponent(".codex-plugin/plugin.json"), atomically: true, encoding: .utf8)
         return pluginRoot
+    }
+
+    private func installedSkill(name: String, path: String) -> InstalledSkill {
+        InstalledSkill(
+            originID: path,
+            name: name,
+            description: "",
+            claudePath: path,
+            codexPath: nil,
+            path: path,
+            skillMDPath: (path as NSString).appendingPathComponent("SKILL.md"),
+            sourceLabel: "Test",
+            scopeLabel: "Project",
+            toolLabels: ["Claude Code"],
+            state: .active,
+            version: nil,
+            diagnostics: [],
+            canEdit: true,
+            canRemove: true,
+            readOnlyReason: nil
+        )
     }
 
     private func withIsolatedToolHomes(_ root: URL, run: () throws -> Void) rethrows {

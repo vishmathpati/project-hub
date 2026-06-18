@@ -8,6 +8,7 @@ struct ProjectsView: View {
     @State private var selection: Project? = nil
     @State private var renamingID: UUID? = nil
     @State private var draftName: String = ""
+    @State private var showWorktrees: Bool = false
 
     var body: some View {
         if let project = selection {
@@ -50,7 +51,10 @@ struct ProjectsView: View {
                 }
             } else {
                 let total = projects.projects.count + projects.discovered.count
-                Text("\(total) project\(total == 1 ? "" : "s")")
+                let hidden = projects.hiddenWorktrees.count
+                Text(hidden == 0
+                     ? "\(total) project\(total == 1 ? "" : "s")"
+                     : "\(total) project\(total == 1 ? "" : "s") · \(hidden) worktree\(hidden == 1 ? "" : "s") hidden")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
@@ -97,6 +101,14 @@ struct ProjectsView: View {
                         discoveredRow(for: disc)
                     }
                 }
+                if !projects.hiddenWorktrees.isEmpty {
+                    worktreesDisclosure
+                    if showWorktrees {
+                        ForEach(projects.hiddenWorktrees) { disc in
+                            worktreeRow(for: disc)
+                        }
+                    }
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -125,6 +137,30 @@ struct ProjectsView: View {
         }
         .padding(.top, 10)
         .padding(.bottom, 2)
+    }
+
+    private var worktreesDisclosure: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.triangle.branch")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.secondary)
+            Text("\(projects.hiddenWorktrees.count) worktree\(projects.hiddenWorktrees.count == 1 ? "" : "s") hidden")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.secondary)
+            Spacer()
+            Button(action: { withAnimation(.easeInOut(duration: 0.18)) { showWorktrees.toggle() } }) {
+                Label(showWorktrees ? "Hide" : "Show", systemImage: showWorktrees ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .help(showWorktrees ? "Hide worktree details" : "Show hidden worktree details")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.45))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(NSColor.separatorColor).opacity(0.25), lineWidth: 0.5))
+        .padding(.top, projects.discovered.isEmpty ? 8 : 4)
     }
 
     // MARK: - Discovered row
@@ -169,6 +205,58 @@ struct ProjectsView: View {
         .background(Color(NSColor.controlBackgroundColor).opacity(0.6))
         .clipShape(RoundedRectangle(cornerRadius: 9))
         .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color(NSColor.separatorColor).opacity(0.3), lineWidth: 0.5))
+    }
+
+    private func worktreeRow(for disc: DiscoveredProject) -> some View {
+        HStack(alignment: .center, spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.secondary.opacity(0.10))
+                    .frame(width: 34, height: 34)
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(disc.displayName)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                Text(shortPath(disc.path))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if let mainName = disc.worktreeInfo?.mainRepositoryName {
+                    Text("Worktree of \(mainName)")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+                HStack(spacing: 4) {
+                    ForEach(disc.orderedSources, id: \.self) { src in
+                        sourceBadge(src)
+                    }
+                    ForEach(disc.detectedTools, id: \.self) { tool in
+                        toolBadge(toolID: tool)
+                    }
+                    gitBadge
+                }
+                .padding(.top, 2)
+            }
+            Spacer()
+            Button(action: { revealPathInFinder(disc.path) }) {
+                Image(systemName: "arrow.up.forward.square")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .padding(6)
+            }
+            .buttonStyle(.plain)
+            .help("Reveal worktree in Finder")
+        }
+        .padding(10)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.35))
+        .clipShape(RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color(NSColor.separatorColor).opacity(0.25), lineWidth: 0.5))
     }
 
     // MARK: - Added project row
@@ -398,9 +486,13 @@ struct ProjectsView: View {
     }
 
     private func revealInFinder(_ project: Project) {
+        revealPathInFinder(project.path)
+    }
+
+    private func revealPathInFinder(_ path: String) {
         NotificationCenter.default.post(name: .projecthubClosePopover, object: nil)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: project.path)])
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
         }
     }
 

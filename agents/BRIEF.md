@@ -31,3 +31,11 @@ Rejected silent installer automation for `.mcpb`, remote connectors, and prompt-
 Recovered Compatibility work was accepted as a preservation merge into active `main` after the deleted-worktree audit. The merge priority was code health and recoverability: fix broken/incomplete implementation, preserve the active dirty checkout, and keep feature drift visible rather than discarding validated work.
 
 Known drift remains to reconcile in canon: the recovered branch includes live MCP Verify/network behavior and read-only editor-adjacent project MCP visibility while the root product docs still describe a stricter local-only, Claude/Codex-only policy. Rejected dropping those paths during recovery because the user explicitly approved merging feature drift as long as the code is not broken.
+
+---
+
+## v1.3 — 2026-06-18 20:46 · Codex
+
+Project discovery now treats Git worktrees as related metadata rather than normal projects: worktrees remain inspectable from a collapsed Projects-tab disclosure, but they do not pollute the primary project or discovered-project lists.
+
+Skills and Compatibility views should not run broad filesystem scans from SwiftUI rendering or tab-change events. Global skill install counts are cached through a background store refresh, and Compatibility scans are explicit, single-flight user actions.

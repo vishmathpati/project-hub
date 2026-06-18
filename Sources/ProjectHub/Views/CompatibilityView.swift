@@ -32,6 +32,7 @@ struct CompatibilityView: View {
     @State private var copiedReport = false
     @State private var scanning = false
     @State private var scanRequestID = UUID()
+    @State private var applyingScanResult = false
 
     init(project: Project? = nil) {
         self.fixedProject = project
@@ -87,16 +88,16 @@ struct CompatibilityView: View {
         }
         .onAppear {
             ensureSelectedProject()
-            if report == nil { refresh() }
+            reloadCodexProfileNames()
         }
         .onChange(of: selectedProjectPath) { _, _ in
-            if fixedProject == nil { refresh() }
+            if fixedProject == nil { invalidateReport() }
         }
         .onChange(of: scanTarget) { _, _ in
-            if fixedProject == nil { refresh() }
+            if fixedProject == nil { invalidateReport() }
         }
         .onChange(of: codexRuntimeProfileName) { _, _ in
-            refresh()
+            if !applyingScanResult { invalidateReport() }
         }
         .sheet(item: $selectedIssue) { issue in
             issueSheet(issue)
@@ -234,28 +235,31 @@ struct CompatibilityView: View {
     }
 
     private func summaryGrid(_ report: CompatibilityScanResult) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let serverCounts = healthCounts(filteredServers(report).map { effectiveHealth(for: $0) })
+        let issueCounts = healthCounts(filteredIssues(report).map(\.state))
+
+        return VStack(alignment: .leading, spacing: 8) {
             summarySectionTitle("MCP Server Health")
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
-                serverSummaryTile(.broken, report: report, icon: "xmark.octagon.fill", color: .red)
-                serverSummaryTile(.needsAuth, report: report, icon: "key.fill", color: .orange)
-                serverSummaryTile(.authExpired, report: report, icon: "key.slash.fill", color: .orange)
-                serverSummaryTile(.needsRestart, report: report, icon: "arrow.clockwise.circle.fill", color: .blue)
-                serverSummaryTile(.conflict, report: report, icon: "exclamationmark.triangle.fill", color: .yellow)
-                serverSummaryTile(.disabled, report: report, icon: "pause.circle.fill", color: .secondary)
-                serverSummaryTile(.unknown, report: report, icon: "questionmark.circle.fill", color: .purple)
-                serverSummaryTile(.working, report: report, icon: "checkmark.circle.fill", color: .green)
+                summaryTile(.broken, count: serverCounts[.broken, default: 0], icon: "xmark.octagon.fill", color: .red)
+                summaryTile(.needsAuth, count: serverCounts[.needsAuth, default: 0], icon: "key.fill", color: .orange)
+                summaryTile(.authExpired, count: serverCounts[.authExpired, default: 0], icon: "key.slash.fill", color: .orange)
+                summaryTile(.needsRestart, count: serverCounts[.needsRestart, default: 0], icon: "arrow.clockwise.circle.fill", color: .blue)
+                summaryTile(.conflict, count: serverCounts[.conflict, default: 0], icon: "exclamationmark.triangle.fill", color: .yellow)
+                summaryTile(.disabled, count: serverCounts[.disabled, default: 0], icon: "pause.circle.fill", color: .secondary)
+                summaryTile(.unknown, count: serverCounts[.unknown, default: 0], icon: "questionmark.circle.fill", color: .purple)
+                summaryTile(.working, count: serverCounts[.working, default: 0], icon: "checkmark.circle.fill", color: .green)
             }
 
             summarySectionTitle("Findings by State")
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
-                issueSummaryTile(.broken, report: report, icon: "xmark.octagon.fill", color: .red)
-                issueSummaryTile(.needsAuth, report: report, icon: "key.fill", color: .orange)
-                issueSummaryTile(.authExpired, report: report, icon: "key.slash.fill", color: .orange)
-                issueSummaryTile(.needsRestart, report: report, icon: "arrow.clockwise.circle.fill", color: .blue)
-                issueSummaryTile(.conflict, report: report, icon: "exclamationmark.triangle.fill", color: .yellow)
-                issueSummaryTile(.disabled, report: report, icon: "pause.circle.fill", color: .secondary)
-                issueSummaryTile(.unknown, report: report, icon: "questionmark.circle.fill", color: .purple)
+                summaryTile(.broken, count: issueCounts[.broken, default: 0], icon: "xmark.octagon.fill", color: .red)
+                summaryTile(.needsAuth, count: issueCounts[.needsAuth, default: 0], icon: "key.fill", color: .orange)
+                summaryTile(.authExpired, count: issueCounts[.authExpired, default: 0], icon: "key.slash.fill", color: .orange)
+                summaryTile(.needsRestart, count: issueCounts[.needsRestart, default: 0], icon: "arrow.clockwise.circle.fill", color: .blue)
+                summaryTile(.conflict, count: issueCounts[.conflict, default: 0], icon: "exclamationmark.triangle.fill", color: .yellow)
+                summaryTile(.disabled, count: issueCounts[.disabled, default: 0], icon: "pause.circle.fill", color: .secondary)
+                summaryTile(.unknown, count: issueCounts[.unknown, default: 0], icon: "questionmark.circle.fill", color: .purple)
             }
         }
     }
@@ -267,14 +271,10 @@ struct CompatibilityView: View {
             .padding(.top, 2)
     }
 
-    private func serverSummaryTile(_ state: CompatibilityHealthState, report: CompatibilityScanResult, icon: String, color: Color) -> some View {
-        let count = filteredServers(report).filter { effectiveHealth(for: $0) == state }.count
-        return summaryTile(state, count: count, icon: icon, color: color)
-    }
-
-    private func issueSummaryTile(_ state: CompatibilityHealthState, report: CompatibilityScanResult, icon: String, color: Color) -> some View {
-        let count = filteredIssues(report).filter { $0.state == state }.count
-        return summaryTile(state, count: count, icon: icon, color: color)
+    private func healthCounts(_ states: [CompatibilityHealthState]) -> [CompatibilityHealthState: Int] {
+        states.reduce(into: [:]) { counts, state in
+            counts[state, default: 0] += 1
+        }
     }
 
     private func summaryTile(_ state: CompatibilityHealthState, count: Int, icon: String, color: Color) -> some View {
@@ -1853,15 +1853,23 @@ struct CompatibilityView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
             Button(action: refresh) {
-                Text("Scan")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 7)
-                    .background(ContentView.headerGrad)
-                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                HStack(spacing: 5) {
+                    if scanning {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .tint(.white)
+                    }
+                    Text(scanning ? "Scanning" : "Scan")
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 7)
+                .background(ContentView.headerGrad)
+                .clipShape(RoundedRectangle(cornerRadius: 7))
             }
             .buttonStyle(.plain)
+            .disabled(scanning)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(30)
@@ -6671,15 +6679,20 @@ struct CompatibilityView: View {
             }
             let key = [
                 issue.code.rawValue,
-                Project.canonicalize(path),
+                normalizedIssuePath(path),
                 issue.title,
-                issue.subjectPath.map(Project.canonicalize) ?? ""
+                issue.subjectPath.map(normalizedIssuePath) ?? ""
             ].joined(separator: "|")
             if seen.insert(key).inserted {
                 output.append(issue)
             }
         }
         return output
+    }
+
+    private func normalizedIssuePath(_ path: String) -> String {
+        let expanded = (path as NSString).expandingTildeInPath
+        return (expanded as NSString).standardizingPath
     }
 
     private func effectiveHealth(for server: CompatibilityServerObservation) -> CompatibilityHealthState {
@@ -6836,6 +6849,8 @@ struct CompatibilityView: View {
 
     private func refresh() {
         ensureSelectedProject()
+        guard !scanning else { return }
+
         let requestID = UUID()
         let requestedRoot = scanRoot
         let requestedProfileName = codexRuntimeProfileName
@@ -6852,14 +6867,32 @@ struct CompatibilityView: View {
             )
 
             await MainActor.run {
-                guard scanRequestID == requestID else { return }
+                guard scanRequestID == requestID else {
+                    scanning = false
+                    return
+                }
+                applyingScanResult = true
                 codexProfileNames = profileNames
                 codexRuntimeProfileName = normalizedProfileName
                 report = scanResult
                 liveReports = [:]
                 scanning = false
+                DispatchQueue.main.async {
+                    applyingScanResult = false
+                }
             }
         }
+    }
+
+    private func invalidateReport() {
+        if scanning {
+            scanRequestID = UUID()
+        }
+        report = nil
+        liveReports = [:]
+        postFixActions = []
+        selectedIssue = nil
+        copiedReport = false
     }
 
     private func reloadCodexProfileNames() {

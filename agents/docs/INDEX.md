@@ -6,7 +6,9 @@
 
 - Owner: `Sources/ProjectHub/Stores/ProjectStore.swift`
 - Reads: `~/.claude.json`, `~/.codex/state_*.sqlite`, `~/.codex/config.toml`, filesystem roots
-- Shared with: project rows, project detail tabs, copy-to-project MCP sheet
+- Data: persisted `Project` rows, ephemeral discovered projects, ephemeral hidden worktrees
+- Shared with: project rows, hidden worktree disclosure, project detail tabs, copy-to-project MCP sheet
+- Guard: Git worktrees should be detected as related metadata but hidden from the primary project/discovered lists unless the user explicitly opens the worktree disclosure.
 
 ### MCP Management
 
@@ -46,3 +48,4 @@
 - Owner: `Sources/ProjectHub/Core/CompatibilityScanner.swift`
 - UI: `Sources/ProjectHub/Views/CompatibilityView.swift`, `Sources/ProjectHub/Views/SettingsView.swift`
 - Dependencies to check before edits: MCP Management, Skill Management, Project Discovery, Critical Shared Components.
+- Guard: compatibility scans are explicit and single-flight; do not trigger full scans on tab open/input changes or allow overlapping Scan requests.
