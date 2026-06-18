@@ -1,13 +1,18 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Root content view (4 tabs: Projects | Skills | MCP | Settings)
+// MARK: - Root content view (5 tabs: Projects | Skills | MCP | Compat | Settings)
 
 struct ContentView: View {
     @EnvironmentObject var projectStore: ProjectStore
     @EnvironmentObject var skillStore:   SkillStore
     @EnvironmentObject var mcpStore:     MCPStore
+    private let showsExpandButton: Bool
     @State private var tab: Int = 0
+
+    init(showsExpandButton: Bool = true) {
+        self.showsExpandButton = showsExpandButton
+    }
 
     static let headerGrad = LinearGradient(
         colors: [
@@ -76,15 +81,17 @@ struct ContentView: View {
             .buttonStyle(.plain)
             .help("Refresh")
 
-            Button(action: {
-                NotificationCenter.default.post(name: .projecthubExpandWindow, object: nil)
-            }) {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.white.opacity(0.7))
+            if showsExpandButton {
+                Button(action: {
+                    NotificationCenter.default.post(name: .projecthubExpandWindow, object: nil)
+                }) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.white.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+                .help("Expand to window")
             }
-            .buttonStyle(.plain)
-            .help("Expand to window")
 
             Menu {
                 Toggle(isOn: Binding(

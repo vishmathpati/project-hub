@@ -8,6 +8,18 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 ## [2026-06-18] · Codex
 
 ### Added
+- Added explicit status-menu commands to open the full Project Hub dashboard or the compact panel.
+
+### Changed
+- Promoted Project Hub to a desktop-first app shell: launch, Dock reopen, and menu-bar left click now open the full dashboard window, while the menu bar remains as a companion control.
+- Removed the release bundle's `LSUIElement` menu-bar-agent flag so installed builds behave as normal macOS desktop apps.
+
+### Fixed
+- Fixed status-menu Quit targeting so Quit is handled by `NSApp` while app-specific menu actions remain on the app delegate.
+
+## [2026-06-18] · Codex
+
+### Added
 - Added first-class Compatibility plugin inventory for Codex CLI/Desktop and Claude Code, covering Codex cache/config/marketplace evidence plus Claude installed inventory/settings/known-marketplace/skills-dir/marketplace-directory evidence.
 - Added a Plugins section to the Compatibility UI and clipboard report with install method, state, version, components, path, and source.
 

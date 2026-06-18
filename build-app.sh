@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds ProjectHub.app — a standalone macOS menu bar app bundle.
+# Builds ProjectHub.app — a standalone macOS desktop app with a menu bar companion.
 # Usage: bash build-app.sh [release]
 set -e
 
@@ -48,8 +48,6 @@ cat > "$APP/Contents/Info.plist" << PLIST
     <string>ProjectHub</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
-    <key>LSUIElement</key>
-    <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>LSMinimumSystemVersion</key>

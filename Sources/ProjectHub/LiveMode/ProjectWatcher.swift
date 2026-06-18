@@ -11,10 +11,25 @@ struct WatchedProject: Equatable {
 // MARK: - Project watcher
 
 /// Detects which Claude Code project was most recently active.
-/// Strategy: find the most-recently-modified `.jsonl` conversation file across
-/// all `~/.claude/projects/<dir>/` subdirectories.  Every message appended in
-/// Claude Code updates the active session file's mtime, making this a reliable
-/// signal even when Claude Code merely switches projects in the sidebar.
+///
+/// Two-strategy detection:
+///
+/// **Strategy A – JSONL mtime** (primary)
+///   Finds the most-recently modified `.jsonl` conversation file across all
+///   `~/.claude/projects/<dir>/` subdirectories.  Works for both CLI sessions
+///   and Desktop sessions where the user is actively sending messages.
+///
+/// **Strategy B – Desktop process cwd** (path-resolution + fallback)
+///   The Claude Code Desktop app spawns one `claude` CLI subprocess per open
+///   tab, each running with the project directory as its working directory.
+///   We enumerate those cwds via `lsof` and maintain an `encodedPath →
+///   absolutePath` cache.  This cache is used in two ways:
+///     1. **Path resolution fix**: resolves ambiguous dir names like
+///        `-Users-foo-Arel-OS-bar` → `/Users/foo/Arel OS/bar` (spaces and
+///        dots both encode as `-`, making the reverse mapping ambiguous;
+///        process cwds are unambiguous).
+///     2. **Fallback**: if no recent JSONL exists, show the project whose
+///        tab is currently open in the Desktop app.
 @MainActor
 final class ProjectWatcher: ObservableObject {
 
@@ -22,6 +37,10 @@ final class ProjectWatcher: ObservableObject {
 
     @Published private(set) var claudeIsFront: Bool = false
     @Published private(set) var activeProject: WatchedProject? = nil
+
+    /// All projects currently open as tabs in Claude Code Desktop.
+    /// Derived from running claude process cwds. Updated every ~10 s.
+    @Published private(set) var openProjects: [WatchedProject] = []
 
     // MARK: Private
 
@@ -41,11 +60,18 @@ final class ProjectWatcher: ObservableObject {
     private var knownPaths: [String: String] = [:]
     private var lastKnownPathsMtime: Date = .distantPast
 
+    /// encodedDirName → absolute path, scraped from running claude Desktop processes.
+    /// Refreshed asynchronously every ~10 s.
+    private var desktopCwdCache: [String: String] = [:]
+    private var desktopCwdTask: Task<Void, Never>?
+    private var pollCount = 0
+
     // MARK: - Lifecycle
 
     func start() {
         loadKnownPaths()
         checkFrontApp()
+        refreshDesktopCwdCache()   // kick off first scan immediately
 
         workspaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
@@ -67,6 +93,8 @@ final class ProjectWatcher: ObservableObject {
 
     func stop() {
         stopPolling()
+        desktopCwdTask?.cancel()
+        desktopCwdTask = nil
         if let obs = workspaceObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(obs)
             workspaceObserver = nil
@@ -98,11 +126,20 @@ final class ProjectWatcher: ObservableObject {
     // MARK: - Core detection: find most recently modified .jsonl
 
     private func pollActiveProject() {
+        pollCount += 1
+
+        // Refresh the Desktop cwd cache every 5 polls (~10 s)
+        if pollCount % 5 == 0 {
+            refreshDesktopCwdCache()
+        }
+
         let fm = FileManager.default
         let projectsRoot = ProjectWatcher.projectsDir
 
         guard let projectDirs = try? fm.contentsOfDirectory(atPath: projectsRoot) else {
-            activeProject = nil
+            // ~/.claude/projects doesn't exist (CLI never run)
+            // Fall back entirely to Desktop process detection
+            activeProject = bestDesktopProject()
             return
         }
 
@@ -134,7 +171,8 @@ final class ProjectWatcher: ObservableObject {
         }
 
         guard let dirName = bestDirName else {
-            activeProject = nil
+            // No JSONL files at all — fall back to Desktop open tabs
+            activeProject = bestDesktopProject()
             return
         }
 
@@ -146,26 +184,148 @@ final class ProjectWatcher: ObservableObject {
 
     // MARK: - Path resolution
 
+    /// Resolves an encoded directory name back to an absolute project path.
+    /// Priority:
+    ///  1. ~/.claude.json cache (authoritative, loaded at start + on change)
+    ///  2. Desktop process cwd cache (fixes ambiguous paths like "Arel OS" ↔ "-Arel-OS")
+    ///  3. Naive '-'→'/' decode (works for paths without spaces/dots)
+    ///  4. Last resort: prepend home dir
     private func resolveProjectPath(dirName: String) -> String {
-        // Cache hit from ~/.claude.json (most reliable)
+        // 1. ~/.claude.json cache
         if let known = knownPaths[dirName] { return known }
 
-        // Fallback: try to reverse the encoding for simple paths
-        // Encoding rule: every '/', ' ', '.' in the original path → '-'
-        // We can reconstruct by replacing leading/segment '-' back to '/',
-        // but it's ambiguous for paths with hyphens/spaces. Best effort:
+        // 2. Desktop process cwd — fixes the space/dot ambiguity
+        if let fromProcess = desktopCwdCache[dirName] { return fromProcess }
+
+        // 3. Naive decode (only reliable for paths with no spaces/dots/hyphens)
         let candidate = "/" + dirName.dropFirst()  // drop leading '-', prepend '/'
             .replacingOccurrences(of: "-", with: "/")
         if FileManager.default.fileExists(atPath: candidate) { return candidate }
 
-        // Last resort
+        // 4. Last resort
         return NSHomeDirectory() + "/" + dirName
+    }
+
+    // MARK: - Desktop process cwd cache
+
+    /// Returns the "best" project to show when no JSONL history exists.
+    /// Picks the first non-trivial cwd among running claude Desktop processes.
+    private func bestDesktopProject() -> WatchedProject? {
+        let home = NSHomeDirectory()
+        // Prefer paths that are actual code projects (not home dir, not root)
+        let cwds = desktopCwdCache.values.filter {
+            $0 != "/" && $0 != home && $0.count > home.count + 2
+        }
+        guard let path = cwds.first else { return nil }
+        return WatchedProject(path: path, name: (path as NSString).lastPathComponent)
+    }
+
+    /// Launches an async background task that runs `lsof` to scrape the cwds of
+    /// all `claude` CLI processes spawned by Claude Code Desktop.
+    private func refreshDesktopCwdCache() {
+        desktopCwdTask?.cancel()
+        desktopCwdTask = Task.detached(priority: .background) { [weak self] in
+            let cache = await ProjectWatcher.scanDesktopCwds()
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.desktopCwdCache = cache
+                // Rebuild openProjects from the new cwd cache
+                let home = NSHomeDirectory()
+                self.openProjects = cache.values
+                    .filter { $0 != "/" && $0 != home && $0.count > home.count + 2 }
+                    .sorted()
+                    .map { WatchedProject(path: $0, name: ($0 as NSString).lastPathComponent) }
+            }
+        }
+    }
+
+    /// Runs `lsof -F pn -d cwd -c claude` to collect cwds of all running claude
+    /// processes, then returns a `[encodedDirName: absolutePath]` mapping.
+    ///
+    /// This is a `nonisolated static` so it can run on a background executor without
+    /// touching actor-isolated state.
+    private nonisolated static func scanDesktopCwds() async -> [String: String] {
+        return await Task.detached(priority: .background) {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+            // -F pn  : output fields: p=pid, n=name(path)
+            // -d cwd : only the current-working-directory entry per process
+            // -c claude : only processes whose command name contains "claude"
+            task.arguments = ["-F", "pn", "-d", "cwd", "-c", "claude"]
+
+            let outPipe = Pipe()
+            let errPipe = Pipe()
+            task.standardOutput = outPipe
+            task.standardError  = errPipe
+
+            do { try task.run() } catch { return [:] }
+            task.waitUntilExit()
+
+            let output = String(
+                data: outPipe.fileHandleForReading.readDataToEndOfFile(),
+                encoding: .utf8
+            ) ?? ""
+
+            // lsof -F output format:
+            //   p<PID>
+            //   n<path>
+            // (one process block per process)
+            var mapping: [String: String] = [:]
+            var pendingPath: String? = nil
+
+            for rawLine in output.components(separatedBy: "\n") {
+                guard !rawLine.isEmpty else { continue }
+                let indicator = rawLine.prefix(1)
+                let value     = String(rawLine.dropFirst())
+
+                switch indicator {
+                case "n":
+                    pendingPath = value
+                    // A valid Desktop project cwd — must pass all of:
+                    //   1. Under /Users/ (not /private/… or other roots)
+                    //   2. Longer than the bare home dir
+                    //   3. Actually a directory on disk (not a file like settings.json)
+                    //   4. Last component doesn't start with '.' (skip .claude, .cursor, etc.)
+                    //   5. Last component doesn't end with a config file extension
+                    //   6. At least 2 path components below home (e.g., ~/Projects/foo, not ~/foo)
+                    let home = NSHomeDirectory()
+                    if let path = pendingPath,
+                       path.hasPrefix("/Users/"),
+                       path != home {
+
+                        let name = (path as NSString).lastPathComponent
+                        let isHidden    = name.hasPrefix(".")
+                        let isConfigExt = name.hasSuffix(".json") || name.hasSuffix(".toml")
+                                       || name.hasSuffix(".yaml") || name.hasSuffix(".plist")
+                                       || name.hasSuffix(".lock")
+                        // macOS container/system dirs — never real project paths
+                        let isSystemPath = path.contains("/Library/")
+                                        || path.contains("/Containers/")
+                                        || path.contains("/Application Support/")
+                        var isDir: ObjCBool = false
+                        let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
+                        // Require ≥ 2 segments below home to avoid ~/SomeSingleDir noise
+                        let extraPath = path.dropFirst(home.count)
+                        let depth = extraPath.components(separatedBy: "/").filter { !$0.isEmpty }.count
+
+                        if exists, isDir.boolValue, !isHidden, !isConfigExt, !isSystemPath, depth >= 2 {
+                            let encoded = ProjectWatcher.encodePath(path)
+                            mapping[encoded] = path
+                        }
+                    }
+                default:
+                    break
+                }
+            }
+
+            return mapping
+        }.value
     }
 
     // MARK: - Known paths cache
 
     /// Claude Code path encoding: '/', ' ', and '.' each become '-'.
-    private static func encodePath(_ absolutePath: String) -> String {
+    nonisolated static func encodePath(_ absolutePath: String) -> String {
         absolutePath
             .replacingOccurrences(of: "/", with: "-")
             .replacingOccurrences(of: " ", with: "-")

@@ -1,6 +1,6 @@
 # Project Hub
 
-Personal Mac menu-bar app to manage AI coding tools across all your projects.
+Personal Mac desktop app, with a menu bar companion, to manage AI coding tools across all your projects.
 
 ## Features
 

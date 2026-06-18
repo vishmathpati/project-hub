@@ -1,6 +1,82 @@
 import AppKit
 import SwiftUI
 
+// MARK: - Custom NSPanel that intercepts mouse events at the window level.
+// With backgroundColor = .clear + isOpaque = false, macOS skips transparent
+// pixels during hit-testing, so NSView-level overrides (acceptsFirstMouse,
+// addSubview overlay, etc.) never fire.  sendEvent() runs BEFORE the
+// transparency check, making it the only reliable way to catch clicks on a
+// clear-background borderless panel.
+
+private final class BeaconPanel: NSPanel {
+
+    var onTap:       (() -> Void)?
+    var onDragEnded: ((NSPoint) -> Void)?
+
+    private var dragOrigin: NSPoint?
+    private var didDrag     = false
+    private let threshold: CGFloat = 5
+
+    override var canBecomeKey:  Bool { false }
+    override var canBecomeMain: Bool { false }
+
+    override func sendEvent(_ event: NSEvent) {
+        switch event.type {
+
+        case .leftMouseDown:
+            dragOrigin = NSEvent.mouseLocation
+            didDrag    = false
+            // Don't forward — we own all left-mouse events
+
+        case .leftMouseDragged:
+            guard let origin = dragOrigin else { return }
+            let loc = NSEvent.mouseLocation
+            if !didDrag &&
+               (abs(loc.x - origin.x) > threshold || abs(loc.y - origin.y) > threshold) {
+                didDrag = true
+            }
+            if didDrag {
+                setFrameOrigin(NSPoint(
+                    x: frame.origin.x + event.deltaX,
+                    y: frame.origin.y - event.deltaY
+                ))
+            }
+
+        case .leftMouseUp:
+            let wasDrag = didDrag
+            dragOrigin  = nil
+            didDrag     = false
+            if wasDrag { onDragEnded?(frame.origin) }
+            else        { onTap?() }
+
+        case .rightMouseUp:
+            // Show context menu via AppKit directly (no view needed)
+            let menu = NSMenu()
+            let item = NSMenuItem(title: "Close Live Mode",
+                                  action: #selector(closeLiveModeFromMenu),
+                                  keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+            // Pop menu at current mouse location
+            if let screen = NSScreen.main {
+                let loc  = NSEvent.mouseLocation
+                let flip = NSPoint(x: loc.x, y: screen.frame.height - loc.y)
+                menu.popUp(positioning: nil,
+                           at: NSPoint(x: frame.origin.x + event.locationInWindow.x,
+                                       y: frame.origin.y + event.locationInWindow.y),
+                           in: contentView)
+            }
+
+        default:
+            super.sendEvent(event)
+        }
+    }
+
+    @objc private func closeLiveModeFromMenu() {
+        NotificationCenter.default.post(name: .projecthubLiveModeClose, object: nil)
+    }
+}
+
 // MARK: - State shared between dot + sidebar
 
 @MainActor
@@ -16,7 +92,7 @@ final class LiveModeWindow {
 
     static let shared = LiveModeWindow()
 
-    private var dotPanel:     NSPanel?
+    private var dotPanel:     BeaconPanel?
     private var sidebarPanel: NSPanel?
     private var watcher:      ProjectWatcher?
     private let state         = LiveModeState()
@@ -85,59 +161,49 @@ final class LiveModeWindow {
 
     // MARK: - Dot panel
 
-    private func makeDotPanel(watcher: ProjectWatcher, skillStore: SkillStore, mcpStore: MCPStore) -> NSPanel {
+    private func makeDotPanel(watcher: ProjectWatcher, skillStore: SkillStore, mcpStore: MCPStore) -> BeaconPanel {
         let size: CGFloat = 52
-        let panel = NSPanel(
+
+        // BeaconPanel owns all mouse handling at the window level — no view subclass needed.
+        let panel = BeaconPanel(
             contentRect: NSRect(x: 0, y: 0, width: size, height: size),
             styleMask:   [.borderless, .nonactivatingPanel],
             backing:     .buffered,
             defer:       false
         )
-        panel.level               = .floating
-        panel.isFloatingPanel     = true
-        panel.hidesOnDeactivate   = false
-        panel.collectionBehavior  = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        panel.isMovableByWindowBackground = false   // we handle drag in DragClickView
-        panel.backgroundColor     = .clear
-        panel.isOpaque            = false
-        panel.hasShadow           = false
+        panel.level              = .floating
+        panel.isFloatingPanel    = true
+        panel.hidesOnDeactivate  = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        // 0.01 alpha = invisible BUT non-zero → macOS routes events to this window.
+        // .clear (alpha=0) causes macOS to skip event delivery entirely.
+        panel.backgroundColor    = NSColor.black.withAlphaComponent(0.01)
+        panel.isOpaque           = false
+        panel.hasShadow          = false
 
-        // Restore or default position
         panel.setFrameOrigin(savedOrDefaultOrigin(size: size))
 
-        // Compose: drag handler (bottom) + SwiftUI beacon (on top)
-        let rootView = ZStack {
-            DragClickViewRepresentable(
-                onTap: { [weak self, weak panel] in
-                    guard let self, let panel else { return }
-                    self.handleDotTap(dotPanel: panel, skillStore: skillStore, mcpStore: mcpStore)
-                },
-                onDragEnded: { [weak panel] origin in
-                    UserDefaults.standard.set(
-                        NSStringFromPoint(origin),
-                        forKey: LiveModeWindow.savedPositionKey
-                    )
-                    // Reposition sidebar if open
-                    Task { @MainActor [weak self, weak panel] in
-                        guard let self, let panel else { return }
-                        if let sidebar = self.sidebarPanel {
-                            self.positionSidebar(sidebar, relativeTo: panel)
-                        }
-                    }
-                }
-            )
-
-            BeaconView(
-                watcher:      watcher,
-                usedFraction: state.usedFraction,
-                sidebarOpen:  state.sidebarOpen
-            )
-            .environmentObject(state)
-            .allowsHitTesting(false)   // clicks fall through to DragClickViewRepresentable
+        // Wire callbacks
+        panel.onTap = { [weak self, weak panel] in
+            guard let self, let panel else { return }
+            self.handleDotTap(dotPanel: panel, skillStore: skillStore, mcpStore: mcpStore)
         }
-        .frame(width: size, height: size)
+        panel.onDragEnded = { [weak self, weak panel] origin in
+            UserDefaults.standard.set(NSStringFromPoint(origin),
+                                      forKey: LiveModeWindow.savedPositionKey)
+            Task { @MainActor [weak self, weak panel] in
+                guard let self, let panel else { return }
+                if let sidebar = self.sidebarPanel {
+                    self.positionSidebar(sidebar, relativeTo: panel)
+                }
+            }
+        }
 
-        panel.contentViewController = NSHostingController(rootView: rootView)
+        // SwiftUI content — purely visual, no hit testing required
+        panel.contentViewController = NSHostingController(
+            rootView: BeaconHostView(watcher: watcher, state: state)
+        )
+
         return panel
     }
 

@@ -1,45 +1,49 @@
-# Project Hub Agent Guide
+# CLAUDE.md — Project Hub
 
-Project Hub is a local macOS menu-bar app for managing AI coding tool configuration across projects.
+## Coding Standards
 
-## Required Reading
+**1. Think Before Coding** — Don't assume. Don't hide confusion. Surface tradeoffs.
+**2. Simplicity First** — Minimum code that solves the problem. Nothing speculative.
+**3. Surgical Changes** — Touch only what you must. Match existing style.
+**4. Verify Before Closing** — Define what "done" looks like before touching code.
 
-Before changing code, read:
+---
 
-- `cowork/STATUS.md`
-- `agents/STATUS.md`
-- `agents/STRUCTURE.md`
-- `agents/BRIEF.md`
-- `agents/BRAND.md`
-- `agents/docs/INDEX.md`
+## What this is
 
-Before UI work, also read:
+**Project Hub** — native macOS menu bar app for managing AI coding tool configurations (skills, agents, MCP servers, hooks, CLAUDE.md, cursor rules) across every project in one place. Live Mode: floating panel showing real-time Claude Code context window usage and token counts.
 
-- `agents/FUNDAMENTALS.md`
-- `agents/DESIGN.md`
+This is a standalone Swift project. Related: `active/mcp/` (mcpbolt CLI), `active/mcpbolt-landing/` (marketing site).
 
-## Stack
+## Tech stack
 
-- SwiftPM executable target: `ProjectHub`
-- SwiftUI + AppKit
-- macOS 14+
-- SQLite3 linked directly for Codex state discovery
-- No external package dependencies
+- Swift + SwiftUI + AppKit, macOS 14+
+- No external dependencies (only system `sqlite3`)
+- Build: `swift build`
+- Run: `swift run`
+- Source: `Sources/ProjectHub/`
 
-## Guardrails
+## Guardrails — never build
 
-- Keep changes local-first. Do not require cloud services for core workflows.
-- Treat AI tool config files as user-owned. Preview writes, create backups, and avoid destructive changes.
-- Prefer official tool behavior and verified local config evidence over assumptions.
-- Preserve README.md and ROADMAP.md as human-facing project docs.
-- Validate with `swift build` after code changes.
+- No cloud / accounts / remote sync — local-only, full stop
+- No team features / SSO / enterprise tier
+- No chat interface or AI inside the app
+- No feature creep into generic launcher territory (not Raycast / Alfred)
+- No Windows / web versions
 
-## File Map
+## Reference files
 
-- `Sources/ProjectHub/Models.swift` shared data models.
-- `Sources/ProjectHub/Core/` file readers, parsers, and writers.
-- `Sources/ProjectHub/Stores/` observable app state.
-- `Sources/ProjectHub/Views/` SwiftUI surfaces.
-- `agents/` agent-facing canon.
-- `cowork/` session orchestration notes.
-- `human/` user-facing steering notes.
+- `ROADMAP.md` — Project Hub roadmap v0.1–v0.5 (note: source ahead of roadmap, see STATUS.md)
+
+## Context files
+
+- Read BRAND.md before any work — product identity and what NOT to build.
+- Read BRIEF.md at session start — key decisions and why.
+- Read docs/INDEX.md for the feature map and dependency index before touching any feature.
+
+## Session rules
+
+- Read STATUS.md before doing anything each session.
+- Read docs/INDEX.md for feature map and dependency index.
+- After every response with a change, bug, or decision — append one line to WORKLOG.md immediately.
+- Run `/project-protocol:save-session` before closing every session.

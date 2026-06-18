@@ -4229,9 +4229,51 @@ enum ConfigWriter {
     }
 }
 
-// MARK: - Project-scope MCP toggle (used by LiveModeView)
+// MARK: - MCP toggles (used by LiveModeView)
 
 extension ConfigWriter {
+
+    /// Toggle a **global** MCP server's enabled state for a specific project.
+    ///
+    /// Claude Code stores per-project global-server disables in `~/.claude.json`:
+    /// ```json
+    /// { "projects": { "/path/to/project": { "disabledMcpServers": ["name1"] } } }
+    /// ```
+    /// Enabling removes the name from the array; disabling adds it.
+    @discardableResult
+    static func toggleGlobalMcpForProject(projectPath: String, name: String, enable: Bool) -> Bool {
+        let claudeJsonPath = (NSHomeDirectory() as NSString)
+            .appendingPathComponent(".claude.json")
+        var root = loadJsonRoot(path: claudeJsonPath)
+        guard !root.isEmpty else { return false }
+
+        var projects    = root["projects"] as? [String: Any] ?? [:]
+        var projEntry   = projects[projectPath] as? [String: Any] ?? [:]
+        var disabled    = projEntry["disabledMcpServers"] as? [String] ?? []
+
+        if enable {
+            disabled.removeAll { $0 == name }
+        } else {
+            if !disabled.contains(name) { disabled.append(name) }
+        }
+
+        if disabled.isEmpty {
+            projEntry.removeValue(forKey: "disabledMcpServers")
+        } else {
+            projEntry["disabledMcpServers"] = disabled
+        }
+
+        if projEntry.isEmpty { projects.removeValue(forKey: projectPath) }
+        else                 { projects[projectPath] = projEntry }
+        root["projects"] = projects
+
+        do {
+            try backupAndWrite(path: claudeJsonPath, root: root)
+            return true
+        } catch {
+            return false
+        }
+    }
 
     /// Toggle a server in the project's `.mcp.json` between enabled and disabled.
     /// Returns `true` on success, `false` if the file doesn't exist or the server wasn't found.

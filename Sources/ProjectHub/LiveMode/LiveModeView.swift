@@ -7,12 +7,38 @@ struct LiveModeView: View {
     @ObservedObject var skillStore: SkillStore
     @ObservedObject var mcpStore:   MCPStore
 
+    /// User-pinned project path. nil = auto-follow watcher.activeProject.
+    @State private var pinnedProjectPath: String? = nil
     @State private var snapshot: ContextSnapshot? = nil
     @State private var isRefreshing = false
+    /// Incremented on every refresh; lets background tasks discard stale results.
+    @State private var refreshGeneration = 0
+
+    // Disclosure state for collapsible groups
+    @State private var globalSkillsExpanded = false
+    @State private var pluginSkillsExpanded = false
+    @State private var globalMcpExpanded = false
+
+    /// The project whose data we're displaying right now.
+    private var displayProject: WatchedProject? {
+        if let pinned = pinnedProjectPath,
+           let match = watcher.openProjects.first(where: { $0.path == pinned }) {
+            return match
+        }
+        return watcher.activeProject
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             header
+
+            // Multi-project switcher — only shown when 2+ real project tabs are open
+            if watcher.openProjects.count > 1 {
+                projectPicker
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 6)
+            }
+
             Divider()
 
             if let snap = snapshot {
@@ -32,7 +58,16 @@ struct LiveModeView: View {
                 Spacer()
             }
         }
-        .onChange(of: watcher.activeProject) { refreshSnapshot() }
+        .onChange(of: watcher.activeProject) { _, _ in
+            if pinnedProjectPath == nil { refreshSnapshot() }
+        }
+        .onChange(of: pinnedProjectPath) { _, _ in refreshSnapshot() }
+        .onChange(of: watcher.openProjects) { _, newProjects in
+            if let pinned = pinnedProjectPath,
+               !newProjects.contains(where: { $0.path == pinned }) {
+                pinnedProjectPath = nil
+            }
+        }
         .onAppear { refreshSnapshot() }
     }
 
@@ -41,13 +76,12 @@ struct LiveModeView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                // Claude Code status dot
                 Circle()
                     .fill(watcher.claudeIsFront ? Color.green : Color.secondary.opacity(0.4))
                     .frame(width: 7, height: 7)
                     .animation(.easeInOut(duration: 0.3), value: watcher.claudeIsFront)
 
-                if let proj = watcher.activeProject {
+                if let proj = displayProject {
                     Text(proj.name)
                         .font(.system(.subheadline, design: .default))
                         .fontWeight(.semibold)
@@ -73,8 +107,7 @@ struct LiveModeView: View {
                 }
             }
 
-            // Project path subtitle
-            if let proj = watcher.activeProject {
+            if let proj = displayProject {
                 Text(proj.path)
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
@@ -87,13 +120,35 @@ struct LiveModeView: View {
         .background(Color(NSColor.controlBackgroundColor))
     }
 
+    // MARK: - Multi-project picker
+
+    private var projectPicker: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "square.stack.3d.up")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            Picker("Project", selection: $pinnedProjectPath) {
+                Text("Auto (most recent)")
+                    .tag(Optional<String>.none)
+                ForEach(watcher.openProjects, id: \.path) { proj in
+                    Text(proj.name)
+                        .tag(Optional(proj.path))
+                }
+            }
+            .labelsHidden()
+            .font(.caption)
+            .help("Switch between open projects")
+        }
+        .padding(.vertical, 4)
+    }
+
     // MARK: - Context section
 
     private func contextSection(_ snap: ContextSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             sectionLabel("Context Window", icon: "chart.bar.fill")
 
-            // Bar
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 4)
@@ -108,20 +163,34 @@ struct LiveModeView: View {
             .frame(height: 10)
 
             HStack {
-                Text("\(tokenLabel(snap.totalTokens)) used")
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(barColor(snap.usedFraction))
+                HStack(spacing: 4) {
+                    Text("\(tokenLabel(snap.totalTokens)) used")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(barColor(snap.usedFraction))
+                    if snap.hasRealSessionData {
+                        Text("· last turn")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
                 Spacer()
                 Text("\(tokenLabel(snap.remainingTokens)) left")
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
 
-            // Breakdown chips
-            HStack(spacing: 10) {
-                chip("Skills",    value: snap.skillsTotal,      color: .blue)
-                chip("MCPs",      value: snap.mcpTotal,         color: .purple)
-                chip("CLAUDE.md", value: snap.claudeMdTokens,   color: .orange)
+            if snap.hasRealSessionData {
+                HStack(spacing: 10) {
+                    chip("Input",  value: snap.sessionInputTokens, color: .blue)
+                    chip("Cache↑", value: snap.sessionCacheCreate, color: .orange)
+                    chip("Cache↓", value: snap.sessionCacheRead,   color: .green)
+                }
+            } else {
+                HStack(spacing: 10) {
+                    chip("Skills",    value: snap.skillsTotal,    color: .blue)
+                    chip("MCPs",      value: snap.mcpTotal,       color: .purple)
+                    chip("CLAUDE.md", value: snap.claudeMdTokens, color: .orange)
+                }
             }
         }
     }
@@ -138,19 +207,70 @@ struct LiveModeView: View {
     // MARK: - Skills section
 
     private func skillsSection(_ snap: ContextSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let projectSkills = snap.skills.filter { $0.source == "project" }
+        let globalSkills  = snap.skills.filter { $0.source == "global" }
+        let pluginSkills  = snap.skills.filter { $0.source == "plugin" }
+        let enabledCount  = snap.skills.filter { $0.enabled }.count
+
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 sectionLabel("Skills", icon: "wand.and.stars")
                 Spacer()
-                countBadge(active: snap.skills.filter { $0.enabled }.count,
-                           total:  snap.skills.count)
+                countBadge(active: enabledCount, total: snap.skills.count)
             }
 
-            if snap.skills.isEmpty {
-                emptyRow("No skills installed in this project")
+            // ── Project skills ──────────────────────────────────────────────
+            if projectSkills.isEmpty && pluginSkills.isEmpty {
+                emptyRow("No project or plugin skills")
             } else {
-                ForEach(snap.skills) { item in
-                    skillRow(item, snapshot: snap)
+                if !projectSkills.isEmpty {
+                    ForEach(projectSkills) { item in
+                        skillRow(item, snapshot: snap)
+                    }
+                }
+            }
+
+            // ── Plugin skills ───────────────────────────────────────────────
+            if !pluginSkills.isEmpty {
+                DisclosureGroup(isExpanded: $pluginSkillsExpanded) {
+                    ForEach(pluginSkills) { item in
+                        skillRow(item, snapshot: snap)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("PLUGINS")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                        Text("\(pluginSkills.count)")
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                        Spacer()
+                        Text(tokenLabel(pluginSkills.filter { $0.enabled }.map { $0.tokens }.reduce(0, +)))
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+
+            // ── Global skills (collapsed by default — there can be 50+) ─────
+            if !globalSkills.isEmpty {
+                DisclosureGroup(isExpanded: $globalSkillsExpanded) {
+                    ForEach(globalSkills) { item in
+                        skillRow(item, snapshot: snap)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("GLOBAL")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                        Text("\(globalSkills.filter { $0.enabled }.count)/\(globalSkills.count)")
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                        Spacer()
+                        Text(tokenLabel(globalSkills.filter { $0.enabled }.map { $0.tokens }.reduce(0, +)))
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
                 }
             }
         }
@@ -158,21 +278,29 @@ struct LiveModeView: View {
 
     private func skillRow(_ item: SkillTokenItem, snapshot: ContextSnapshot) -> some View {
         HStack(spacing: 8) {
-            Toggle("", isOn: Binding(
-                get: { item.enabled },
-                set: { enable in toggleSkill(item: item, enable: enable, snapshot: snapshot) }
-            ))
-            .toggleStyle(.switch)
-            .controlSize(.mini)
-            .labelsHidden()
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(item.name)
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .lineLimit(1)
+            if item.source == "plugin" {
+                // Plugin skills are read-only — no toggle
+                Image(systemName: "puzzlepiece.extension")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 26)
+            } else {
+                Toggle("", isOn: Binding(
+                    get: { item.enabled },
+                    set: { enable in toggleSkill(item: item, enable: enable, snapshot: snapshot) }
+                ))
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .labelsHidden()
             }
+
+            Text(item.name)
+                .font(.caption)
+                .fontWeight(.medium)
+                .lineLimit(1)
+
             Spacer()
+
             Text(tokenLabel(item.tokens))
                 .font(.system(.caption2, design: .monospaced))
                 .foregroundStyle(.tertiary)
@@ -184,19 +312,49 @@ struct LiveModeView: View {
     // MARK: - MCP section
 
     private func mcpSection(_ snap: ContextSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let projectMcps = snap.mcpServers.filter { $0.source == "project" }
+        let globalMcps  = snap.mcpServers.filter { $0.source == "global" }
+        let enabledCount = snap.mcpServers.filter { $0.enabled }.count
+
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 sectionLabel("MCP Servers", icon: "server.rack")
                 Spacer()
-                countBadge(active: snap.mcpServers.filter { $0.enabled }.count,
-                           total:  snap.mcpServers.count)
+                countBadge(active: enabledCount, total: snap.mcpServers.count)
             }
 
-            if snap.mcpServers.isEmpty {
-                emptyRow("No MCP servers in .mcp.json")
+            // ── Project MCP servers ─────────────────────────────────────────
+            if projectMcps.isEmpty && globalMcps.isEmpty {
+                emptyRow("No MCP servers configured")
             } else {
-                ForEach(snap.mcpServers) { item in
-                    mcpRow(item, snapshot: snap)
+                if !projectMcps.isEmpty {
+                    ForEach(projectMcps) { item in
+                        mcpRow(item, snapshot: snap)
+                    }
+                } else {
+                    emptyRow("No project MCP servers")
+                }
+            }
+
+            // ── Global MCP servers (collapsible) ────────────────────────────
+            if !globalMcps.isEmpty {
+                DisclosureGroup(isExpanded: $globalMcpExpanded) {
+                    ForEach(globalMcps) { item in
+                        mcpRow(item, snapshot: snap)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("GLOBAL")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                        Text("\(globalMcps.filter { $0.enabled }.count)/\(globalMcps.count)")
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                        Spacer()
+                        Text(tokenLabel(globalMcps.filter { $0.enabled }.map { $0.tokens }.reduce(0, +)))
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                    }
                 }
             }
         }
@@ -216,7 +374,9 @@ struct LiveModeView: View {
                 .font(.caption)
                 .fontWeight(.medium)
                 .lineLimit(1)
+
             Spacer()
+
             Text(tokenLabel(item.tokens))
                 .font(.system(.caption2, design: .monospaced))
                 .foregroundStyle(.tertiary)
@@ -269,14 +429,21 @@ struct LiveModeView: View {
     // MARK: - Actions
 
     private func refreshSnapshot() {
-        guard let proj = watcher.activeProject else {
-            snapshot = nil
+        guard let proj = displayProject else {
+            // Don't wipe snapshot — keep last known data visible while we wait
+            isRefreshing = false
             return
         }
         isRefreshing = true
+        refreshGeneration += 1
+        let gen  = refreshGeneration
+        let path = proj.path
+
         Task.detached(priority: .userInitiated) {
-            let snap = ContextEstimator.estimate(for: proj.path)
+            let snap = ContextEstimator.estimate(for: path)
             await MainActor.run {
+                // Discard result if a newer refresh already fired
+                guard self.refreshGeneration == gen else { return }
                 self.snapshot     = snap
                 self.isRefreshing = false
             }
@@ -284,6 +451,7 @@ struct LiveModeView: View {
     }
 
     private func toggleSkill(item: SkillTokenItem, enable: Bool, snapshot: ContextSnapshot) {
+        guard item.source != "plugin" else { return } // Plugin and non-Claude skills are read-only here.
         let fm = FileManager.default
         let canonicalPath = URL(fileURLWithPath: item.path)
             .standardizedFileURL
@@ -333,8 +501,19 @@ struct LiveModeView: View {
     }
 
     private func toggleMCP(item: MCPTokenItem, enable: Bool, snapshot: ContextSnapshot) {
-        ConfigWriter.toggleProjectServer(projectPath: snapshot.projectPath,
-                                         name: item.name, enable: enable)
+        if item.source == "global" {
+            ConfigWriter.toggleGlobalMcpForProject(
+                projectPath: snapshot.projectPath,
+                name: item.name,
+                enable: enable
+            )
+        } else {
+            ConfigWriter.toggleProjectServer(
+                projectPath: snapshot.projectPath,
+                name: item.name,
+                enable: enable
+            )
+        }
         refreshSnapshot()
     }
 

@@ -3,11 +3,12 @@
 
 ## Current State
 
-Project Hub is a local macOS menu-bar app for scanning projects and managing AI coding tool configuration. The active checkout has the recovered Compatibility work plus freeze fixes, hidden-worktree handling, tightened project discovery/privacy guards, and first-class plugin detection.
+Project Hub is a local macOS desktop app with a menu bar companion for scanning projects and managing AI coding tool configuration. The active checkout has the recovered Compatibility work plus freeze fixes, hidden-worktree handling, tightened project discovery/privacy guards, first-class plugin detection, and a desktop-first app shell.
 
 ## Working
 
 - Projects: discovery from Claude Code state, Codex state/config, and filesystem roots, with Git worktrees hidden from the normal project list behind a collapsed disclosure; tool homes, transcript folders, broad workspace roots, protected storage, and stale saved false positives are filtered.
+- App shell: launch, Dock reopen, and menu-bar left click open the full dashboard window; the menu bar still offers quick actions and explicit compact-panel access.
 - Skills: global and per-project skill inventory, including Claude/Codex origins and plugin/read-only evidence, with global install counts cached off the main render path and protected storage skipped during background aggregate refresh.
 - MCP: global/project config display, import/copy/edit, health checks, Compatibility-backed inventory, and previewed safe writes through `ConfigWriter`.
 - Compatibility: explicit single-flight scan/explain/fix/verify workflow for Claude Code, Claude Desktop, Codex CLI, and Codex Desktop, with first-class Codex/Claude plugin inventory and recovered adjacent editor MCP visibility retained as read-only evidence.
@@ -16,6 +17,7 @@ Project Hub is a local macOS menu-bar app for scanning projects and managing AI 
 ## Health
 
 - ✅ Recovered branch merged into active `main`.
+- ✅ Desktop-first app shell validation passed: `swift build`, full `swift test` (583 tests), `git diff --check`, release app build/codesign, `/Applications` install, and launch smoke test.
 - ✅ Active checkout validation passed after discovery/privacy, hidden-worktree, Skills, Compatibility, and plugin detection fixes: `swift build`, focused regression tests, full `swift test` baseline (581 tests), focused `CompatibilityPluginMCPTests`, and `git diff --check`.
 - ✅ Fresh release `ProjectHub.app` is installed at `/Applications/ProjectHub.app`; `/Applications` contains only that one Project Hub app bundle.
 - ✅ Saved Project Hub state migrated away the stale `~/Desktop/Code` row; only the real saved `mcp converter` row remains.
@@ -27,11 +29,11 @@ Project Hub is a local macOS menu-bar app for scanning projects and managing AI 
 
 ## Recent Sessions
 
+- 2026-06-18 · Codex — Promoted Project Hub to a desktop-first app shell while keeping the menu bar companion and compact panel.
 - 2026-06-18 · Codex — Added first-class Codex/Claude Code plugin detection to Compatibility, surfaced plugin rows in the UI/report, rebuilt `/Applications/ProjectHub.app`, and verified build/focused tests.
 - 2026-06-18 · Codex — Tightened discovery to reject tool/session/workspace/protected-storage false positives, cleaned stale saved project rows, prevented Skills background storage prompts, rebuilt `/Applications/ProjectHub.app`, and validated full `swift test` (581 tests).
 - 2026-06-18 · Codex — Hid discovered Git worktrees behind a Projects-tab disclosure, fixed Skills-tab and Compatibility-scan freeze paths, rebuilt the installed app, and validated `swift build`, `swift test` (568 tests), and `git diff --check`.
 - 2026-06-18 · Codex — Built a fresh release `ProjectHub.app`, installed it to `/Applications`, verified codesigning, and confirmed only one Project Hub app bundle exists in `/Applications`.
-- 2026-06-18 · Codex — Merged recovered Compatibility branch into active `main`, preserved dirty Live Mode/root-doc work, resolved conflicts, and validated the active checkout.
 
 ## Pending Human Input
 
@@ -41,7 +43,7 @@ Project Hub is a local macOS menu-bar app for scanning projects and managing AI 
 
 ## Next Actions
 
-1. Manual UI test: open Project Hub, go to Compat, run Scan, confirm Plugins rows appear and repeated Scan clicks do not freeze.
+1. Manual UI test: confirm Project Hub opens as a full desktop window by default; status-menu left click should bring the dashboard forward, and right click should offer compact-panel access.
 2. Review the preserved unstaged/untracked active checkout changes separately from this fix.
 3. Reconcile root `BRIEF.md` / `docs/INDEX.md` policy with the merged Compatibility behavior.
 4. Push `main` only after deciding how to handle preserved local dirty work and canon drift.

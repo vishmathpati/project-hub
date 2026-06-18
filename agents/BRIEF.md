@@ -55,3 +55,11 @@ Background refresh paths must not trigger macOS protected-storage prompts. Skill
 Compatibility now treats plugins as first-class local evidence rather than only incidental MCP or skill rows. Codex plugin detection covers installed cache manifests, enabled/disabled plugin config, configured marketplace sources, and personal/project marketplace files. Claude Code plugin detection covers installed plugin inventory, enabledPlugins settings, extraKnownMarketplaces, skills-dir plugins, and marketplace-directory manifests.
 
 Rejected installer automation for this slice. Project Hub reports plugin state and missing enabled plugins, but plugin-owned files and marketplace installs remain read-only and must be changed through Codex or Claude Code's own plugin flows.
+
+---
+
+## v1.6 — 2026-06-18 22:29 · Codex
+
+Project Hub is now desktop-first because the product has grown beyond the original MCP-focused menu-bar panel. Launch, Dock reopen, and menu-bar left click should open the full desktop dashboard. The menu bar item stays as a companion for quick actions and explicit compact-panel access.
+
+Rejected keeping the popover as the primary surface; the Compatibility, Skills, MCP, Projects, and Settings workflows need the full desktop window as the default.

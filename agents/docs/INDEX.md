@@ -2,6 +2,13 @@
 
 ## Features
 
+### Desktop App Shell
+
+- Owner: `Sources/ProjectHub/App.swift`, `Sources/ProjectHub/DashboardWindow.swift`, `Sources/ProjectHub/Views/ContentView.swift`
+- Flow: launch / Dock reopen / menu-bar left click -> `DashboardWindow.open(...)` -> shared `ContentView`
+- Shared with: every top-level tab, compact popover, menu bar status item
+- Guard: full desktop dashboard is the default surface; menu bar stays as a companion and compact popover access must be explicit.
+
 ### Project Discovery
 
 - Owner: `Sources/ProjectHub/Stores/ProjectStore.swift`

@@ -1,6 +1,20 @@
 import SwiftUI
 import AppKit
 
+// MARK: - Thin wrapper so NSHostingController observes LiveModeState changes
+
+struct BeaconHostView: View {
+    @ObservedObject var watcher: ProjectWatcher
+    @ObservedObject var state:   LiveModeState
+
+    var body: some View {
+        BeaconView(watcher: watcher,
+                   usedFraction: state.usedFraction,
+                   sidebarOpen:  state.sidebarOpen)
+            .allowsHitTesting(false)
+    }
+}
+
 // MARK: - The floating dot button view
 
 struct BeaconView: View {
@@ -10,14 +24,11 @@ struct BeaconView: View {
 
     var body: some View {
         ZStack {
-            // Dark glass circle
+            // Solid dark circle — material is skipped because it can render as
+            // transparent in a borderless panel, killing hit-testing.
             Circle()
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Circle()
-                        .fill(Color.black.opacity(0.55))
-                )
-                .shadow(color: .black.opacity(0.5), radius: 6, x: 0, y: 3)
+                .fill(Color(red: 0.10, green: 0.10, blue: 0.13))
+                .shadow(color: .black.opacity(0.6), radius: 6, x: 0, y: 3)
 
             // Usage ring — always drawn, fades in as usage rises
             Circle()

@@ -8,12 +8,13 @@ struct ProjectHubApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        // Menu-bar-only app — Settings scene prevents "no scenes" crash.
+        // AppKit owns the main window/status item; Settings keeps SwiftUI's app
+        // lifecycle happy without creating an extra default window.
         Settings { EmptyView() }
     }
 }
 
-// MARK: - App delegate (manages status item + popover)
+// MARK: - App delegate (manages desktop window + status item + popover)
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -32,14 +33,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setDockIcon()
         setupStatusItem()
         setupPopover()
-
-        // First-launch welcome
-        if !UserDefaults.standard.bool(forKey: "projecthub.didShowWelcome") {
-            UserDefaults.standard.set(true, forKey: "projecthub.didShowWelcome")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
-                self?.togglePopover()
-            }
-        }
 
         // Live Mode close notification (panel X button)
         NotificationCenter.default.addObserver(
@@ -71,20 +64,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
-                self.popover.performClose(nil)
-                DashboardWindow.shared.open(
-                    projectStore: self.projectStore,
-                    skillStore:   self.skillStore,
-                    agentStore:   self.agentStore,
-                    mcpStore:     self.mcpStore
-                )
+                self.openDashboardWindow()
             }
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            self?.openDashboardWindow(refresh: false)
         }
     }
 
-    // Dock icon click → toggle popover
+    // Dock icon click → open the full desktop app.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        togglePopover()
+        openDashboardWindow()
         return true
     }
 
@@ -151,8 +142,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if event.type == .rightMouseUp {
             showContextMenu()
         } else {
-            togglePopover()
+            openDashboardWindow()
         }
+    }
+
+    private func openDashboardWindow(refresh: Bool = true) {
+        if popover.isShown {
+            popover.performClose(nil)
+        }
+        if refresh {
+            projectStore.scan()
+            skillStore.refresh()
+        }
+        DashboardWindow.shared.open(
+            projectStore: projectStore,
+            skillStore:   skillStore,
+            agentStore:   agentStore,
+            mcpStore:     mcpStore
+        )
     }
 
     // MARK: - Popover
@@ -162,7 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentSize = NSSize(width: 480, height: 680)
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(
-            rootView: ContentView()
+            rootView: ContentView(showsExpandButton: true)
                 .environmentObject(projectStore)
                 .environmentObject(skillStore)
                 .environmentObject(agentStore)
@@ -193,6 +200,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(header)
         menu.addItem(NSMenuItem.separator())
 
+        menu.addItem(withTitle: "Open Project Hub", action: #selector(openDashboardFromMenu), keyEquivalent: "o")
+        menu.addItem(withTitle: "Open Compact Panel", action: #selector(openCompactPanelFromMenu), keyEquivalent: "p")
+        menu.addItem(NSMenuItem.separator())
+
         menu.addItem(withTitle: "Refresh",            action: #selector(refreshFromMenu),     keyEquivalent: "r")
         menu.addItem(NSMenuItem.separator())
 
@@ -211,12 +222,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "About Project Hub", action: #selector(aboutFromMenu),    keyEquivalent: "")
         menu.addItem(withTitle: "Visit GitHub",      action: #selector(openRepoFromMenu), keyEquivalent: "")
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(withTitle: "Quit Project Hub",  action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit Project Hub", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        quitItem.target = NSApp
+        menu.addItem(quitItem)
 
-        menu.items.forEach { if $0.action != nil { $0.target = self } }
+        menu.items.forEach { if $0.action != nil && $0.target == nil { $0.target = self } }
         statusItem.menu = menu
         statusItem.button?.performClick(nil)
         statusItem.menu = nil
+    }
+
+    @objc private func openDashboardFromMenu() {
+        openDashboardWindow()
+    }
+
+    @objc private func openCompactPanelFromMenu() {
+        togglePopover()
     }
 
     @objc private func refreshFromMenu() {
