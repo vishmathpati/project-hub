@@ -5,6 +5,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [2026-06-18] · Codex
+
+### Added
+- Restored and merged the recovered Compatibility branch into active `main`, including the Compatibility scanner/view, MCP health and import coverage, Codex plugin/profile surfaces, and regression coverage that had lived only in the recovered worktree.
+- Added Claude Code additional-directory skill roots to Compatibility skill-support surfaces and restored read-only adjacent editor project MCP visibility for Cursor, VS Code, and Roo config files.
+
+### Changed
+- Moved Compatibility scanning off the SwiftUI main path with a busy/request state, and made XCTest auth probing deterministic when no fake Claude command is supplied.
+- Replaced project-root canonicalization hotspots with file-path canonicalization in Compatibility and Codex trust helpers.
+- Preserved active checkout dirty Live Mode work while merging the recovered branch into `main`.
+
+### Fixed
+- Fixed the recovered branch's full-suite failures in adjacent MCP detection, read-only editor project MCP discovery, headers helper expectations, and additional-directory skill inventory.
+- Verified the recovered branch and active checkout with `swift build`, focused seam tests, full `swift test` (564 tests), and `git diff --check`.
+
 ## [2026-05-22] · Codex
 
 ### Added
