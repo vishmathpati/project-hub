@@ -489,6 +489,130 @@ final class CompatibilityPluginMCPTests: XCTestCase {
         }
     }
 
+    func testCodexPluginInventoryReportsCacheConfigAndMarketplaceModes() throws {
+        let root = try makeTempProject()
+        let codexHome = root.appendingPathComponent("codex-home", isDirectory: true)
+        let agentsHome = root.appendingPathComponent("agents-home", isDirectory: true)
+        let personalMarketplace = agentsHome.appendingPathComponent("plugins/marketplace.json")
+        let projectMarketplace = root.appendingPathComponent(".agents/plugins/marketplace.json")
+        let pluginRoot = try writeCodexPlugin(
+            pluginID: "toolbox@team-tools",
+            codexHome: codexHome,
+            enabled: true,
+            manifestJSON: """
+            {
+              "name": "toolbox",
+              "version": "local",
+              "mcpServers": "./.mcp.json",
+              "skills": "./skills",
+              "hooks": "./hooks/hooks.json"
+            }
+            """,
+            mcpJSON: """
+            {
+              "mcpServers": {
+                "toolbox": {
+                  "command": "node",
+                  "args": ["server.js"]
+                }
+              }
+            }
+            """
+        )
+        try FileManager.default.createDirectory(
+            at: pluginRoot.appendingPathComponent("skills/toolbox", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: personalMarketplace.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: projectMarketplace.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try """
+        {
+          "plugins": [
+            {
+              "name": "personal-helper",
+              "path": "./personal-helper",
+              "version": "0.1.0"
+            }
+          ]
+        }
+        """.write(to: personalMarketplace, atomically: true, encoding: .utf8)
+        try """
+        {
+          "plugins": {
+            "project-helper": {
+              "path": "./plugins/project-helper"
+            }
+          }
+        }
+        """.write(to: projectMarketplace, atomically: true, encoding: .utf8)
+        let configPath = codexHome.appendingPathComponent("config.toml")
+        let existingConfig = try String(contentsOf: configPath, encoding: .utf8)
+        try """
+        \(existingConfig)
+
+        [marketplaces.local-team]
+        source = "\(root.appendingPathComponent("local-marketplace").path)"
+
+        [plugins."missing@team-tools"]
+        enabled = true
+        """.write(to: configPath, atomically: true, encoding: .utf8)
+
+        try withCodexHome(codexHome.path) {
+            try withEnv("PROJECTHUB_AGENTS_HOME", agentsHome.path) {
+                let report = CompatibilityScanner.scan(projectRoot: root.path)
+                let installed = try XCTUnwrap(report.plugins.first {
+                    $0.toolID == .codexCLI
+                        && $0.pluginID == "toolbox@team-tools"
+                        && $0.installMethod == .codexCache
+                })
+
+                XCTAssertEqual(installed.enabled, true)
+                XCTAssertEqual(installed.marketplace, "team-tools")
+                XCTAssertTrue(installed.components.contains("MCP"))
+                XCTAssertTrue(installed.components.contains("skills"))
+                XCTAssertTrue(installed.components.contains("hooks"))
+                XCTAssertTrue(report.plugins.contains {
+                    $0.toolID == .codexDesktop
+                        && $0.pluginID == "toolbox@team-tools"
+                        && $0.installMethod == .codexCache
+                })
+                XCTAssertTrue(report.plugins.contains {
+                    $0.toolID == .codexCLI
+                        && $0.pluginID == "marketplace:local-team"
+                        && $0.installMethod == .codexMarketplaceConfig
+                })
+                XCTAssertTrue(report.plugins.contains {
+                    $0.toolID == .codexCLI
+                        && $0.pluginID == "personal-helper@personal"
+                        && $0.installMethod == .codexMarketplaceFile
+                        && $0.sourcePath == canonicalFilePath(personalMarketplace.path)
+                })
+                XCTAssertTrue(report.plugins.contains {
+                    $0.toolID == .codexDesktop
+                        && $0.pluginID == "project-helper@project"
+                        && $0.installMethod == .codexMarketplaceFile
+                        && $0.sourcePath == canonicalFilePath(projectMarketplace.path)
+                })
+                XCTAssertTrue(report.plugins.contains {
+                    $0.toolID == .codexCLI
+                        && $0.pluginID == "missing@team-tools"
+                        && $0.installMethod == .codexConfig
+                        && $0.enabled == true
+                })
+                XCTAssertTrue(report.issues.contains {
+                    $0.title == "Codex plugin configured but not installed"
+                        && $0.subjectPath == "missing@team-tools"
+                })
+            }
+        }
+    }
+
     func testCodexPluginManifestReportsInvalidAndMissingMCPPaths() throws {
         let root = try makeTempProject()
         let codexHome = root.appendingPathComponent("codex-home", isDirectory: true)
@@ -1330,6 +1454,115 @@ final class CompatibilityPluginMCPTests: XCTestCase {
                 $0.code == .serverDisabled
                     && $0.title == "Server disabled"
                     && $0.path == mcpPath
+            })
+        }
+    }
+
+    func testClaudePluginInventoryReportsInstalledSettingsSkillsDirAndMarketplaceModes() throws {
+        let root = try makeTempProject()
+        let claudeHome = root.appendingPathComponent("claude-home", isDirectory: true)
+        let pluginRoot = claudeHome
+            .appendingPathComponent("plugins/cache/team-tools/project-tools/1.0.0", isDirectory: true)
+        let manifestDirectory = pluginRoot.appendingPathComponent(".claude-plugin", isDirectory: true)
+        try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+        try """
+        {
+          "name": "project-tools",
+          "version": "1.0.0",
+          "skills": ["./skills"],
+          "commands": ["./commands"],
+          "agents": ["./agents"],
+          "hooks": ["./hooks"],
+          "mcpServers": {
+            "inline-api": {
+              "type": "http",
+              "url": "https://example.invalid/mcp"
+            }
+          }
+        }
+        """.write(to: manifestDirectory.appendingPathComponent("plugin.json"), atomically: true, encoding: .utf8)
+        try writeInstalledClaudePlugin(
+            pluginID: "project-tools@team-tools",
+            scope: "user",
+            installPath: pluginRoot.path,
+            claudeHome: claudeHome
+        )
+
+        let skillsDirPlugin = claudeHome.appendingPathComponent("skills/local-helper/.claude-plugin", isDirectory: true)
+        try FileManager.default.createDirectory(at: skillsDirPlugin, withIntermediateDirectories: true)
+        try """
+        {
+          "name": "local-helper",
+          "version": "0.2.0",
+          "skills": ["./skills"]
+        }
+        """.write(to: skillsDirPlugin.appendingPathComponent("plugin.json"), atomically: true, encoding: .utf8)
+
+        let marketplacePlugin = claudeHome
+            .appendingPathComponent("plugins/marketplaces/local-upload/dodo/.claude-plugin", isDirectory: true)
+        try FileManager.default.createDirectory(at: marketplacePlugin, withIntermediateDirectories: true)
+        try """
+        {
+          "name": "dodo",
+          "version": "0.1.0",
+          "commands": ["./commands"]
+        }
+        """.write(to: marketplacePlugin.appendingPathComponent("plugin.json"), atomically: true, encoding: .utf8)
+
+        try """
+        {
+          "enabledPlugins": {
+            "project-tools@team-tools": true,
+            "missing@team-tools": true
+          },
+          "extraKnownMarketplaces": {
+            "team-tools": {
+              "type": "github",
+              "repo": "org/team-tools"
+            },
+            "local-tools": "/tmp/local-tools"
+          }
+        }
+        """.write(to: claudeHome.appendingPathComponent("settings.json"), atomically: true, encoding: .utf8)
+
+        try withClaudeHome(claudeHome.path) {
+            let report = CompatibilityScanner.scan(projectRoot: root.path)
+            let installed = try XCTUnwrap(report.plugins.first {
+                $0.toolID == .claudeCode
+                    && $0.pluginID == "project-tools@team-tools"
+                    && $0.installMethod == .claudeInstalledInventory
+            })
+
+            XCTAssertEqual(installed.enabled, true)
+            XCTAssertEqual(installed.version, "1.0.0")
+            XCTAssertTrue(installed.components.contains("MCP"))
+            XCTAssertTrue(installed.components.contains("skills"))
+            XCTAssertTrue(installed.components.contains("commands"))
+            XCTAssertTrue(installed.components.contains("agents"))
+            XCTAssertTrue(installed.components.contains("hooks"))
+            XCTAssertTrue(report.plugins.contains {
+                $0.pluginID == "missing@team-tools"
+                    && $0.installMethod == .claudeSettings
+                    && $0.enabled == true
+            })
+            XCTAssertTrue(report.plugins.contains {
+                $0.pluginID == "marketplace:team-tools"
+                    && $0.installMethod == .claudeKnownMarketplace
+                    && $0.installPath == "org/team-tools"
+            })
+            XCTAssertTrue(report.plugins.contains {
+                $0.pluginID == "local-helper@skills-dir"
+                    && $0.installMethod == .claudeSkillsDirectory
+                    && $0.version == "0.2.0"
+            })
+            XCTAssertTrue(report.plugins.contains {
+                $0.pluginID == "dodo@local-upload"
+                    && $0.installMethod == .claudeMarketplaceDirectory
+                    && $0.version == "0.1.0"
+            })
+            XCTAssertTrue(report.issues.contains {
+                $0.title == "Claude Code plugin configured but not installed"
+                    && $0.subjectPath == "missing@team-tools"
             })
         }
     }

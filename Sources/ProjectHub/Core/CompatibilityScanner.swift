@@ -276,6 +276,58 @@ struct CompatibilitySkillSupportObservation: Identifiable, Codable {
     let requiresRestartAfterWrite: Bool
 }
 
+enum CompatibilityPluginInstallMethod: String, Codable {
+    case codexCache
+    case codexConfig
+    case codexMarketplaceConfig
+    case codexMarketplaceFile
+    case claudeInstalledInventory
+    case claudeSettings
+    case claudeKnownMarketplace
+    case claudeSkillsDirectory
+    case claudeMarketplaceDirectory
+
+    var label: String {
+        switch self {
+        case .codexCache:
+            return "Codex cache"
+        case .codexConfig:
+            return "Codex config"
+        case .codexMarketplaceConfig:
+            return "Codex marketplace"
+        case .codexMarketplaceFile:
+            return "Marketplace file"
+        case .claudeInstalledInventory:
+            return "Claude inventory"
+        case .claudeSettings:
+            return "Claude settings"
+        case .claudeKnownMarketplace:
+            return "Known marketplace"
+        case .claudeSkillsDirectory:
+            return "Skills directory"
+        case .claudeMarketplaceDirectory:
+            return "Marketplace directory"
+        }
+    }
+}
+
+struct CompatibilityPluginObservation: Identifiable, Codable {
+    let id: String
+    let toolID: CompatibilityToolID
+    let pluginID: String
+    let name: String
+    let marketplace: String?
+    let version: String?
+    let scope: CompatibilityScope
+    let installMethod: CompatibilityPluginInstallMethod
+    let installPath: String?
+    let sourcePath: String?
+    let enabled: Bool?
+    let components: [String]
+    let summary: String
+    let requiresRestartAfterWrite: Bool
+}
+
 struct CompatibilitySettingsObservation: Identifiable, Codable {
     let id: String
     let toolID: CompatibilityToolID
@@ -300,6 +352,7 @@ struct CompatibilityScanResult: Codable {
     let servers: [CompatibilityServerObservation]
     let skills: [CompatibilitySkillObservation]
     let skillSupport: [CompatibilitySkillSupportObservation]
+    let plugins: [CompatibilityPluginObservation]
     let settings: [CompatibilitySettingsObservation]
     let issues: [CompatibilityIssue]
 
@@ -575,6 +628,12 @@ enum CompatibilityScanner {
         let skillRead = readSkills(from: matrix, servers: servers)
         issues.append(contentsOf: skillRead.issues)
         let skillSupport = skillSupportObservations(from: matrix)
+        let pluginRead = readPlugins(
+            from: matrix,
+            projectRoot: normalizedRoot,
+            codexProfileSelection: codexProfileSelection
+        )
+        issues.append(contentsOf: pluginRead.issues)
 
         return CompatibilityScanResult(
             projectRoot: normalizedRoot,
@@ -588,6 +647,7 @@ enum CompatibilityScanner {
             },
             skills: skillRead.skills,
             skillSupport: skillSupport,
+            plugins: pluginRead.plugins,
             settings: settings.sorted { lhs, rhs in
                 if lhs.toolID.rawValue != rhs.toolID.rawValue { return lhs.toolID.rawValue < rhs.toolID.rawValue }
                 if lhs.precedence != rhs.precedence { return lhs.precedence < rhs.precedence }
@@ -3186,6 +3246,800 @@ enum CompatibilityScanner {
         let installPath: String
         let version: String
         let enabled: Bool
+    }
+
+    private struct PluginRead {
+        var plugins: [CompatibilityPluginObservation]
+        var issues: [CompatibilityIssue]
+    }
+
+    private struct PluginConfigState {
+        let pluginID: String
+        let enabled: Bool
+        let sourcePath: String
+        let profileName: String?
+    }
+
+    private struct CodexCachedPlugin {
+        let id: String
+        let name: String
+        let marketplace: String
+        let version: String
+        let installPath: String
+    }
+
+    private struct MarketplacePluginEntry {
+        let name: String
+        let path: String?
+        let version: String?
+        let detail: String?
+    }
+
+    private static func readPlugins(
+        from matrix: [CompatibilityMatrixEntry],
+        projectRoot: String?,
+        codexProfileSelection: CodexProfileSelection?
+    ) -> PluginRead {
+        let home = NSHomeDirectory()
+        let codexHome = ProjectHubPaths.codexHome(home: home)
+        let claudeHome = claudeHomeDirectory(home: home)
+        let codexStates = codexConfiguredPluginStatesByTool(
+            codexHome: codexHome,
+            codexProfileSelection: codexProfileSelection
+        )
+        let codexCache = codexCachedPlugins(codexHome: codexHome)
+        let codexCacheIDs = Set(codexCache.map(\.id))
+        var plugins: [CompatibilityPluginObservation] = []
+        var issues: [CompatibilityIssue] = []
+
+        for toolID in [CompatibilityToolID.codexCLI, .codexDesktop] {
+            let states = codexStates[toolID] ?? [:]
+            for cached in codexCache {
+                let state = states[cached.id]
+                plugins.append(codexPluginObservation(
+                    cached,
+                    toolID: toolID,
+                    enabled: state?.enabled,
+                    sourcePath: state?.sourcePath
+                ))
+            }
+            for state in states.values.sorted(by: { $0.pluginID < $1.pluginID }) where !codexCacheIDs.contains(state.pluginID) {
+                plugins.append(codexConfiguredMissingPluginObservation(state, toolID: toolID))
+                if state.enabled {
+                    issues.append(configuredPluginMissingIssue(
+                        pluginID: state.pluginID,
+                        toolID: toolID,
+                        sourcePath: state.sourcePath,
+                        surface: matrix.first { $0.toolID == toolID && $0.kind == .settings && $0.path == state.sourcePath },
+                        owner: "Codex"
+                    ))
+                }
+            }
+        }
+
+        plugins.append(contentsOf: codexMarketplaceConfigPluginObservations(
+            codexHome: codexHome,
+            codexProfileSelection: codexProfileSelection
+        ))
+        plugins.append(contentsOf: codexMarketplaceFilePluginObservations(from: matrix))
+
+        let claudeInstalled = claudeInstalledPlugins(claudeHome: claudeHome, projectRoot: projectRoot)
+        let claudeInstalledIDs = Set(claudeInstalled.map(\.id))
+        for plugin in claudeInstalled {
+            plugins.append(claudeInstalledPluginObservation(plugin))
+        }
+        plugins.append(contentsOf: claudeSkillsDirectoryPluginObservations(claudeHome: claudeHome, installedIDs: claudeInstalledIDs))
+        let claudeSettingsRead = claudeSettingsPluginObservations(from: matrix, installedIDs: claudeInstalledIDs)
+        plugins.append(contentsOf: claudeSettingsRead.plugins)
+        issues.append(contentsOf: claudeSettingsRead.issues)
+        plugins.append(contentsOf: claudeMarketplaceDirectoryPluginObservations(claudeHome: claudeHome, installedIDs: claudeInstalledIDs))
+
+        var seen = Set<String>()
+        let unique = plugins
+            .filter { seen.insert($0.id).inserted }
+            .sorted { lhs, rhs in
+                if lhs.toolID.rawValue != rhs.toolID.rawValue { return lhs.toolID.rawValue < rhs.toolID.rawValue }
+                if lhs.scope.rawValue != rhs.scope.rawValue { return lhs.scope.rawValue < rhs.scope.rawValue }
+                if lhs.pluginID.localizedCaseInsensitiveCompare(rhs.pluginID) != .orderedSame {
+                    return lhs.pluginID.localizedCaseInsensitiveCompare(rhs.pluginID) == .orderedAscending
+                }
+                return lhs.installMethod.rawValue < rhs.installMethod.rawValue
+            }
+
+        return PluginRead(plugins: unique, issues: issues)
+    }
+
+    private static func codexPluginObservation(
+        _ plugin: CodexCachedPlugin,
+        toolID: CompatibilityToolID,
+        enabled: Bool?,
+        sourcePath: String?
+    ) -> CompatibilityPluginObservation {
+        let components = codexPluginComponents(installPath: plugin.installPath)
+        return CompatibilityPluginObservation(
+            id: "codex-cache|\(toolID.rawValue)|\(plugin.id)|\(plugin.version)|\(plugin.installPath)",
+            toolID: toolID,
+            pluginID: plugin.id,
+            name: plugin.name,
+            marketplace: plugin.marketplace,
+            version: plugin.version,
+            scope: .global,
+            installMethod: .codexCache,
+            installPath: plugin.installPath,
+            sourcePath: sourcePath,
+            enabled: enabled,
+            components: components,
+            summary: pluginObservationSummary(method: .codexCache, enabled: enabled, components: components),
+            requiresRestartAfterWrite: true
+        )
+    }
+
+    private static func codexConfiguredMissingPluginObservation(
+        _ state: PluginConfigState,
+        toolID: CompatibilityToolID
+    ) -> CompatibilityPluginObservation {
+        let parts = codexPluginIDParts(state.pluginID)
+        return CompatibilityPluginObservation(
+            id: "codex-config|\(toolID.rawValue)|\(state.pluginID)|\(state.sourcePath)|\(state.profileName ?? "default")",
+            toolID: toolID,
+            pluginID: state.pluginID,
+            name: parts?.name ?? state.pluginID,
+            marketplace: parts?.marketplace,
+            version: nil,
+            scope: .global,
+            installMethod: .codexConfig,
+            installPath: nil,
+            sourcePath: state.sourcePath,
+            enabled: state.enabled,
+            components: [],
+            summary: state.enabled ? "Configured but not installed in the local plugin cache" : "Disabled configuration without a local cache entry",
+            requiresRestartAfterWrite: true
+        )
+    }
+
+    private static func codexConfiguredPluginStatesByTool(
+        codexHome: String,
+        codexProfileSelection: CodexProfileSelection?
+    ) -> [CompatibilityToolID: [String: PluginConfigState]] {
+        let globalConfigPath = (codexHome as NSString).appendingPathComponent("config.toml")
+        var states: [CompatibilityToolID: [String: PluginConfigState]] = [:]
+        if let raw = try? String(contentsOfFile: globalConfigPath, encoding: .utf8) {
+            let document = parseSettingsTOMLDocument(raw)
+            let global = codexPluginConfigStates(document, sourcePath: globalConfigPath, profileName: nil)
+            states[.codexCLI, default: [:]].merge(global) { _, new in new }
+            states[.codexDesktop, default: [:]].merge(global) { _, new in new }
+        }
+        if let activeProfile = codexActiveProfileSelection(
+            codexHome: codexHome,
+            selection: codexProfileSelection,
+            allowDefaultConfig: true
+        ),
+           let profilePath = codexProfileConfigPath(codexHome: codexHome, profileName: activeProfile.name),
+           let raw = try? String(contentsOfFile: profilePath, encoding: .utf8) {
+            let document = parseSettingsTOMLDocument(raw)
+            states[.codexCLI, default: [:]].merge(codexPluginConfigStates(
+                document,
+                sourcePath: profilePath,
+                profileName: activeProfile.name
+            )) { _, new in new }
+        }
+        return states
+    }
+
+    private static func codexPluginConfigStates(
+        _ document: SettingsTOMLDocument,
+        sourcePath: String,
+        profileName: String?
+    ) -> [String: PluginConfigState] {
+        var states: [String: PluginConfigState] = [:]
+        for (section, values) in document.sectionValues {
+            let segments = tomlSectionSegments(section)
+            guard segments.count >= 2, segments[0] == "plugins" else { continue }
+            let pluginID = segments[1]
+            if states[pluginID] == nil {
+                states[pluginID] = PluginConfigState(
+                    pluginID: pluginID,
+                    enabled: true,
+                    sourcePath: sourcePath,
+                    profileName: profileName
+                )
+            }
+            if segments.count == 2, let enabled = boolSettingValue(values["enabled"]) {
+                states[pluginID] = PluginConfigState(
+                    pluginID: pluginID,
+                    enabled: enabled,
+                    sourcePath: sourcePath,
+                    profileName: profileName
+                )
+            }
+        }
+        return states
+    }
+
+    private static func codexCachedPlugins(codexHome: String) -> [CodexCachedPlugin] {
+        let cacheRoot = ((codexHome as NSString).appendingPathComponent("plugins/cache") as NSString)
+            .expandingTildeInPath
+        let fm = FileManager.default
+        guard let marketplaces = try? fm.contentsOfDirectory(atPath: cacheRoot) else { return [] }
+        var plugins: [CodexCachedPlugin] = []
+        for marketplace in marketplaces.sorted() where !marketplace.hasPrefix(".") {
+            let marketplaceRoot = (cacheRoot as NSString).appendingPathComponent(marketplace)
+            guard let names = try? fm.contentsOfDirectory(atPath: marketplaceRoot) else { continue }
+            for name in names.sorted() where !name.hasPrefix(".") {
+                let pluginRoot = (marketplaceRoot as NSString).appendingPathComponent(name)
+                guard let versions = try? fm.contentsOfDirectory(atPath: pluginRoot) else { continue }
+                for version in versions.sorted() where !version.hasPrefix(".") {
+                    let installPath = (pluginRoot as NSString).appendingPathComponent(version)
+                    let manifestPath = (installPath as NSString).appendingPathComponent(".codex-plugin/plugin.json")
+                    guard fileExists(manifestPath) else { continue }
+                    plugins.append(.init(
+                        id: "\(name)@\(marketplace)",
+                        name: name,
+                        marketplace: marketplace,
+                        version: version,
+                        installPath: expandedPath(installPath)
+                    ))
+                }
+            }
+        }
+        return plugins
+    }
+
+    private static func codexMarketplaceConfigPluginObservations(
+        codexHome: String,
+        codexProfileSelection: CodexProfileSelection?
+    ) -> [CompatibilityPluginObservation] {
+        let globalConfigPath = (codexHome as NSString).appendingPathComponent("config.toml")
+        var observations: [CompatibilityPluginObservation] = []
+        observations.append(contentsOf: codexMarketplaceConfigPluginObservations(
+            path: globalConfigPath,
+            toolIDs: [.codexCLI, .codexDesktop],
+            scope: .global
+        ))
+        if let activeProfile = codexActiveProfileSelection(
+            codexHome: codexHome,
+            selection: codexProfileSelection,
+            allowDefaultConfig: true
+        ),
+           let profilePath = codexProfileConfigPath(codexHome: codexHome, profileName: activeProfile.name) {
+            observations.append(contentsOf: codexMarketplaceConfigPluginObservations(
+                path: profilePath,
+                toolIDs: [.codexCLI],
+                scope: .global
+            ))
+        }
+        return observations
+    }
+
+    private static func codexMarketplaceConfigPluginObservations(
+        path: String,
+        toolIDs: [CompatibilityToolID],
+        scope: CompatibilityScope
+    ) -> [CompatibilityPluginObservation] {
+        guard let raw = try? String(contentsOfFile: path, encoding: .utf8) else { return [] }
+        let document = parseSettingsTOMLDocument(raw)
+        var output: [CompatibilityPluginObservation] = []
+        for (section, values) in document.sectionValues.sorted(by: { $0.key < $1.key }) {
+            let segments = tomlSectionSegments(section)
+            guard segments.count == 2, segments[0] == "marketplaces" else { continue }
+            let marketplace = segments[1]
+            let source = stringFromAny(values["source"])
+                ?? stringFromAny(values["path"])
+                ?? stringFromAny(values["url"])
+            for toolID in toolIDs {
+                output.append(CompatibilityPluginObservation(
+                    id: "codex-marketplace-config|\(toolID.rawValue)|\(marketplace)|\(path)",
+                    toolID: toolID,
+                    pluginID: "marketplace:\(marketplace)",
+                    name: "\(marketplace) marketplace",
+                    marketplace: marketplace,
+                    version: nil,
+                    scope: scope,
+                    installMethod: .codexMarketplaceConfig,
+                    installPath: source,
+                    sourcePath: path,
+                    enabled: nil,
+                    components: ["source"],
+                    summary: source.map { "Marketplace source: \($0)" } ?? "Marketplace source configured",
+                    requiresRestartAfterWrite: true
+                ))
+            }
+        }
+        return output
+    }
+
+    private static func codexMarketplaceFilePluginObservations(
+        from matrix: [CompatibilityMatrixEntry]
+    ) -> [CompatibilityPluginObservation] {
+        var observations: [CompatibilityPluginObservation] = []
+        for surface in matrix where isCodexPluginMarketplaceSurface(surface) {
+            guard let path = surface.path,
+                  let root = readJSONDictionary(at: path) else { continue }
+            let marketplace = codexMarketplaceName(from: surface)
+            let entries = marketplacePluginEntries(from: root)
+            for entry in entries {
+                let resolvedPath = entry.path.map {
+                    resolveMarketplaceEntryPath($0, marketplacePath: path)
+                }
+                observations.append(CompatibilityPluginObservation(
+                    id: "codex-marketplace-file|\(surface.toolID.rawValue)|\(surface.id)|\(entry.name)|\(entry.path ?? "")",
+                    toolID: surface.toolID,
+                    pluginID: entry.name.contains("@") ? entry.name : "\(entry.name)@\(marketplace)",
+                    name: entry.name,
+                    marketplace: marketplace,
+                    version: entry.version,
+                    scope: surface.scope,
+                    installMethod: .codexMarketplaceFile,
+                    installPath: resolvedPath,
+                    sourcePath: path,
+                    enabled: nil,
+                    components: [],
+                    summary: entry.detail ?? "Declared in \(surface.label.lowercased())",
+                    requiresRestartAfterWrite: true
+                ))
+            }
+        }
+        return observations
+    }
+
+    private static func claudeInstalledPluginObservation(
+        _ plugin: ClaudeInstalledPlugin
+    ) -> CompatibilityPluginObservation {
+        let components = claudePluginComponents(installPath: plugin.installPath)
+        let parts = pluginIDParts(plugin.id)
+        return CompatibilityPluginObservation(
+            id: "claude-installed|\(plugin.scope)|\(plugin.id)|\(plugin.installPath)",
+            toolID: .claudeCode,
+            pluginID: plugin.id,
+            name: parts.name,
+            marketplace: parts.marketplace,
+            version: plugin.version,
+            scope: claudePluginScope(plugin.scope),
+            installMethod: .claudeInstalledInventory,
+            installPath: plugin.installPath,
+            sourcePath: nil,
+            enabled: plugin.enabled,
+            components: components,
+            summary: pluginObservationSummary(method: .claudeInstalledInventory, enabled: plugin.enabled, components: components),
+            requiresRestartAfterWrite: true
+        )
+    }
+
+    private static func claudeSettingsPluginObservations(
+        from matrix: [CompatibilityMatrixEntry],
+        installedIDs: Set<String>
+    ) -> PluginRead {
+        var observations: [CompatibilityPluginObservation] = []
+        var issues: [CompatibilityIssue] = []
+        for surface in matrix where surface.toolID == .claudeCode && surface.kind == .settings {
+            guard let path = surface.path,
+                  let root = settingsDictionary(for: surface, path: path) else { continue }
+            if let enabledPlugins = root["enabledPlugins"] as? [String: Any] {
+                for pluginID in enabledPlugins.keys.sorted() {
+                    guard !installedIDs.contains(pluginID) else { continue }
+                    let enabled = boolSettingValue(enabledPlugins[pluginID])
+                    let parts = pluginIDParts(pluginID)
+                    observations.append(CompatibilityPluginObservation(
+                        id: "claude-settings|\(surface.id)|\(pluginID)",
+                        toolID: .claudeCode,
+                        pluginID: pluginID,
+                        name: parts.name,
+                        marketplace: parts.marketplace,
+                        version: nil,
+                        scope: surface.scope,
+                        installMethod: .claudeSettings,
+                        installPath: nil,
+                        sourcePath: path,
+                        enabled: enabled,
+                        components: [],
+                        summary: enabled == false ? "Disabled in Claude settings" : "Enabled in Claude settings but not present in installed plugin inventory",
+                        requiresRestartAfterWrite: true
+                    ))
+                    if enabled != false {
+                        issues.append(configuredPluginMissingIssue(
+                            pluginID: pluginID,
+                            toolID: .claudeCode,
+                            sourcePath: path,
+                            surface: surface,
+                            owner: "Claude Code"
+                        ))
+                    }
+                }
+            }
+            if let rawMarketplaces = root["extraKnownMarketplaces"] {
+                for entry in claudeKnownMarketplaceEntries(from: rawMarketplaces) {
+                    observations.append(CompatibilityPluginObservation(
+                        id: "claude-known-marketplace|\(surface.id)|\(entry.name)|\(entry.path ?? entry.detail ?? "")",
+                        toolID: .claudeCode,
+                        pluginID: "marketplace:\(entry.name)",
+                        name: "\(entry.name) marketplace",
+                        marketplace: entry.name,
+                        version: entry.version,
+                        scope: surface.scope,
+                        installMethod: .claudeKnownMarketplace,
+                        installPath: entry.path,
+                        sourcePath: path,
+                        enabled: nil,
+                        components: entry.detail.map { [$0] } ?? ["source"],
+                        summary: entry.path.map { "Known marketplace source: \($0)" } ?? "Known marketplace source configured",
+                        requiresRestartAfterWrite: true
+                    ))
+                }
+            }
+        }
+        return PluginRead(plugins: observations, issues: issues)
+    }
+
+    private static func claudeSkillsDirectoryPluginObservations(
+        claudeHome: String,
+        installedIDs: Set<String>
+    ) -> [CompatibilityPluginObservation] {
+        let skillsRoot = (claudeHome as NSString).appendingPathComponent("skills")
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(atPath: skillsRoot) else { return [] }
+        return entries.sorted().compactMap { entry -> CompatibilityPluginObservation? in
+            guard !entry.hasPrefix(".") else { return nil }
+            let pluginRoot = (skillsRoot as NSString).appendingPathComponent(entry)
+            let manifestPath = (pluginRoot as NSString).appendingPathComponent(".claude-plugin/plugin.json")
+            guard fileExists(manifestPath) else { return nil }
+            let name = manifestPluginName(path: manifestPath, fallback: entry)
+            let pluginID = "\(name)@skills-dir"
+            guard !installedIDs.contains(pluginID) else { return nil }
+            let components = claudePluginComponents(installPath: pluginRoot)
+            return CompatibilityPluginObservation(
+                id: "claude-skills-dir|\(pluginID)|\(pluginRoot)",
+                toolID: .claudeCode,
+                pluginID: pluginID,
+                name: name,
+                marketplace: "skills-dir",
+                version: manifestPluginVersion(path: manifestPath),
+                scope: .global,
+                installMethod: .claudeSkillsDirectory,
+                installPath: expandedPath(pluginRoot),
+                sourcePath: manifestPath,
+                enabled: true,
+                components: components,
+                summary: pluginObservationSummary(method: .claudeSkillsDirectory, enabled: true, components: components),
+                requiresRestartAfterWrite: true
+            )
+        }
+    }
+
+    private static func claudeMarketplaceDirectoryPluginObservations(
+        claudeHome: String,
+        installedIDs: Set<String>
+    ) -> [CompatibilityPluginObservation] {
+        let marketplacesRoot = (claudeHome as NSString).appendingPathComponent("plugins/marketplaces")
+        let manifestPaths = pluginManifestPaths(
+            under: marketplacesRoot,
+            markerDirectory: ".claude-plugin",
+            maxDepth: 4
+        )
+        return manifestPaths.compactMap { manifestPath -> CompatibilityPluginObservation? in
+            let pluginRoot = URL(fileURLWithPath: manifestPath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .path
+            let name = manifestPluginName(path: manifestPath, fallback: URL(fileURLWithPath: pluginRoot).lastPathComponent)
+            let marketplace = claudeMarketplaceName(pluginRoot: pluginRoot, marketplacesRoot: marketplacesRoot)
+            let pluginID = "\(name)@\(marketplace)"
+            guard !installedIDs.contains(pluginID) else { return nil }
+            let components = claudePluginComponents(installPath: pluginRoot)
+            return CompatibilityPluginObservation(
+                id: "claude-marketplace-dir|\(pluginID)|\(pluginRoot)",
+                toolID: .claudeCode,
+                pluginID: pluginID,
+                name: name,
+                marketplace: marketplace,
+                version: manifestPluginVersion(path: manifestPath),
+                scope: .global,
+                installMethod: .claudeMarketplaceDirectory,
+                installPath: expandedPath(pluginRoot),
+                sourcePath: manifestPath,
+                enabled: nil,
+                components: components,
+                summary: pluginObservationSummary(method: .claudeMarketplaceDirectory, enabled: nil, components: components),
+                requiresRestartAfterWrite: true
+            )
+        }
+    }
+
+    private static func configuredPluginMissingIssue(
+        pluginID: String,
+        toolID: CompatibilityToolID,
+        sourcePath: String,
+        surface: CompatibilityMatrixEntry?,
+        owner: String
+    ) -> CompatibilityIssue {
+        CompatibilityIssue(
+            id: UUID(),
+            code: .configMissing,
+            severity: .warning,
+            toolID: toolID,
+            surfaceID: surface?.id,
+            title: "\(owner) plugin configured but not installed",
+            detail: "\(pluginID) is enabled in \(tilde(sourcePath)), but Project Hub could not find a matching installed plugin manifest in the local plugin cache/inventory.",
+            path: sourcePath,
+            subjectPath: pluginID,
+            fixHint: "Install or update \(pluginID) with the target tool's plugin command or marketplace UI, or remove the stale enabled plugin setting.",
+            metadata: ["pluginID": pluginID]
+        )
+    }
+
+    private static func pluginObservationSummary(
+        method: CompatibilityPluginInstallMethod,
+        enabled: Bool?,
+        components: [String]
+    ) -> String {
+        var parts: [String] = [method.label]
+        if let enabled {
+            parts.append(enabled ? "enabled" : "disabled")
+        }
+        if !components.isEmpty {
+            parts.append(components.joined(separator: ", "))
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func codexPluginComponents(installPath: String) -> [String] {
+        let manifestPath = (installPath as NSString).appendingPathComponent(".codex-plugin/plugin.json")
+        let manifest = readJSONDictionary(at: manifestPath) ?? [:]
+        var components: [String] = []
+        if manifest["mcpServers"] != nil || fileExists((installPath as NSString).appendingPathComponent(".mcp.json")) {
+            components.append("MCP")
+        }
+        if manifest["skills"] != nil || directoryExists((installPath as NSString).appendingPathComponent("skills")) {
+            components.append("skills")
+        }
+        if manifest["hooks"] != nil || fileExists((installPath as NSString).appendingPathComponent("hooks/hooks.json")) {
+            components.append("hooks")
+        }
+        if manifest["apps"] != nil || fileExists((installPath as NSString).appendingPathComponent(".app.json")) {
+            components.append("apps")
+        }
+        if manifest["interface"] != nil { components.append("interface") }
+        return uniqueStringsPreservingOrder(components)
+    }
+
+    private static func claudePluginComponents(installPath: String) -> [String] {
+        let manifestPath = (installPath as NSString).appendingPathComponent(".claude-plugin/plugin.json")
+        let manifest = readJSONDictionary(at: manifestPath) ?? [:]
+        var components: [String] = []
+        if manifest["mcpServers"] != nil || fileExists((installPath as NSString).appendingPathComponent(".mcp.json")) {
+            components.append("MCP")
+        }
+        if manifest["skills"] != nil || directoryExists((installPath as NSString).appendingPathComponent("skills")) || fileExists((installPath as NSString).appendingPathComponent("SKILL.md")) {
+            components.append("skills")
+        }
+        if manifest["commands"] != nil || directoryExists((installPath as NSString).appendingPathComponent("commands")) {
+            components.append("commands")
+        }
+        if manifest["agents"] != nil || directoryExists((installPath as NSString).appendingPathComponent("agents")) {
+            components.append("agents")
+        }
+        if manifest["hooks"] != nil || directoryExists((installPath as NSString).appendingPathComponent("hooks")) {
+            components.append("hooks")
+        }
+        if manifest["lspServers"] != nil || fileExists((installPath as NSString).appendingPathComponent(".lsp.json")) {
+            components.append("LSP")
+        }
+        return uniqueStringsPreservingOrder(components)
+    }
+
+    private static func marketplacePluginEntries(from root: [String: Any]) -> [MarketplacePluginEntry] {
+        if let entries = root["plugins"] as? [[String: Any]] {
+            return entries.enumerated().compactMap { index, entry in
+                let name = stringFromAny(entry["name"])
+                    ?? stringFromAny(entry["id"])
+                    ?? stringFromAny(entry["plugin"])
+                    ?? "plugin-\(index + 1)"
+                return MarketplacePluginEntry(
+                    name: name,
+                    path: stringFromAny(entry["path"]) ?? stringFromAny(entry["source"]),
+                    version: stringFromAny(entry["version"]),
+                    detail: stringFromAny(entry["description"])
+                )
+            }
+        }
+        if let entries = root["plugins"] as? [Any] {
+            return entries.enumerated().compactMap { index, raw in
+                if let name = raw as? String {
+                    return MarketplacePluginEntry(name: name, path: nil, version: nil, detail: nil)
+                }
+                if let entry = raw as? [String: Any] {
+                    let name = stringFromAny(entry["name"])
+                        ?? stringFromAny(entry["id"])
+                        ?? "plugin-\(index + 1)"
+                    return MarketplacePluginEntry(
+                        name: name,
+                        path: stringFromAny(entry["path"]) ?? stringFromAny(entry["source"]),
+                        version: stringFromAny(entry["version"]),
+                        detail: stringFromAny(entry["description"])
+                    )
+                }
+                return nil
+            }
+        }
+        if let entries = root["plugins"] as? [String: Any] {
+            return entries.keys.sorted().map { name in
+                let raw = entries[name]
+                if let entry = raw as? [String: Any] {
+                    return MarketplacePluginEntry(
+                        name: name,
+                        path: stringFromAny(entry["path"]) ?? stringFromAny(entry["source"]),
+                        version: stringFromAny(entry["version"]),
+                        detail: stringFromAny(entry["description"])
+                    )
+                }
+                return MarketplacePluginEntry(name: name, path: stringFromAny(raw), version: nil, detail: nil)
+            }
+        }
+        return []
+    }
+
+    private static func claudeKnownMarketplaceEntries(from raw: Any) -> [MarketplacePluginEntry] {
+        if let dictionary = raw as? [String: Any] {
+            return dictionary.keys.sorted().map { name in
+                let value = dictionary[name]
+                if let entry = value as? [String: Any] {
+                    return MarketplacePluginEntry(
+                        name: name,
+                        path: marketplaceSourcePath(from: entry),
+                        version: nil,
+                        detail: stringFromAny(entry["type"]) ?? marketplaceSourceKind(from: entry)
+                    )
+                }
+                return MarketplacePluginEntry(name: name, path: stringFromAny(value), version: nil, detail: nil)
+            }
+        }
+        if let entries = raw as? [[String: Any]] {
+            return entries.enumerated().map { index, entry in
+                let name = stringFromAny(entry["name"])
+                    ?? stringFromAny(entry["id"])
+                    ?? stringFromAny(entry["marketplace"])
+                    ?? "marketplace-\(index + 1)"
+                return MarketplacePluginEntry(
+                    name: name,
+                    path: marketplaceSourcePath(from: entry),
+                    version: nil,
+                    detail: stringFromAny(entry["type"]) ?? marketplaceSourceKind(from: entry)
+                )
+            }
+        }
+        if let entries = raw as? [Any] {
+            return entries.enumerated().compactMap { index, value in
+                if let string = value as? String {
+                    return MarketplacePluginEntry(name: "marketplace-\(index + 1)", path: string, version: nil, detail: nil)
+                }
+                if let entry = value as? [String: Any] {
+                    let name = stringFromAny(entry["name"])
+                        ?? stringFromAny(entry["id"])
+                        ?? "marketplace-\(index + 1)"
+                    return MarketplacePluginEntry(
+                        name: name,
+                        path: marketplaceSourcePath(from: entry),
+                        version: nil,
+                        detail: stringFromAny(entry["type"]) ?? marketplaceSourceKind(from: entry)
+                    )
+                }
+                return nil
+            }
+        }
+        return []
+    }
+
+    private static func marketplaceSourcePath(from entry: [String: Any]) -> String? {
+        for key in ["source", "url", "repo", "repository", "path", "directory", "file", "npm", "git", "github", "hostPattern"] {
+            if let value = stringFromAny(entry[key]), !value.isEmpty {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private static func marketplaceSourceKind(from entry: [String: Any]) -> String? {
+        for key in ["github", "git", "directory", "url", "npm", "file", "hostPattern", "settings"] where entry[key] != nil {
+            return key
+        }
+        return nil
+    }
+
+    private static func settingsDictionary(for surface: CompatibilityMatrixEntry, path: String) -> [String: Any]? {
+        switch surface.format {
+        case .json, .jsonc:
+            return readJSONDictionary(at: path)
+        case .plist:
+            return readPlistFile(path)
+        default:
+            return nil
+        }
+    }
+
+    private static func codexMarketplaceName(from surface: CompatibilityMatrixEntry) -> String {
+        guard isCodexPluginMarketplaceSurface(surface) else { return "marketplace" }
+        let pieces = surface.id.dropFirst(codexPluginMarketplaceSurfacePrefix.count)
+            .split(separator: "|", maxSplits: 1)
+            .map(String.init)
+        return pieces.first ?? "marketplace"
+    }
+
+    private static func resolveMarketplaceEntryPath(_ rawPath: String, marketplacePath: String) -> String {
+        let expanded = (rawPath as NSString).expandingTildeInPath
+        if expanded.hasPrefix("/") {
+            return URL(fileURLWithPath: expanded).standardizedFileURL.path
+        }
+        return URL(fileURLWithPath: marketplacePath)
+            .deletingLastPathComponent()
+            .appendingPathComponent(rawPath)
+            .standardizedFileURL
+            .path
+    }
+
+    private static func pluginIDParts(_ pluginID: String) -> (name: String, marketplace: String?) {
+        guard let at = pluginID.lastIndex(of: "@") else { return (pluginID, nil) }
+        return (
+            String(pluginID[..<at]),
+            String(pluginID[pluginID.index(after: at)...])
+        )
+    }
+
+    private static func manifestPluginName(path: String, fallback: String) -> String {
+        guard let manifest = readJSONDictionary(at: path) else { return fallback }
+        return stringFromAny(manifest["name"])
+            ?? stringFromAny(manifest["id"])
+            ?? fallback
+    }
+
+    private static func manifestPluginVersion(path: String) -> String? {
+        guard let manifest = readJSONDictionary(at: path) else { return nil }
+        return stringFromAny(manifest["version"])
+    }
+
+    private static func pluginManifestPaths(
+        under root: String,
+        markerDirectory: String,
+        maxDepth: Int
+    ) -> [String] {
+        let fm = FileManager.default
+        var paths: [String] = []
+
+        func scan(_ directory: String, depth: Int) {
+            guard depth <= maxDepth, directoryExists(directory) else { return }
+            let manifestPath = ((directory as NSString).appendingPathComponent(markerDirectory) as NSString)
+                .appendingPathComponent("plugin.json")
+            if fileExists(manifestPath) {
+                paths.append(manifestPath)
+            }
+            guard depth < maxDepth,
+                  let entries = try? fm.contentsOfDirectory(atPath: directory) else { return }
+            for entry in entries.sorted() where !entry.hasPrefix(".") {
+                let child = (directory as NSString).appendingPathComponent(entry)
+                guard directoryExists(child) else { continue }
+                scan(child, depth: depth + 1)
+            }
+        }
+
+        scan(root, depth: 0)
+        return paths.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private static func claudeMarketplaceName(pluginRoot: String, marketplacesRoot: String) -> String {
+        let relative = URL(fileURLWithPath: pluginRoot).path
+            .replacingOccurrences(of: "\(URL(fileURLWithPath: marketplacesRoot).path)/", with: "")
+        let pieces = relative.split(separator: "/").map(String.init)
+        if pieces.count >= 2 { return pieces[0] }
+        return pieces.first ?? "local"
+    }
+
+    private static func stringFromAny(_ value: Any?) -> String? {
+        if let string = value as? String {
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        if let number = value as? NSNumber {
+            return number.stringValue
+        }
+        return nil
     }
 
     private static func codexInstalledPlugins(

@@ -47,3 +47,11 @@ Skills and Compatibility views should not run broad filesystem scans from SwiftU
 Project discovery now requires an existing coding-project root with direct evidence before surfacing a folder from Claude/Codex history or filesystem roots. Tool homes, broad workspace folders, transient Codex session folders, top-level generic storage folders, protected Desktop/Documents/Downloads paths, and case-variant duplicates are rejected or sanitized out of saved state.
 
 Background refresh paths must not trigger macOS protected-storage prompts. Skills global install counts skip protected storage and stale false-positive projects; explicit user-added protected projects can still be inspected through direct project actions.
+
+---
+
+## v1.5 — 2026-06-18 22:15 · Codex
+
+Compatibility now treats plugins as first-class local evidence rather than only incidental MCP or skill rows. Codex plugin detection covers installed cache manifests, enabled/disabled plugin config, configured marketplace sources, and personal/project marketplace files. Claude Code plugin detection covers installed plugin inventory, enabledPlugins settings, extraKnownMarketplaces, skills-dir plugins, and marketplace-directory manifests.
+
+Rejected installer automation for this slice. Project Hub reports plugin state and missing enabled plugins, but plugin-owned files and marketplace installs remain read-only and must be changed through Codex or Claude Code's own plugin flows.

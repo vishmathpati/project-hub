@@ -70,6 +70,7 @@ struct CompatibilityView: View {
                         coverageOverview(report)
                         liveVerification(report)
                         settingsOverview(report)
+                        pluginsOverview(report)
                         authOverview(report)
                         skillSupportOverview(report)
                         skillsOverview(report)
@@ -819,6 +820,144 @@ struct CompatibilityView: View {
         case .codexDesktop:
             return "app.badge"
         }
+    }
+
+    private func pluginsOverview(_ report: CompatibilityScanResult) -> some View {
+        let plugins = filteredPlugins(report)
+        return VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("Plugins", count: plugins.count)
+            if plugins.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "puzzlepiece.extension")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.secondary)
+                    Text("No plugins were found for the selected target.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding(10)
+                .background(Color(NSColor.controlBackgroundColor).opacity(0.65))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                VStack(spacing: 6) {
+                    ForEach(Array(plugins.prefix(10))) { plugin in
+                        pluginRow(plugin)
+                    }
+                    if plugins.count > 10 {
+                        Text("+ \(plugins.count - 10) more plugin\(plugins.count - 10 == 1 ? "" : "s") in this target")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 2)
+                    }
+                }
+            }
+        }
+    }
+
+    private func pluginRow(_ plugin: CompatibilityPluginObservation) -> some View {
+        let color = pluginColor(plugin)
+        return HStack(alignment: .top, spacing: 8) {
+            Image(systemName: plugin.enabled == false ? "puzzlepiece.extension" : "puzzlepiece.extension.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(color)
+                .frame(width: 18, height: 18)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 5) {
+                    Text(plugin.name)
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                    Text(plugin.toolID.label)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.accentColor)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.accentColor.opacity(0.10))
+                        .clipShape(Capsule())
+                    Text(plugin.installMethod.label)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.10))
+                        .clipShape(Capsule())
+                    if let state = pluginStateLabel(plugin) {
+                        Text(state)
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(color)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(color.opacity(0.10))
+                            .clipShape(Capsule())
+                    }
+                    if let version = plugin.version {
+                        Text("v\(version)")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.10))
+                            .clipShape(Capsule())
+                    }
+                }
+
+                Text(plugin.summary)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+
+                if let path = pluginDisplayPath(plugin) {
+                    Text(shortPath(path))
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                if !plugin.components.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 4) {
+                            ForEach(plugin.components.prefix(8), id: \.self) { component in
+                                Text(component)
+                                    .font(.system(size: 8, weight: .semibold))
+                                    .foregroundColor(color)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 2)
+                                    .background(color.opacity(0.08))
+                                    .clipShape(Capsule())
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer()
+            if plugin.requiresRestartAfterWrite {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.blue)
+            }
+        }
+        .padding(10)
+        .background(Color(NSColor.controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.14), lineWidth: 1))
+    }
+
+    private func pluginStateLabel(_ plugin: CompatibilityPluginObservation) -> String? {
+        guard let enabled = plugin.enabled else { return nil }
+        return enabled ? "Enabled" : "Disabled"
+    }
+
+    private func pluginColor(_ plugin: CompatibilityPluginObservation) -> Color {
+        if plugin.enabled == false { return .secondary }
+        if plugin.installPath == nil && plugin.installMethod == .codexConfig { return .orange }
+        if plugin.installPath == nil && plugin.installMethod == .claudeSettings { return .orange }
+        return .accentColor
+    }
+
+    private func pluginDisplayPath(_ plugin: CompatibilityPluginObservation) -> String? {
+        plugin.installPath ?? plugin.sourcePath
     }
 
     private func authOverview(_ report: CompatibilityScanResult) -> some View {
@@ -6632,6 +6771,10 @@ struct CompatibilityView: View {
         report.skills.filter { scopeFilter.includes(scope: $0.scope) && runtimeFilter.includes(skill: $0) }
     }
 
+    private func filteredPlugins(_ report: CompatibilityScanResult) -> [CompatibilityPluginObservation] {
+        report.plugins.filter { scopeFilter.includes(scope: $0.scope) && runtimeFilter.includes(toolID: $0.toolID, scope: $0.scope) }
+    }
+
     private func filteredSkillSupport(_ report: CompatibilityScanResult) -> [CompatibilitySkillSupportObservation] {
         report.skillSupport.filter { scopeFilter.includes(scope: $0.scope) && runtimeFilter.includes(toolID: $0.toolID, scope: $0.scope) }
     }
@@ -7005,6 +7148,7 @@ struct CompatibilityView: View {
         let servers = filteredServers(report)
         let settings = filteredSettings(report)
         let skills = filteredSkills(report)
+        let plugins = filteredPlugins(report)
         let skillSupport = filteredSkillSupport(report)
         let issues = filteredIssues(report)
         let surfaces = filteredMatrix(report)
@@ -7030,6 +7174,7 @@ struct CompatibilityView: View {
             "- Surfaces: \(surfaces.count)",
             "- MCP servers: \(servers.count)",
             "- Settings/context files: \(settings.count)",
+            "- Plugins: \(plugins.count)",
             "- Skills: \(skills.count)",
             "- Skill support rows: \(skillSupport.count)",
             "- Findings: \(issues.count)",
@@ -7103,6 +7248,26 @@ struct CompatibilityView: View {
                     item.state.rawValue,
                     item.summary,
                     item.roots.map(shortPath).joined(separator: ", ")
+                ].map(escapeMarkdown).joined(separator: " | ").wrappedTableRow)
+            }
+            lines.append("")
+        }
+
+        if !plugins.isEmpty {
+            lines.append("## Plugins")
+            lines.append("")
+            lines.append("| Tool | Plugin | Method | State | Version | Components | Path | Source |")
+            lines.append("| --- | --- | --- | --- | --- | --- | --- | --- |")
+            for plugin in plugins {
+                lines.append([
+                    plugin.toolID.label,
+                    plugin.pluginID,
+                    plugin.installMethod.label,
+                    pluginStateLabel(plugin) ?? "Detected",
+                    plugin.version ?? "",
+                    plugin.components.joined(separator: ", "),
+                    plugin.installPath.map(shortPath) ?? "",
+                    plugin.sourcePath.map(shortPath) ?? ""
                 ].map(escapeMarkdown).joined(separator: " | ").wrappedTableRow)
             }
             lines.append("")

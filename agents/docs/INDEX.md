@@ -23,6 +23,7 @@
 - UI: `Sources/ProjectHub/Views/SkillsView.swift`, `Sources/ProjectHub/Views/SkillEditorSheet.swift`, `Sources/ProjectHub/Views/SettingsView.swift`
 - Shared with: global skills tab and project skills tab
 - Guard: global install-count refresh is a background aggregate; skip protected user-storage paths and stale saved false positives so opening Skills never triggers Desktop/Documents/Downloads permission prompts.
+- Plugin evidence: Compatibility and inventory views may surface read-only Claude/Codex plugin-provided skills; do not treat plugin-owned skill roots as writable project installs.
 
 ### Claude Agents
 
@@ -50,3 +51,5 @@
 - UI: `Sources/ProjectHub/Views/CompatibilityView.swift`, `Sources/ProjectHub/Views/SettingsView.swift`
 - Dependencies to check before edits: MCP Management, Skill Management, Project Discovery, Critical Shared Components.
 - Guard: compatibility scans are explicit and single-flight; do not trigger full scans on tab open/input changes or allow overlapping Scan requests.
+- Plugin inventory: Compatibility surfaces first-class `CompatibilityPluginObservation` rows for Codex cache/config/marketplace-file/marketplace-source evidence and Claude installed inventory/settings/known-marketplace/skills-dir/marketplace-directory evidence.
+- Plugin guard: plugin detection is read-only; Project Hub reports missing enabled plugins but does not install, update, or mutate plugin-owned files.

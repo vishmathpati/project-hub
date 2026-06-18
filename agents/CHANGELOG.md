@@ -7,6 +7,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [2026-06-18] · Codex
 
+### Added
+- Added first-class Compatibility plugin inventory for Codex CLI/Desktop and Claude Code, covering Codex cache/config/marketplace evidence plus Claude installed inventory/settings/known-marketplace/skills-dir/marketplace-directory evidence.
+- Added a Plugins section to the Compatibility UI and clipboard report with install method, state, version, components, path, and source.
+
+### Fixed
+- Added warnings for enabled Codex/Claude plugins that are configured in local settings but missing from the installed cache/inventory.
+- Rebuilt and reinstalled `/Applications/ProjectHub.app` from the current release bundle, then removed the generated repo-local app artifact so `/Applications` remains the only installed app location.
+
+## [2026-06-18] · Codex
+
 ### Changed
 - Tightened project discovery so auto-discovery only accepts existing coding-project roots with evidence, skips protected Desktop/Documents/Downloads paths unless explicitly added, hides worktrees outside the primary list, and de-dupes case variants such as `active` vs `Active`.
 - Added saved-project sanitation on load so old false positives like tool homes, workspace containers, and top-level generic storage folders are removed from persisted Project Hub state.
