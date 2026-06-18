@@ -149,7 +149,7 @@ final class ProjectStore: ObservableObject {
     func scan() {
         guard !isScanning else { return }
         isScanning = true
-        let existingPaths = Set(projects.map { $0.path })
+        let existingPaths = Set(projects.map { ProjectStore.discoveryDedupKey($0.path) })
         Task { [weak self] in
             let result = await Task.detached(priority: .utility) {
                 ProjectStore.findProjects(excluding: existingPaths)
@@ -182,8 +182,9 @@ final class ProjectStore: ObservableObject {
     nonisolated static func mergeDiscoveryCandidates(_ candidates: [DiscoveredProject]) -> ProjectDiscoveryResult {
         var byPath: [String: DiscoveredProject] = [:]
         for project in candidates {
-            if let existing = byPath[project.path] {
-                byPath[project.path] = DiscoveredProject(
+            let key = discoveryDedupKey(project.path)
+            if let existing = byPath[key] {
+                byPath[key] = DiscoveredProject(
                     id:            existing.id,
                     path:          existing.path,
                     displayName:   existing.displayName,
@@ -193,7 +194,7 @@ final class ProjectStore: ObservableObject {
                     worktreeInfo:  existing.worktreeInfo ?? project.worktreeInfo
                 )
             } else {
-                byPath[project.path] = project
+                byPath[key] = project
             }
         }
 
@@ -220,27 +221,16 @@ final class ProjectStore: ObservableObject {
         var found: [DiscoveredProject] = []
 
         for rawPath in projects.keys {
-            let canonical = Project.canonicalize(rawPath)
-            guard !seen.contains(canonical) else { continue }
-            guard !canonical.contains("/.paperclip/") else { continue }
-            guard canonical != "/", canonical != home else { continue }
-            var isDir: ObjCBool = false
-            guard fm.fileExists(atPath: canonical, isDirectory: &isDir), isDir.boolValue else { continue }
+            guard let project = makeDiscoveredProject(
+                rawPath: rawPath,
+                source: .claudeCode,
+                excluding: seen,
+                fm: fm,
+                home: home
+            ) else { continue }
 
-            let hasGit = fm.fileExists(atPath: (canonical as NSString).appendingPathComponent(".git"))
-            let tools  = detectedTools(at: canonical, fm: fm)
-            let worktreeInfo = worktreeInfo(at: canonical, fm: fm)
-
-            found.append(DiscoveredProject(
-                id:            UUID(),
-                path:          canonical,
-                displayName:   Project.folderName(at: canonical),
-                hasGit:        hasGit,
-                detectedTools: tools,
-                sources:       [.claudeCode],
-                worktreeInfo:  worktreeInfo
-            ))
-            seen.insert(canonical)
+            found.append(project)
+            seen.insert(discoveryDedupKey(project.path))
             if found.count >= 60 { break }
         }
 
@@ -259,14 +249,6 @@ final class ProjectStore: ObservableObject {
         }.first
         guard let dbPath else { return [] }
 
-        let broadPaths: Set<String> = [
-            home, "/",
-            (home as NSString).appendingPathComponent("Desktop"),
-            (home as NSString).appendingPathComponent("Downloads"),
-            (home as NSString).appendingPathComponent("Documents"),
-            (home as NSString).appendingPathComponent("Library"),
-        ]
-
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_close(db) }
@@ -276,31 +258,20 @@ final class ProjectStore: ObservableObject {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
 
-        let codexSessionDir = (home as NSString).appendingPathComponent("Documents/Codex")
         var found: [DiscoveredProject] = []
 
         while sqlite3_step(stmt) == SQLITE_ROW {
             guard let ptr = sqlite3_column_text(stmt, 0) else { continue }
-            let canonical = Project.canonicalize(String(cString: ptr))
-            guard !seen.contains(canonical), !broadPaths.contains(canonical) else { continue }
-            guard !canonical.hasPrefix(codexSessionDir) else { continue }
-            let folderName = Project.folderName(at: canonical)
-            let looksLikeSession = folderName.count > 10 &&
-                folderName.prefix(4).allSatisfy(\.isNumber) &&
-                folderName.dropFirst(4).hasPrefix("-")
-            guard !looksLikeSession else { continue }
-            var isDir: ObjCBool = false
-            guard fm.fileExists(atPath: canonical, isDirectory: &isDir), isDir.boolValue else { continue }
-            let hasGit = fm.fileExists(atPath: (canonical as NSString).appendingPathComponent(".git"))
-            let tools = detectedTools(at: canonical, fm: fm)
-            let worktreeInfo = worktreeInfo(at: canonical, fm: fm)
-            guard hasGit || !tools.isEmpty else { continue }
-            found.append(DiscoveredProject(
-                id: UUID(), path: canonical, displayName: folderName,
-                hasGit: hasGit, detectedTools: tools, sources: [.codexCLI],
-                worktreeInfo: worktreeInfo
-            ))
-            seen.insert(canonical)
+            guard let project = makeDiscoveredProject(
+                rawPath: String(cString: ptr),
+                source: .codexCLI,
+                excluding: seen,
+                fm: fm,
+                home: home
+            ) else { continue }
+
+            found.append(project)
+            seen.insert(discoveryDedupKey(project.path))
             if found.count >= 40 { break }
         }
         return found
@@ -318,27 +289,16 @@ final class ProjectStore: ObservableObject {
         var found: [DiscoveredProject] = []
 
         for rawPath in ProjectRootDetector.codexProjectRootPaths(in: content) {
-            let canonical = Project.canonicalize(rawPath)
+            guard let project = makeDiscoveredProject(
+                rawPath: rawPath,
+                source: .codexCLI,
+                excluding: seen,
+                fm: fm,
+                home: home
+            ) else { continue }
 
-            guard !seen.contains(canonical) else { continue }
-
-            var isDir: ObjCBool = false
-            guard fm.fileExists(atPath: canonical, isDirectory: &isDir), isDir.boolValue else { continue }
-
-            let hasGit = fm.fileExists(atPath: (canonical as NSString).appendingPathComponent(".git"))
-            let tools  = detectedTools(at: canonical, fm: fm)
-            let worktreeInfo = worktreeInfo(at: canonical, fm: fm)
-
-            found.append(DiscoveredProject(
-                id:            UUID(),
-                path:          canonical,
-                displayName:   Project.folderName(at: canonical),
-                hasGit:        hasGit,
-                detectedTools: tools,
-                sources:       [.codexCLI],
-                worktreeInfo:  worktreeInfo
-            ))
-            seen.insert(canonical)
+            found.append(project)
+            seen.insert(discoveryDedupKey(project.path))
         }
 
         return found
@@ -371,7 +331,7 @@ final class ProjectStore: ObservableObject {
                 guard fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else { continue }
 
                 if let p = makeProject(at: path, excluding: seen, fm: fm) {
-                    found.append(p); seen.insert(p.path)
+                    found.append(p); seen.insert(discoveryDedupKey(p.path))
                 } else {
                     guard let level2 = try? fm.contentsOfDirectory(atPath: path) else { continue }
                     for name2 in level2.prefix(20) {
@@ -380,7 +340,7 @@ final class ProjectStore: ObservableObject {
                         var isDir2: ObjCBool = false
                         guard fm.fileExists(atPath: path2, isDirectory: &isDir2), isDir2.boolValue else { continue }
                         if let p = makeProject(at: path2, excluding: seen, fm: fm) {
-                            found.append(p); seen.insert(p.path)
+                            found.append(p); seen.insert(discoveryDedupKey(p.path))
                         }
                         if found.count >= 40 { break }
                     }
@@ -394,13 +354,41 @@ final class ProjectStore: ObservableObject {
     }
 
     nonisolated private static func makeProject(at path: String, excluding: Set<String>, fm: FileManager) -> DiscoveredProject? {
-        let canonical = Project.canonicalize(path)
-        guard !excluding.contains(canonical) else { return nil }
+        makeDiscoveredProject(
+            rawPath: path,
+            source: .filesystem,
+            excluding: excluding,
+            fm: fm,
+            home: NSHomeDirectory()
+        )
+    }
 
-        let hasGit = fm.fileExists(atPath: (canonical as NSString).appendingPathComponent(".git"))
-        let tools  = detectedTools(at: canonical, fm: fm)
-        guard hasGit || !tools.isEmpty else { return nil }
+    nonisolated static func makeDiscoveredProject(
+        rawPath: String,
+        source: DiscoverySource,
+        excluding: Set<String>,
+        fm: FileManager,
+        home: String = NSHomeDirectory()
+    ) -> DiscoveredProject? {
+        let rawNormalized = normalizedStoredProjectPath(rawPath)
+        guard !isProtectedUserStoragePath(rawNormalized, home: home) else { return nil }
+        guard let canonical = canonicalDiscoveryPath(rawPath, fm: fm) else { return nil }
+        guard !excluding.contains(discoveryDedupKey(canonical)) else { return nil }
+        guard !canonical.contains("/.paperclip/") else { return nil }
+
+        let hasGit = hasGitBoundary(at: canonical, fm: fm)
+        let tools = detectedTools(at: canonical, fm: fm)
         let worktreeInfo = worktreeInfo(at: canonical, fm: fm)
+        let hasCodeMarkers = hasCodeProjectMarkers(at: canonical, fm: fm)
+
+        guard isDiscoverableProjectRoot(
+            canonical,
+            hasGit: hasGit,
+            hasTools: !tools.isEmpty,
+            hasCodeMarkers: hasCodeMarkers,
+            worktreeInfo: worktreeInfo,
+            home: home
+        ) else { return nil }
 
         return DiscoveredProject(
             id:            UUID(),
@@ -408,9 +396,141 @@ final class ProjectStore: ObservableObject {
             displayName:   Project.folderName(at: canonical),
             hasGit:        hasGit,
             detectedTools: tools,
-            sources:       [.filesystem],
+            sources:       [source],
             worktreeInfo:  worktreeInfo
         )
+    }
+
+    nonisolated static func canonicalDiscoveryPath(_ rawPath: String, fm: FileManager) -> String? {
+        let expanded = (rawPath as NSString).expandingTildeInPath
+        let standardized = URL(fileURLWithPath: expanded)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: standardized.path, isDirectory: &isDir) else {
+            return nil
+        }
+        let candidate = isDir.boolValue ? standardized.path : standardized.deletingLastPathComponent().path
+        let canonical = Project.canonicalize(candidate)
+        var canonicalIsDir: ObjCBool = false
+        guard fm.fileExists(atPath: canonical, isDirectory: &canonicalIsDir),
+              canonicalIsDir.boolValue else {
+            return nil
+        }
+        return canonical
+    }
+
+    nonisolated static func discoveryDedupKey(_ path: String) -> String {
+        URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
+            .lowercased()
+    }
+
+    nonisolated static func isDiscoverableProjectRoot(
+        _ path: String,
+        hasGit: Bool,
+        hasTools: Bool,
+        hasCodeMarkers: Bool,
+        worktreeInfo: DiscoveredProject.WorktreeInfo?,
+        home: String = NSHomeDirectory()
+    ) -> Bool {
+        let canonical = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
+        guard !isIgnoredDiscoveryRoot(canonical, home: home) else { return false }
+        if isCodexSessionRoot(canonical, home: home) {
+            return hasGit || hasCodeMarkers || worktreeInfo != nil
+        }
+        if isGenericContainerNamed(canonical) {
+            return hasTools || hasCodeMarkers || worktreeInfo != nil
+        }
+        return hasGit || hasTools || hasCodeMarkers || worktreeInfo != nil
+    }
+
+    nonisolated static func isIgnoredDiscoveryRoot(_ path: String, home: String = NSHomeDirectory()) -> Bool {
+        let canonicalHome = URL(fileURLWithPath: (home as NSString).expandingTildeInPath)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
+        let canonical = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
+
+        let exactIgnored: Set<String> = [
+            "/",
+            canonicalHome,
+            (canonicalHome as NSString).appendingPathComponent("Desktop"),
+            (canonicalHome as NSString).appendingPathComponent("Documents"),
+            (canonicalHome as NSString).appendingPathComponent("Downloads"),
+            (canonicalHome as NSString).appendingPathComponent("Library"),
+            (canonicalHome as NSString).appendingPathComponent(".codex"),
+            (canonicalHome as NSString).appendingPathComponent(".claude"),
+            (canonicalHome as NSString).appendingPathComponent(".agents"),
+            (canonicalHome as NSString).appendingPathComponent(".cursor"),
+            (canonicalHome as NSString).appendingPathComponent("Arel OS"),
+            (canonicalHome as NSString).appendingPathComponent("Arel OS/Projects"),
+            (canonicalHome as NSString).appendingPathComponent("Arel OS/Projects/Active"),
+            (canonicalHome as NSString).appendingPathComponent("Arel OS/Projects/active"),
+            (canonicalHome as NSString).appendingPathComponent("Documents/Codex"),
+            (canonicalHome as NSString).appendingPathComponent("Documents/New project")
+        ]
+        return exactIgnored.contains(canonical)
+    }
+
+    nonisolated private static func isCodexSessionRoot(_ path: String, home: String) -> Bool {
+        let root = URL(fileURLWithPath: (home as NSString).appendingPathComponent("Documents/Codex"))
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
+        return path == root || path.hasPrefix(root + "/")
+    }
+
+    nonisolated private static func isGenericContainerNamed(_ path: String) -> Bool {
+        let name = Project.folderName(at: path).lowercased()
+        return ["active", "code", "coding", "dev", "projects", "repos", "src", "workspace", "workspaces"].contains(name)
+    }
+
+    nonisolated private static func hasGitBoundary(at path: String, fm: FileManager) -> Bool {
+        fm.fileExists(atPath: (path as NSString).appendingPathComponent(".git"))
+    }
+
+    nonisolated static func hasCodeProjectMarkers(at path: String, fm: FileManager) -> Bool {
+        let markerPaths = [
+            "Package.swift",
+            "package.json",
+            "pnpm-lock.yaml",
+            "yarn.lock",
+            "pyproject.toml",
+            "requirements.txt",
+            "Cargo.toml",
+            "go.mod",
+            "pom.xml",
+            "build.gradle",
+            "settings.gradle",
+            "Gemfile",
+            "composer.json",
+            "mix.exs",
+            "deno.json",
+            "tsconfig.json",
+            "vite.config.js",
+            "vite.config.ts",
+            "next.config.js",
+            "next.config.ts",
+            "Sources",
+            "src",
+            "app",
+            "lib",
+            "Tests",
+            "test",
+            "convex"
+        ]
+        return markerPaths.contains {
+            fm.fileExists(atPath: (path as NSString).appendingPathComponent($0))
+        }
     }
 
     nonisolated static func worktreeInfo(at path: String, fm: FileManager) -> DiscoveredProject.WorktreeInfo? {
@@ -534,7 +654,89 @@ final class ProjectStore: ObservableObject {
     private func load() {
         guard let data = UserDefaults.standard.data(forKey: defaultsKey) else { return }
         if let decoded = try? JSONDecoder().decode([Project].self, from: data) {
-            projects = decoded.sorted { $0.lastOpenedAt > $1.lastOpenedAt }
+            let sanitized = ProjectStore.sanitizeSavedProjects(decoded)
+            projects = sanitized.sorted { $0.lastOpenedAt > $1.lastOpenedAt }
+            if sanitized != decoded {
+                persist()
+            }
+        }
+    }
+
+    nonisolated static func sanitizeSavedProjects(_ projects: [Project], home: String = NSHomeDirectory()) -> [Project] {
+        var seen: Set<String> = []
+        var kept: [Project] = []
+
+        for var project in projects {
+            let normalized = normalizedStoredProjectPath(project.path)
+            guard !isStaleSavedProjectPath(normalized, home: home) else { continue }
+
+            let key = normalized.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+
+            project.path = normalized
+            if project.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                project.displayName = Project.folderName(at: normalized)
+            }
+            kept.append(project)
+        }
+
+        return kept
+    }
+
+    nonisolated static func isSafeForBackgroundInspection(_ path: String, home: String = NSHomeDirectory()) -> Bool {
+        let normalized = normalizedStoredProjectPath(path)
+        guard !isStaleSavedProjectPath(normalized, home: home) else { return false }
+        return !isProtectedUserStoragePath(normalized, home: home)
+    }
+
+    nonisolated private static func normalizedStoredProjectPath(_ path: String) -> String {
+        URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            .standardizedFileURL
+            .path
+    }
+
+    nonisolated private static func isStaleSavedProjectPath(_ path: String, home: String) -> Bool {
+        let normalizedHome = normalizedStoredProjectPath(home)
+        let exactIgnored: Set<String> = [
+            "/",
+            normalizedHome,
+            (normalizedHome as NSString).appendingPathComponent("Desktop"),
+            (normalizedHome as NSString).appendingPathComponent("Documents"),
+            (normalizedHome as NSString).appendingPathComponent("Downloads"),
+            (normalizedHome as NSString).appendingPathComponent("Library"),
+            (normalizedHome as NSString).appendingPathComponent(".codex"),
+            (normalizedHome as NSString).appendingPathComponent(".claude"),
+            (normalizedHome as NSString).appendingPathComponent(".agents"),
+            (normalizedHome as NSString).appendingPathComponent(".cursor"),
+            (normalizedHome as NSString).appendingPathComponent("Arel OS"),
+            (normalizedHome as NSString).appendingPathComponent("Arel OS/Projects"),
+            (normalizedHome as NSString).appendingPathComponent("Arel OS/Projects/Active"),
+            (normalizedHome as NSString).appendingPathComponent("Arel OS/Projects/active"),
+            (normalizedHome as NSString).appendingPathComponent("Documents/Codex"),
+            (normalizedHome as NSString).appendingPathComponent("Documents/New project")
+        ]
+        if exactIgnored.contains(path) { return true }
+
+        let parent = (path as NSString).deletingLastPathComponent
+        let topLevelContainerParents: Set<String> = [
+            normalizedHome,
+            (normalizedHome as NSString).appendingPathComponent("Desktop"),
+            (normalizedHome as NSString).appendingPathComponent("Documents"),
+            (normalizedHome as NSString).appendingPathComponent("Downloads")
+        ]
+        return topLevelContainerParents.contains(parent) && isGenericContainerNamed(path)
+    }
+
+    nonisolated private static func isProtectedUserStoragePath(_ path: String, home: String) -> Bool {
+        let normalizedHome = normalizedStoredProjectPath(home)
+        let protectedRoots = [
+            (normalizedHome as NSString).appendingPathComponent("Desktop"),
+            (normalizedHome as NSString).appendingPathComponent("Documents"),
+            (normalizedHome as NSString).appendingPathComponent("Downloads")
+        ]
+        return protectedRoots.contains { root in
+            path == root || path.hasPrefix(root + "/")
         }
     }
 }

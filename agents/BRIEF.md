@@ -39,3 +39,11 @@ Known drift remains to reconcile in canon: the recovered branch includes live MC
 Project discovery now treats Git worktrees as related metadata rather than normal projects: worktrees remain inspectable from a collapsed Projects-tab disclosure, but they do not pollute the primary project or discovered-project lists.
 
 Skills and Compatibility views should not run broad filesystem scans from SwiftUI rendering or tab-change events. Global skill install counts are cached through a background store refresh, and Compatibility scans are explicit, single-flight user actions.
+
+---
+
+## v1.4 — 2026-06-18 21:38 · Codex
+
+Project discovery now requires an existing coding-project root with direct evidence before surfacing a folder from Claude/Codex history or filesystem roots. Tool homes, broad workspace folders, transient Codex session folders, top-level generic storage folders, protected Desktop/Documents/Downloads paths, and case-variant duplicates are rejected or sanitized out of saved state.
+
+Background refresh paths must not trigger macOS protected-storage prompts. Skills global install counts skip protected storage and stale false-positive projects; explicit user-added protected projects can still be inspected through direct project actions.

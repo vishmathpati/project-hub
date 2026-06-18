@@ -8,7 +8,7 @@
 - Reads: `~/.claude.json`, `~/.codex/state_*.sqlite`, `~/.codex/config.toml`, filesystem roots
 - Data: persisted `Project` rows, ephemeral discovered projects, ephemeral hidden worktrees
 - Shared with: project rows, hidden worktree disclosure, project detail tabs, copy-to-project MCP sheet
-- Guard: Git worktrees should be detected as related metadata but hidden from the primary project/discovered lists unless the user explicitly opens the worktree disclosure.
+- Guard: Auto-discovery only admits existing folders with project evidence; ignore tool homes, transcript/session folders, workspace containers, and protected Desktop/Documents/Downloads paths unless the user explicitly adds them. Git worktrees should be detected as related metadata but hidden from the primary project/discovered lists unless the user explicitly opens the worktree disclosure.
 
 ### MCP Management
 
@@ -22,6 +22,7 @@
 - Owner: `Sources/ProjectHub/Core/SkillReader.swift`, `Sources/ProjectHub/Stores/SkillStore.swift`
 - UI: `Sources/ProjectHub/Views/SkillsView.swift`, `Sources/ProjectHub/Views/SkillEditorSheet.swift`, `Sources/ProjectHub/Views/SettingsView.swift`
 - Shared with: global skills tab and project skills tab
+- Guard: global install-count refresh is a background aggregate; skip protected user-storage paths and stale saved false positives so opening Skills never triggers Desktop/Documents/Downloads permission prompts.
 
 ### Claude Agents
 

@@ -120,6 +120,44 @@ final class SkillInventoryReaderTests: XCTestCase {
         XCTAssertNil(counts["local-only"])
     }
 
+    func testGlobalSkillInstallCountRefreshSkipsProtectedStorageProjects() throws {
+        let home = try makeTempProject()
+        let globalSkills = [
+            Skill(name: "deploy", description: "", triggers: [], source: .claudeGlobal, path: "/global/deploy")
+        ]
+        let projects = [
+            Project(
+                id: UUID(),
+                path: home.appendingPathComponent("Desktop/projecthub", isDirectory: true).path,
+                displayName: "projecthub desktop",
+                addedAt: Date(),
+                lastOpenedAt: Date()
+            ),
+            Project(
+                id: UUID(),
+                path: home.appendingPathComponent("Arel OS/Projects/Active/projecthub", isDirectory: true).path,
+                displayName: "projecthub",
+                addedAt: Date(),
+                lastOpenedAt: Date()
+            )
+        ]
+        var scannedPaths: [String] = []
+
+        let counts = SkillStore.installedProjectCounts(
+            globalSkills: globalSkills,
+            projects: projects,
+            home: home.path
+        ) { path in
+            scannedPaths.append(path)
+            return [
+                installedSkill(name: "deploy", path: "\(path)/.claude/skills/deploy")
+            ]
+        }
+
+        XCTAssertEqual(scannedPaths, [projects[1].path])
+        XCTAssertEqual(counts["deploy"], 1)
+    }
+
     func testInventoryCarriesDuplicateAndVersionDiagnostics() throws {
         let root = try makeTempProject()
         let app = root.appendingPathComponent("packages/app", isDirectory: true)

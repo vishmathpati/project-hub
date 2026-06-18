@@ -139,13 +139,14 @@ final class SkillStore: ObservableObject {
     nonisolated static func installedProjectCounts(
         globalSkills: [Skill],
         projects: [Project],
+        home: String = NSHomeDirectory(),
         installedSkillsProvider: (String) -> [InstalledSkill]
     ) -> [String: Int] {
         let globalSkillNames = Set(globalSkills.map(\.name))
         guard !globalSkillNames.isEmpty else { return [:] }
 
         var counts: [String: Int] = [:]
-        for project in projects {
+        for project in projects where ProjectStore.isSafeForBackgroundInspection(project.path, home: home) {
             let installedNames = Set(installedSkillsProvider(project.path).map(\.name))
             for name in installedNames where globalSkillNames.contains(name) {
                 counts[name, default: 0] += 1

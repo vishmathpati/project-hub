@@ -7,6 +7,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [2026-06-18] · Codex
 
+### Changed
+- Tightened project discovery so auto-discovery only accepts existing coding-project roots with evidence, skips protected Desktop/Documents/Downloads paths unless explicitly added, hides worktrees outside the primary list, and de-dupes case variants such as `active` vs `Active`.
+- Added saved-project sanitation on load so old false positives like tool homes, workspace containers, and top-level generic storage folders are removed from persisted Project Hub state.
+- Guarded global Skills install-count refresh so opening the Skills tab does not background-walk protected storage folders.
+
+### Fixed
+- Fixed false discovered rows such as `~/.codex`, broad `Active` workspace roots, Codex transcript/session folders, and generic non-project folders.
+- Fixed the Project Hub Desktop permission prompt path by avoiding protected-storage probes during background discovery and Skills aggregate refresh.
+
+## [2026-06-18] · Codex
+
 ### Added
 - Added hidden Git worktree handling in project discovery, including collapsed Projects-tab access to related worktrees without showing them as normal projects.
 
