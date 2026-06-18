@@ -14,9 +14,9 @@
 
 | View | What it shows | Features |
 |------|--------------|---------|
-| Dashboard window | Primary full desktop app window | Default launch/reopen/menu-bar-left-click surface, resizable, macOS full-screen capable |
+| Dashboard window | Primary full desktop app window | Default launch/reopen/menu-bar-left-click surface, sidebar navigation, toolbar summary/actions, resizable, macOS full-screen capable |
 | Popover (480×680) | Compact menu bar panel, 5 tabs | Secondary quick-access surface |
-| Projects tab | Tracked + auto-discovered project folders, with worktrees collapsed separately | Add, scan, rename, remove, open in Finder, drill in, inspect hidden worktrees |
+| Projects tab | Desktop split workspace for tracked + auto-discovered project folders, with compact stacked layout in the popover | Add, scan, rename, remove, open in Finder, drill in, inspect hidden worktrees |
 | Skills tab (global) | All skills across Claude/Codex/Cursor global dirs | Browse library, see per-project install counts without background-walking protected storage folders |
 | MCP tab (global) | All MCP servers across all 12 AI tools | Search, import, edit, copy between tools, enable/disable |
 | Compat tab | MCP/plugins/skills/settings/auth/project compatibility diagnostics | Explicit single-flight scan, plugin inventory, filters, MCP verify, safe-fix previews |
@@ -106,13 +106,13 @@ Saved project rows are sanitized on load so old false positives such as tool hom
 
 ```
 desktop-app-shell:
-  flow: ProjectHubApp/AppDelegate -> DashboardWindow -> ContentView; status item remains as companion control
+  flow: ProjectHubApp/AppDelegate -> DashboardWindow -> ContentView desktop shell (sidebar + toolbar + feature content); status item remains as companion control
   data: shared ProjectStore, SkillStore, AgentStore, MCPStore instances injected into both desktop window and compact popover
-  guards: default launch, Dock reopen, and menu-bar left click open the desktop window; compact popover remains explicit and secondary
+  guards: default launch, Dock reopen, and menu-bar left click open the desktop window; compact popover remains explicit and secondary; desktop layout must not inherit the compact popover tab-strip as its primary navigation
   shared with: every top-level tab rendered by ContentView
 
 projects-tab:
-  flow: ProjectsView → ProjectStore.scan() → [~/.claude.json, Codex SQLite, Codex config, filesystem walk]
+  flow: ProjectsView compact/desktop presentation → ProjectStore.scan() → [~/.claude.json, Codex SQLite, Codex config, filesystem walk]
   data: Project (UserDefaults), DiscoveredProject (ephemeral), hiddenWorktrees (ephemeral)
   guards: requires home dir access; Codex SQLite may not exist; only existing folders with project evidence qualify; ignore tool homes, transcript/session folders, and workspace containers; Git worktrees must stay out of the primary project/discovered lists and appear only in the collapsed worktree section
 

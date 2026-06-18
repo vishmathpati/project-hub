@@ -79,3 +79,11 @@ All roadmap features through v0.5 are live in source code:
 Project Hub should be a full desktop app by default, not a menu-bar-only utility. The existing dashboard window becomes the primary launch/reopen/menu-bar-left-click surface, while the 480×680 popover remains available as a compact menu-bar panel for quick use.
 
 Rejected keeping the app menu-bar-first because the product now has too many operational surfaces for a constrained popover: project discovery, Skills, MCP, Compatibility, Settings, and Live Mode.
+
+---
+
+## v1.2 — 2026-06-19 00:17 · Codex
+
+The full desktop window should not reuse compact menu-bar layout language. The desktop path now uses sidebar navigation, toolbar summaries/actions, a split Projects workspace, and desktop project-detail navigation, while the compact popover remains intentionally compact.
+
+Rejected expanding product scope during the visual redesign. This change keeps the same stores and feature views and only changes presentation/layout for the desktop surface.

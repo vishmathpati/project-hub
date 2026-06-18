@@ -4,8 +4,14 @@ import AppKit
 // MARK: - Project detail: Claude/Codex sub-tabs across compact rows
 
 struct ProjectDetailView: View {
+    enum Presentation {
+        case compact
+        case desktop
+    }
+
     let project: Project
     let onBack: () -> Void
+    let presentation: Presentation
 
     @EnvironmentObject var projectStore: ProjectStore
     @EnvironmentObject var skillStore:   SkillStore
@@ -14,13 +20,19 @@ struct ProjectDetailView: View {
     @State private var reloadTick: Int = 0
     @State private var showCopySheet: Bool = false
 
+    init(project: Project, onBack: @escaping () -> Void, presentation: Presentation = .compact) {
+        self.project = project
+        self.onBack = onBack
+        self.presentation = presentation
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            subTabBar
-            Divider()
-            content
+        Group {
+            if presentation == .desktop {
+                desktopBody
+            } else {
+                compactBody
+            }
         }
         .sheet(isPresented: $showCopySheet) {
             CopyProfileSheet(
@@ -28,6 +40,30 @@ struct ProjectDetailView: View {
                 allProjects: projectStore.projects
             ) {
                 reloadTick &+= 1
+            }
+        }
+    }
+
+    private var compactBody: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            subTabBar
+            Divider()
+            content
+        }
+    }
+
+    private var desktopBody: some View {
+        VStack(spacing: 0) {
+            desktopHeader
+            Divider()
+            HStack(spacing: 0) {
+                desktopSubTabSidebar
+                Divider()
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(NSColor.windowBackgroundColor))
             }
         }
     }
@@ -103,6 +139,88 @@ struct ProjectDetailView: View {
         .padding(.vertical, 10)
     }
 
+    private var desktopHeader: some View {
+        HStack(spacing: 12) {
+            Button(action: onBack) {
+                Label("Projects", systemImage: "chevron.left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color(NSColor.separatorColor).opacity(0.45), lineWidth: 0.5)
+                    )
+            }
+            .buttonStyle(.plain)
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.accentColor.opacity(0.12))
+                    .frame(width: 38, height: 38)
+                Image(systemName: project.exists ? "folder.fill" : "folder.badge.questionmark")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(project.exists ? .accentColor : .secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(project.displayName)
+                    .font(.system(size: 20, weight: .semibold))
+                    .lineLimit(1)
+                Text(shortPath(project.path))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer(minLength: 16)
+
+            Button {
+                showCopySheet = true
+            } label: {
+                Label("Copy from", systemImage: "arrow.down.doc")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color(NSColor.separatorColor).opacity(0.45), lineWidth: 0.5)
+                    )
+            }
+            .buttonStyle(.plain)
+            .help("Copy Claude/Codex skills, agents, and MCP servers from another project")
+
+            Button {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: project.path)])
+            } label: {
+                Image(systemName: "arrow.up.right.square")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .help("Open in Finder")
+
+            Button { reloadTick &+= 1 } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .help("Refresh")
+        }
+        .padding(.horizontal, 22)
+        .padding(.vertical, 16)
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+
     // MARK: - Sub-tab bar (two rows of three)
 
     private var subTabBar: some View {
@@ -145,6 +263,71 @@ struct ProjectDetailView: View {
             .clipShape(RoundedRectangle(cornerRadius: 7))
             .overlay(RoundedRectangle(cornerRadius: 7)
                 .stroke(active ? Color.clear : Color(NSColor.separatorColor).opacity(0.5), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var desktopSubTabSidebar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Project")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 4)
+
+            ForEach(projectSections, id: \.tag) { item in
+                desktopSubTabButton(title: item.title, icon: item.icon, tag: item.tag)
+            }
+
+            Spacer()
+        }
+        .padding(14)
+        .frame(width: 190)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.38))
+    }
+
+    private var projectSections: [(title: String, icon: String, tag: Int)] {
+        [
+            ("Health", "stethoscope", 0),
+            ("Skills", "book.closed.fill", 1),
+            ("Agents", "person.fill.viewfinder", 2),
+            ("MCP", "server.rack", 3),
+            ("Hooks", "bolt.fill", 4),
+            ("CLAUDE.md", "doc.text.fill", 5),
+        ]
+    }
+
+    private func desktopSubTabButton(title: String, icon: String, tag: Int) -> some View {
+        let active = subTab == tag
+        return Button(action: {
+            withAnimation(.easeOut(duration: 0.16)) {
+                subTab = tag
+            }
+        }) {
+            HStack(spacing: 9) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(active ? .accentColor : .secondary)
+                    .frame(width: 20)
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.primary)
+                Spacer()
+                if active {
+                    Circle()
+                        .fill(Color.accentColor)
+                        .frame(width: 5, height: 5)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+            .background(active ? Color.accentColor.opacity(0.10) : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(active ? Color.accentColor.opacity(0.22) : Color.clear, lineWidth: 0.5)
+            )
         }
         .buttonStyle(.plain)
     }

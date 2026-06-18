@@ -63,3 +63,11 @@ Rejected installer automation for this slice. Project Hub reports plugin state a
 Project Hub is now desktop-first because the product has grown beyond the original MCP-focused menu-bar panel. Launch, Dock reopen, and menu-bar left click should open the full desktop dashboard. The menu bar item stays as a companion for quick actions and explicit compact-panel access.
 
 Rejected keeping the popover as the primary surface; the Compatibility, Skills, MCP, Projects, and Settings workflows need the full desktop window as the default.
+
+---
+
+## v1.7 — 2026-06-19 00:17 · Codex
+
+Desktop-first also means the full window must use desktop app layout language, not the compact popover's horizontal tab strip stretched across a large window. The primary `ContentView` desktop path now uses sidebar navigation, toolbar summaries/actions, a split Projects workspace, and a desktop project-detail rail, while the compact popover keeps its original constrained layout.
+
+Rejected adding new product scope during the redesign. The change is visual/layout only: same stores, same feature views, same menu-bar companion, no cloud/chat/launcher expansion.

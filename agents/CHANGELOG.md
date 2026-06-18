@@ -5,6 +5,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [Unreleased]
 
+## [2026-06-19] · Codex
+
+### Changed
+- Redesigned the primary desktop window from a stretched compact panel into a desktop app shell with sidebar navigation, toolbar summaries/actions, a split Projects workspace, and a desktop project-detail rail.
+- Preserved the 480×680 compact popover as the secondary menu-bar panel while keeping the new desktop layout as the full-window default.
+
+### Fixed
+- Built, installed, codesigned, and visually verified the redesigned `/Applications/ProjectHub.app`; full `swift test` passed with 583 tests and `git diff --check` passed.
+
 ## [2026-06-18] · Codex
 
 ### Added

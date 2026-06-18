@@ -4,20 +4,35 @@ import AppKit
 // MARK: - Projects tab: list + drill-in
 
 struct ProjectsView: View {
+    enum Presentation {
+        case compact
+        case desktop
+    }
+
+    let presentation: Presentation
     @EnvironmentObject var projects: ProjectStore
     @State private var selection: Project? = nil
     @State private var renamingID: UUID? = nil
     @State private var draftName: String = ""
     @State private var showWorktrees: Bool = false
 
+    init(presentation: Presentation = .compact) {
+        self.presentation = presentation
+    }
+
     var body: some View {
         if let project = selection {
             ProjectDetailView(
                 project: project,
-                onBack: { withAnimation { selection = nil } }
+                onBack: { withAnimation { selection = nil } },
+                presentation: presentation == .desktop ? .desktop : .compact
             )
         } else {
-            landing
+            if presentation == .desktop {
+                desktopLanding
+            } else {
+                landing
+            }
         }
     }
 
@@ -113,6 +128,274 @@ struct ProjectsView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
         }
+    }
+
+    // MARK: - Desktop landing
+
+    private var desktopLanding: some View {
+        let hasAny = !projects.projects.isEmpty || !projects.discovered.isEmpty
+        return Group {
+            if !hasAny && projects.isScanning {
+                scanningState
+            } else if !hasAny {
+                desktopEmptyState
+            } else {
+                desktopWorkspace
+            }
+        }
+    }
+
+    private var desktopWorkspace: some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                desktopListHeader
+                Divider()
+                desktopList
+            }
+            .frame(minWidth: 360, idealWidth: 430, maxWidth: 520)
+
+            Divider()
+
+            desktopInspector
+        }
+    }
+
+    private var desktopListHeader: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Project folders")
+                    .font(.system(size: 13, weight: .semibold))
+                Text(projectListSummary)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Button(action: { projects.scan() }) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(projects.isScanning ? .accentColor : .secondary)
+                    .frame(width: 26, height: 26)
+            }
+            .buttonStyle(.plain)
+            .disabled(projects.isScanning)
+            .help("Re-scan for projects")
+
+            Button(action: addFolder) {
+                Label("Add", systemImage: "plus")
+                    .font(.system(size: 12, weight: .semibold))
+                    .labelStyle(.titleAndIcon)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.accentColor.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
+            }
+            .buttonStyle(.plain)
+            .help("Add a project folder")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    private var desktopList: some View {
+        ScrollView {
+            VStack(spacing: 8) {
+                ForEach(projects.projects) { project in
+                    projectRow(for: project)
+                }
+                if !projects.discovered.isEmpty {
+                    discoveredSectionHeader
+                    ForEach(projects.discovered) { disc in
+                        discoveredRow(for: disc)
+                    }
+                }
+                if !projects.hiddenWorktrees.isEmpty {
+                    worktreesDisclosure
+                    if showWorktrees {
+                        ForEach(projects.hiddenWorktrees) { disc in
+                            worktreeRow(for: disc)
+                        }
+                    }
+                }
+            }
+            .padding(14)
+        }
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    private var desktopInspector: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                overviewPanel
+                sourcePanel
+                if !projects.hiddenWorktrees.isEmpty {
+                    worktreePanel
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.25))
+    }
+
+    private var overviewPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Overview")
+                    .font(.system(size: 16, weight: .semibold))
+                Spacer()
+                if projects.isScanning {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                metricTile(title: "Tracked", value: "\(projects.projects.count)", icon: "folder.fill", color: .accentColor)
+                metricTile(title: "Discovered", value: "\(projects.discovered.count)", icon: "magnifyingglass", color: .secondary)
+                metricTile(title: "Hidden", value: "\(projects.hiddenWorktrees.count)", icon: "arrow.triangle.branch", color: .secondary)
+                metricTile(title: "Total", value: "\(projects.projects.count + projects.discovered.count)", icon: "tray.full", color: .primary)
+            }
+        }
+        .padding(14)
+        .background(Color(NSColor.windowBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(NSColor.separatorColor).opacity(0.35), lineWidth: 0.5)
+        )
+    }
+
+    private var sourcePanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Discovery sources")
+                .font(.system(size: 13, weight: .semibold))
+            VStack(spacing: 8) {
+                sourceSummaryRow(title: "Claude Code", count: discoveryCount(for: .claudeCode), icon: "terminal.fill", color: .orange)
+                sourceSummaryRow(title: "Codex", count: discoveryCount(for: .codexCLI), icon: "sparkles", color: .purple)
+                sourceSummaryRow(title: "Filesystem", count: discoveryCount(for: .filesystem), icon: "externaldrive", color: .secondary)
+            }
+        }
+        .padding(14)
+        .background(Color(NSColor.windowBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(NSColor.separatorColor).opacity(0.35), lineWidth: 0.5)
+        )
+    }
+
+    private var worktreePanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Worktrees")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Button(showWorktrees ? "Hide" : "Show") {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        showWorktrees.toggle()
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+            }
+            Text("\(projects.hiddenWorktrees.count) related worktree\(projects.hiddenWorktrees.count == 1 ? "" : "s") kept out of the primary list.")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .background(Color(NSColor.windowBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(NSColor.separatorColor).opacity(0.35), lineWidth: 0.5)
+        )
+    }
+
+    private var desktopEmptyState: some View {
+        VStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.accentColor.opacity(0.12))
+                    .frame(width: 68, height: 68)
+                Image(systemName: "folder.fill.badge.plus")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundColor(.accentColor)
+            }
+            Text("No projects yet")
+                .font(.system(size: 18, weight: .semibold))
+            Text("Add a folder to start managing its local AI tool configuration.")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+            Button(action: addFolder) {
+                Label("Add project folder", systemImage: "plus.circle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color.accentColor.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(32)
+    }
+
+    private var projectListSummary: String {
+        let total = projects.projects.count + projects.discovered.count
+        let hidden = projects.hiddenWorktrees.count
+        if hidden == 0 {
+            return "\(total) project\(total == 1 ? "" : "s")"
+        }
+        return "\(total) project\(total == 1 ? "" : "s") · \(hidden) worktree\(hidden == 1 ? "" : "s") hidden"
+    }
+
+    private func metricTile(title: String, value: String, icon: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(color)
+                Spacer()
+            }
+            Text(value)
+                .font(.system(size: 22, weight: .semibold))
+            Text(title)
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(NSColor.controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color(NSColor.separatorColor).opacity(0.25), lineWidth: 0.5)
+        )
+    }
+
+    private func sourceSummaryRow(title: String, count: Int, icon: String, color: Color) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(color)
+                .frame(width: 18)
+            Text(title)
+                .font(.system(size: 12))
+            Spacer()
+            Text("\(count)")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private func discoveryCount(for source: DiscoverySource) -> Int {
+        projects.discovered.filter { $0.orderedSources.contains(source) }.count
     }
 
     // MARK: - Discovered section header

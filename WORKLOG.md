@@ -38,3 +38,8 @@
 [22:29] decided: Project Hub is now desktop-first with a menu bar companion because the product has outgrown the original compact popover.
 [22:29] fixed: Launch, Dock reopen, and menu-bar left click now open the full dashboard window; compact popover remains explicit from the status menu — App.swift, DashboardWindow.swift, ContentView.swift, build-app.sh.
 [22:29] fixed: Status-menu Quit now targets NSApp while other menu actions target the app delegate — App.swift.
+[23:56] decided: Treat the requested redesign as a UI change to the existing desktop app shell; reuse ContentView/top-level feature views, avoid new product scope, and focus on desktop-window layout language.
+[00:03] fixed: Redesigned the desktop app shell with sidebar navigation, toolbar summaries, split Projects workspace, desktop project-detail rail, and centered desktop window sizing; compact popover layout remains intact.
+[00:03] fixed: Verified the redesign compiles with `swift build`; pre-existing Live Mode/ClaudeMdView warnings remain.
+[00:08] fixed: Built release ProjectHub.app from this checkout, installed it to /Applications, verified code signing, confirmed only one ProjectHub app bundle in /Applications, and visually captured the installed desktop layout.
+[00:16] fixed: Full regression gate passed with `swift test` (583 tests, 0 failures) and `git diff --check`.

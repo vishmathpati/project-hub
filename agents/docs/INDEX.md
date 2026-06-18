@@ -5,13 +5,13 @@
 ### Desktop App Shell
 
 - Owner: `Sources/ProjectHub/App.swift`, `Sources/ProjectHub/DashboardWindow.swift`, `Sources/ProjectHub/Views/ContentView.swift`
-- Flow: launch / Dock reopen / menu-bar left click -> `DashboardWindow.open(...)` -> shared `ContentView`
+- Flow: launch / Dock reopen / menu-bar left click -> `DashboardWindow.open(...)` -> `ContentView` desktop shell with sidebar navigation, toolbar summary/actions, and shared feature content
 - Shared with: every top-level tab, compact popover, menu bar status item
-- Guard: full desktop dashboard is the default surface; menu bar stays as a companion and compact popover access must be explicit.
+- Guard: full desktop dashboard is the default surface; menu bar stays as a companion and compact popover access must be explicit. The full window should use desktop navigation/layout patterns, not the compact popover tab strip.
 
 ### Project Discovery
 
-- Owner: `Sources/ProjectHub/Stores/ProjectStore.swift`
+- Owner: `Sources/ProjectHub/Stores/ProjectStore.swift`, `Sources/ProjectHub/Views/ProjectsView.swift`
 - Reads: `~/.claude.json`, `~/.codex/state_*.sqlite`, `~/.codex/config.toml`, filesystem roots
 - Data: persisted `Project` rows, ephemeral discovered projects, ephemeral hidden worktrees
 - Shared with: project rows, hidden worktree disclosure, project detail tabs, copy-to-project MCP sheet
