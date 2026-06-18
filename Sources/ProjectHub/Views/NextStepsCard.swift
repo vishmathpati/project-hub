@@ -13,7 +13,7 @@ import AppKit
 struct NextStepsCard: View {
     let serverName: String
     let installedTools: [InstalledTool]   // (toolID, toolLabel, configPath)
-    let envHints: [String]                // env keys pulled from the imported config
+    let credentialRequirements: [ImportCredentialRequirement]
     let refresh: () -> Void
 
     struct InstalledTool: Identifiable, Hashable {
@@ -21,6 +21,8 @@ struct NextStepsCard: View {
         let toolID: String
         let toolLabel: String
         let path: String
+        let scope: ConfigScope
+        let projectRoot: String?
     }
 
     enum Mode { case collapsed, openFile, showSteps, pasteKey }
@@ -97,12 +99,35 @@ struct NextStepsCard: View {
                     target: .showSteps
                 )
                 optionButton(
-                    title: envHints.isEmpty ? "Add key" : "Add key\(envHints.count > 1 ? "s" : "")",
+                    title: canPasteKeys ? (credentialInputNames.isEmpty ? "Add value" : "Add value\(credentialInputNames.count > 1 ? "s" : "")") : "Open project config",
                     icon: "key.fill",
-                    target: .pasteKey
+                    target: canPasteKeys ? .pasteKey : .openFile
                 )
             }
         }
+    }
+
+    private var canPasteKeys: Bool {
+        !installedTools.contains { $0.scope == .project }
+    }
+
+    private var credentialPromptItems: [ImportCredentialPromptItem] {
+        ImportCredentialPlanner.promptItems(for: credentialRequirements)
+    }
+
+    private var credentialInputNames: [String] {
+        var seen = Set<String>()
+        var names: [String] = []
+        for item in credentialPromptItems where seen.insert(item.inputName).inserted {
+            names.append(item.inputName)
+        }
+        return names
+    }
+
+    private var credentialPromptSummary: String {
+        credentialPromptItems.map { item in
+            "\(item.inputName) (\(item.detail.lowercased()))"
+        }.joined(separator: ", ")
     }
 
     private func optionButton(title: String, icon: String, target: Mode) -> some View {
@@ -118,7 +143,7 @@ struct NextStepsCard: View {
                         selectedTool = installedTools.first?.toolID ?? ""
                     }
                     if target == .pasteKey, envValues.isEmpty {
-                        for k in envHints { envValues[k] = "" }
+                        for k in credentialInputNames { envValues[k] = "" }
                     }
                     saveStatus = .idle
                 }
@@ -228,16 +253,16 @@ struct NextStepsCard: View {
 
     private var showStepsView: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("How to add an API key or token")
+            Text("How to finish credentials")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(.secondary)
 
             stepRow(n: 1, text: "Quit the app you're adding the key to.")
             stepRow(n: 2, text: "Open the config file (pick one above, or use \"Open config\").")
             stepRow(n: 3, text: "Find the \"\(serverName)\" block.")
-            stepRow(n: 4, text: envHints.isEmpty
-                    ? "Add or edit the \"env\" section with your key(s)."
-                    : "Fill in \"env\" values: \(envHints.joined(separator: ", ")).")
+            stepRow(n: 4, text: credentialInputNames.isEmpty
+                    ? "Add credential values if this server needs them."
+                    : "Fill these placeholders: \(credentialPromptSummary).")
             stepRow(n: 5, text: "Save the file, then relaunch the app.")
 
             Text("Tip: if the server uses OAuth (Supabase, Linear, etc.) you don't need a key — the app will open a login page on first use.")
@@ -265,19 +290,27 @@ struct NextStepsCard: View {
 
     private var pasteKeyView: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if envHints.isEmpty {
-                // No env hints from the imported config
+            if !canPasteKeys {
                 HStack(spacing: 6) {
                     Image(systemName: "info.circle")
                         .foregroundColor(.secondary)
-                    Text("No env variables in this server. If you need to add one, use \"Open config\".")
+                    Text("Project-scope imports stay manual so secrets are not written into a repo config from this sheet.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.vertical, 4)
+            } else if credentialInputNames.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "info.circle")
+                        .foregroundColor(.secondary)
+                    Text("No credential placeholders were found. If you need to add one, use \"Open config\".")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
                 }
                 .padding(.vertical, 4)
             } else {
                 HStack {
-                    Text("Paste your key\(envHints.count > 1 ? "s" : "")")
+                    Text("Paste credential value\(credentialInputNames.count > 1 ? "s" : "")")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(.secondary)
                     Spacer()
@@ -292,8 +325,8 @@ struct NextStepsCard: View {
                     .buttonStyle(.plain)
                 }
 
-                ForEach(envHints, id: \.self) { key in
-                    envField(for: key)
+                ForEach(credentialPromptItems) { item in
+                    envField(for: item)
                 }
 
                 // Trust disclosure
@@ -354,10 +387,14 @@ struct NextStepsCard: View {
         envValues.values.contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
     }
 
-    private func envField(for key: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+    private func envField(for item: ImportCredentialPromptItem) -> some View {
+        let key = item.inputName
+        return VStack(alignment: .leading, spacing: 3) {
             Text(key)
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundColor(.secondary)
+            Text(item.detail)
+                .font(.system(size: 9))
                 .foregroundColor(.secondary)
 
             Group {
@@ -414,6 +451,10 @@ struct NextStepsCard: View {
     }
 
     private func saveKeys() {
+        guard canPasteKeys else {
+            saveStatus = .failed("Open the project config to add credentials")
+            return
+        }
         saveStatus = .saving
         // Strip empty / whitespace-only values — those mean "don't set"
         let toWrite = envValues.reduce(into: [String: String]()) { acc, kv in
@@ -422,9 +463,10 @@ struct NextStepsCard: View {
         }
 
         Task { @MainActor in
-            let result = mcpStore.updateServerEnv(
+            let result = mcpStore.updateServerCredentials(
                 name: serverName,
-                env: toWrite,
+                values: toWrite,
+                requirements: credentialRequirements,
                 across: installedTools.map { $0.toolID }
             )
             if result.failures.isEmpty {

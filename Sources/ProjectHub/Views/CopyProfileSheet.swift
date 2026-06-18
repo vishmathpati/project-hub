@@ -14,7 +14,6 @@ struct CopyProfileSheet: View {
     @State private var selectedSourceID: UUID? = nil
     @State private var copySkills: Bool = true
     @State private var copyAgents: Bool = true
-    @State private var copyRules: Bool = true
     @State private var copyMCP: Bool = false
     @State private var isRunning: Bool = false
     @State private var result: CopyResult? = nil
@@ -30,13 +29,13 @@ struct CopyProfileSheet: View {
         return sourceCandidates.first { $0.id == id }
     }
 
-    private var preview: (skills: Int, agents: Int, rules: Int, mcp: Int) {
-        guard let src = selectedSource else { return (0, 0, 0, 0) }
+    private var preview: (skills: Int, agents: Int, mcp: Int) {
+        guard let src = selectedSource else { return (0, 0, 0) }
         return ProfileCopier.preview(from: src.path)
     }
 
     private var nothingSelected: Bool {
-        !copySkills && !copyAgents && !copyRules && !copyMCP
+        !copySkills && !copyAgents && !copyMCP
     }
 
     // MARK: - Body
@@ -135,7 +134,6 @@ struct CopyProfileSheet: View {
             HStack(spacing: 8) {
                 previewChip(count: p.skills, label: "skill\(p.skills == 1 ? "" : "s")",       icon: "book.closed.fill",      color: .cyan)
                 previewChip(count: p.agents, label: "agent\(p.agents == 1 ? "" : "s")",       icon: "person.fill",           color: .indigo)
-                previewChip(count: p.rules,  label: "rule\(p.rules == 1 ? "" : "s")",         icon: "pencil.and.ruler.fill",  color: .orange)
                 previewChip(count: p.mcp,    label: "MCP server\(p.mcp == 1 ? "" : "s")",    icon: "server.rack",            color: .green)
             }
         }
@@ -169,7 +167,7 @@ struct CopyProfileSheet: View {
                     icon: "book.closed.fill",
                     color: .cyan,
                     title: "Skills",
-                    subtitle: ".claude/skills and .agents/skills"
+                    subtitle: "Writable Claude/Codex project skill origins"
                 )
                 Divider().padding(.leading, 36)
 
@@ -179,15 +177,6 @@ struct CopyProfileSheet: View {
                     color: .indigo,
                     title: "Agents",
                     subtitle: ".claude/agents/*.md files"
-                )
-                Divider().padding(.leading, 36)
-
-                toggleRow(
-                    isOn: $copyRules,
-                    icon: "pencil.and.ruler.fill",
-                    color: .orange,
-                    title: "Cursor Rules",
-                    subtitle: ".cursor/rules/*.mdc files"
                 )
                 Divider().padding(.leading, 36)
 
@@ -243,7 +232,7 @@ struct CopyProfileSheet: View {
                         .font(.system(size: 10))
                         .foregroundColor(.yellow)
                 }
-                Text("Includes API keys — .mcp.json, .cursor/mcp.json, .codex/config.toml")
+                Text("Includes API keys — .mcp.json and .codex/config.toml")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
@@ -302,7 +291,6 @@ struct CopyProfileSheet: View {
         var parts: [String] = []
         if r.skillsCopied > 0 { parts.append("\(r.skillsCopied) skill\(r.skillsCopied == 1 ? "" : "s")") }
         if r.agentsCopied > 0 { parts.append("\(r.agentsCopied) agent\(r.agentsCopied == 1 ? "" : "s")") }
-        if r.rulesCopied  > 0 { parts.append("\(r.rulesCopied) rule\(r.rulesCopied == 1 ? "" : "s")") }
         if r.mcpCopied    > 0 { parts.append("\(r.mcpCopied) MCP server\(r.mcpCopied == 1 ? "" : "s")") }
         return parts
     }
@@ -369,7 +357,6 @@ struct CopyProfileSheet: View {
         let options = CopyOptions(
             skills:      copySkills,
             agents:      copyAgents,
-            cursorRules: copyRules,
             mcpServers:  copyMCP
         )
 

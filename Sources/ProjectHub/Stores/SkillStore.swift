@@ -14,72 +14,25 @@ final class SkillStore: ObservableObject {
     func refresh() {
         guard !isRefreshing else { return }
         isRefreshing = true
-        Task.detached(priority: .utility) { [weak self] in
-            let skills = SkillStore.scanGlobalSkills()
-            await MainActor.run {
-                self?.globalSkills = skills
-                self?.isRefreshing = false
-            }
+        Task { [weak self] in
+            let skills = await Task.detached(priority: .utility) {
+                SkillStore.scanGlobalSkills()
+            }.value
+            self?.globalSkills = skills
+            self?.isRefreshing = false
         }
     }
 
     // MARK: - Project-scoped queries
 
     func installedSkills(for projectPath: String) -> [InstalledSkill] {
-        let fm = FileManager.default
-
-        // Claude: .claude/skills/<name>/SKILL.md
-        let claudeSkillsDir = (projectPath as NSString).appendingPathComponent(".claude/skills")
-        // Codex: .agents/skills/<name>/SKILL.md
-        let codexSkillsDir  = (projectPath as NSString).appendingPathComponent(".agents/skills")
-
-        var byName: [String: (claudePath: String?, codexPath: String?, desc: String)] = [:]
-
-        for (dir, kind) in [(claudeSkillsDir, "claude"), (codexSkillsDir, "codex")] {
-            guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { continue }
-            for entry in entries.sorted() {
-                let skillDir = (dir as NSString).appendingPathComponent(entry)
-                let skillMd  = (skillDir as NSString).appendingPathComponent("SKILL.md")
-                var isDir: ObjCBool = false
-                guard fm.fileExists(atPath: skillDir, isDirectory: &isDir), isDir.boolValue else { continue }
-                guard fm.fileExists(atPath: skillMd) else { continue }
-
-                let parsed = SkillReader.parse(at: skillMd)
-                let desc   = parsed?.description ?? ""
-                let name   = parsed?.name ?? entry
-
-                if byName[name] == nil {
-                    byName[name] = (claudePath: nil, codexPath: nil, desc: desc)
-                }
-                if kind == "claude" {
-                    byName[name]?.claudePath = skillDir
-                } else {
-                    byName[name]?.codexPath = skillDir
-                }
-                if byName[name]?.desc.isEmpty == true && !desc.isEmpty {
-                    byName[name]?.desc = desc
-                }
-            }
-        }
-
-        return byName.keys.sorted().map { name in
-            let info = byName[name]!
-            return InstalledSkill(
-                name:        name,
-                description: info.desc,
-                claudePath:  info.claudePath,
-                codexPath:   info.codexPath
-            )
-        }
+        SkillInventoryReader.installedSkills(for: projectPath)
     }
 
-    /// Install a global skill into the project (copies to .claude/skills AND .agents/skills).
+    /// Install a global skill into the matching project skill root.
     func install(skill: Skill, to projectPath: String) {
         let fm = FileManager.default
-        let targets: [(String, String)] = [
-            ((projectPath as NSString).appendingPathComponent(".claude/skills"), skill.name),
-            ((projectPath as NSString).appendingPathComponent(".agents/skills"), skill.name),
-        ]
+        let targets = installTargets(for: skill, projectPath: projectPath)
 
         for (baseDir, name) in targets {
             let destDir = (baseDir as NSString).appendingPathComponent(name)
@@ -93,16 +46,41 @@ final class SkillStore: ObservableObject {
         }
     }
 
-    /// Remove a skill from the project (deletes from both .claude/skills and .agents/skills).
+    /// Remove only the selected installed skill origin.
+    func remove(skill: InstalledSkill, from projectPath: String) {
+        guard skill.canRemove else { return }
+        let canonicalProject = Project.canonicalize(ProjectRootDetector.detect(from: projectPath))
+        let canonicalSkill = canonicalFilePath(skill.path)
+        guard canonicalSkill == canonicalProject || canonicalSkill.hasPrefix(canonicalProject + "/") else { return }
+        try? FileManager.default.removeItem(atPath: skill.path)
+    }
+
+    /// Legacy caller support: remove writable origins with the selected name.
     func remove(skillName: String, from projectPath: String) {
-        let fm = FileManager.default
-        let targets = [
-            (projectPath as NSString).appendingPathComponent(".claude/skills/\(skillName)"),
-            (projectPath as NSString).appendingPathComponent(".agents/skills/\(skillName)"),
-        ]
-        for path in targets {
-            guard fm.fileExists(atPath: path) else { continue }
-            try? fm.removeItem(atPath: path)
+        for skill in installedSkills(for: projectPath) where skill.name == skillName && skill.canRemove {
+            remove(skill: skill, from: projectPath)
+        }
+    }
+
+    func installTargets(for skill: Skill, projectPath: String) -> [(String, String)] {
+        switch skill.source {
+        case .claudeGlobal:
+            return [((projectPath as NSString).appendingPathComponent(".claude/skills"), skill.name)]
+        case .codexGlobal, .codexAdmin, .codexManaged:
+            return [((projectPath as NSString).appendingPathComponent(".agents/skills"), skill.name)]
+        case .cursorGlobal:
+            return []
+        }
+    }
+
+    func isInstalled(_ skill: Skill, in installed: [InstalledSkill]) -> Bool {
+        switch skill.source {
+        case .claudeGlobal:
+            return installed.contains { $0.name == skill.name && $0.claudePath != nil }
+        case .codexGlobal, .codexAdmin, .codexManaged:
+            return installed.contains { $0.name == skill.name && $0.codexPath != nil }
+        case .cursorGlobal:
+            return installed.contains { $0.name == skill.name }
         }
     }
 
@@ -110,10 +88,12 @@ final class SkillStore: ObservableObject {
 
     nonisolated private static func scanGlobalSkills() -> [Skill] {
         let home = NSHomeDirectory()
+        let codexHome = ProjectHubPaths.codexHome(home: home)
         let dirs: [(String, SkillSource)] = [
             ((home as NSString).appendingPathComponent(".claude/skills"),        .claudeGlobal),
-            ((home as NSString).appendingPathComponent(".codex/skills"),         .codexGlobal),
-            ((home as NSString).appendingPathComponent(".cursor/skills-cursor"), .cursorGlobal),
+            ((home as NSString).appendingPathComponent(".agents/skills"),         .codexGlobal),
+            ("/etc/codex/skills",                                                .codexAdmin),
+            ((codexHome as NSString).appendingPathComponent("skills"),           .codexManaged),
         ]
 
         var all: [Skill] = []
@@ -127,5 +107,12 @@ final class SkillStore: ObservableObject {
 
     func globalSkillNames() -> Set<String> {
         Set(globalSkills.map { $0.name })
+    }
+
+    private func canonicalFilePath(_ path: String) -> String {
+        URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
     }
 }

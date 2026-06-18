@@ -28,11 +28,9 @@ struct DiffPreviewBlock: View {
 
     @ViewBuilder
     private func previewForTool(toolID: String) -> some View {
-        let effectiveScope: ConfigScope = (scope == .project
-            && ToolSpecs.projectScopedTools.contains(toolID)) ? .project : .user
-        let root = effectiveScope == .project ? projectRoot : nil
+        let root = scope == .project ? projectRoot : nil
 
-        if let spec = ToolSpecs.spec(for: toolID, scope: effectiveScope, projectRoot: root) {
+        if let spec = ToolSpecs.spec(for: toolID, scope: scope, projectRoot: root) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Image(systemName: "doc.text")
@@ -41,7 +39,7 @@ struct DiffPreviewBlock: View {
                         .font(.system(size: 10, design: .monospaced))
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    if effectiveScope == .project {
+                    if scope == .project {
                         Text("(project)")
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundColor(.accentColor)
@@ -49,7 +47,7 @@ struct DiffPreviewBlock: View {
                 }
                 .foregroundColor(.secondary)
 
-                diffBody(toolID: toolID, scope: effectiveScope, projectRoot: root)
+                diffBody(toolID: toolID, scope: scope, projectRoot: root)
                     .padding(8)
                     .background(Color(NSColor.textBackgroundColor))
                     .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -64,28 +62,24 @@ struct DiffPreviewBlock: View {
     }
 
     private func computeDiff(toolID: String, scope: ConfigScope, projectRoot: String?) -> [DiffLine]? {
-        var currentBefore: String = ""
-        var currentAfter:  String = ""
-        var hadPreview = false
-        for (idx, server) in servers.enumerated() {
-            if let p = ConfigWriter.previewWrite(
-                toolID: toolID,
-                scope: scope,
-                projectRoot: projectRoot,
-                name: server.name,
-                config: server.config
-            ) {
-                if idx == 0 { currentBefore = p.before }
-                currentAfter = p.after
-                hadPreview = true
-            }
-        }
-        return hadPreview ? lineDiff(before: currentBefore, after: currentAfter) : nil
+        let batch = servers.map { (name: $0.name, config: $0.config) }
+        guard let preview = ConfigWriter.previewWriteBatch(
+            toolID: toolID,
+            scope: scope,
+            projectRoot: projectRoot,
+            servers: batch
+        ) else { return nil }
+        return lineDiff(before: preview.before, after: preview.after)
     }
 
     @ViewBuilder
     private func diffBody(toolID: String, scope: ConfigScope, projectRoot: String?) -> some View {
-        if let lines = computeDiff(toolID: toolID, scope: scope, projectRoot: projectRoot) {
+        if let blocker = servers.compactMap({ ConfigWriter.nativeWriteBlocker(toolID: toolID, scope: scope, name: $0.name, config: $0.config) }).first {
+            Text(blocker)
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+                .textSelection(.enabled)
+        } else if let lines = computeDiff(toolID: toolID, scope: scope, projectRoot: projectRoot) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
                     HStack(spacing: 0) {

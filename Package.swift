@@ -9,6 +9,11 @@ let package = Package(
             name: "ProjectHub",
             path: "Sources/ProjectHub",
             linkerSettings: [.linkedLibrary("sqlite3")]
+        ),
+        .testTarget(
+            name: "ProjectHubTests",
+            dependencies: ["ProjectHub"],
+            path: "Tests/ProjectHubTests"
         )
     ]
 )

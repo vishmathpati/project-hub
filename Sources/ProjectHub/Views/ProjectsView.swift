@@ -371,7 +371,6 @@ struct ProjectsView: View {
         switch toolID {
         case "claude-code": return .orange
         case "codex":       return .purple
-        case "cursor":      return .blue
         default:            return .secondary
         }
     }
@@ -380,7 +379,6 @@ struct ProjectsView: View {
         switch toolID {
         case "claude-code": return "Claude"
         case "codex":       return "Codex"
-        case "cursor":      return "Cursor"
         default:            return toolID
         }
     }

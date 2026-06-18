@@ -15,7 +15,6 @@ struct SkillsView: View {
     var body: some View {
         let installed = skillStore.installedSkills(for: project.path)
         let globals   = skillStore.globalSkills
-        let installedNames = Set(installed.map { $0.name })
 
         HStack(alignment: .top, spacing: 0) {
             // MARK: Left — Installed
@@ -50,7 +49,7 @@ struct SkillsView: View {
                         VStack(spacing: 4) {
                             ForEach(globals) { skill in
                                 globalRow(skill,
-                                          alreadyInstalled: installedNames.contains(skill.name),
+                                          alreadyInstalled: skillStore.isInstalled(skill, in: installed),
                                           projectPath: project.path)
                             }
                         }
@@ -102,12 +101,20 @@ struct SkillsView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
                 HStack(spacing: 4) {
-                    if skill.claudePath != nil {
-                        sourcePill("Claude", color: .orange)
+                    ForEach(skill.toolLabels, id: \.self) { label in
+                        sourcePill(label, color: toolColor(label))
                     }
-                    if skill.codexPath != nil {
-                        sourcePill("Codex", color: .purple)
+                    sourcePill(skill.scopeLabel, color: .secondary)
+                    sourcePill(skill.state.label, color: stateColor(skill.state))
+                    ForEach(skill.diagnostics, id: \.self) { diagnostic in
+                        sourcePill(diagnostic, color: .orange)
                     }
+                }
+                if !skill.sourceLabel.isEmpty {
+                    Text(skill.sourceLabel)
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
                 }
             }
             Spacer()
@@ -117,16 +124,18 @@ struct SkillsView: View {
                     .foregroundColor(.secondary)
             }
             .buttonStyle(.plain)
-            .help("Edit skill")
+            .disabled(!skill.canEdit)
+            .help(skill.canEdit ? "Edit skill" : (skill.readOnlyReason ?? "This skill is read-only"))
             Button(action: {
-                skillStore.remove(skillName: skill.name, from: projectPath)
+                skillStore.remove(skill: skill, from: projectPath)
             }) {
                 Image(systemName: "trash")
                     .font(.system(size: 11))
                     .foregroundColor(.red.opacity(0.8))
             }
             .buttonStyle(.plain)
-            .help("Remove skill")
+            .disabled(!skill.canRemove)
+            .help(skill.canRemove ? "Remove this skill origin" : (skill.readOnlyReason ?? "This skill is read-only"))
         }
         .padding(8)
         .background(Color(NSColor.controlBackgroundColor))
@@ -138,7 +147,8 @@ struct SkillsView: View {
     // MARK: - Global library row
 
     private func globalRow(_ skill: Skill, alreadyInstalled: Bool, projectPath: String) -> some View {
-        HStack(spacing: 8) {
+        let canInstall = !skillStore.installTargets(for: skill, projectPath: projectPath).isEmpty
+        return HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(skill.name)
                     .font(.system(size: 12, weight: .semibold))
@@ -155,16 +165,17 @@ struct SkillsView: View {
             Button(action: {
                 skillStore.install(skill: skill, to: projectPath)
             }) {
-                Text(alreadyInstalled ? "Installed" : "Install")
+                Text(alreadyInstalled ? "Installed" : installLabel(for: skill))
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(alreadyInstalled ? .secondary : .white)
+                    .foregroundColor((alreadyInstalled || !canInstall) ? .secondary : .white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(alreadyInstalled ? Color.secondary.opacity(0.15) : Color.accentColor)
+                    .background((alreadyInstalled || !canInstall) ? Color.secondary.opacity(0.15) : Color.accentColor)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
-            .disabled(alreadyInstalled)
+            .disabled(alreadyInstalled || !canInstall)
+            .help(canInstall ? installLabel(for: skill) : "No safe primary-tool install target for this skill source")
         }
         .padding(8)
         .background(Color(NSColor.controlBackgroundColor))
@@ -197,7 +208,7 @@ struct SkillsView: View {
                 .foregroundColor(.secondary)
             Text("No global skills")
                 .font(.system(size: 12, weight: .semibold))
-            Text("Add skills to ~/.claude/skills/")
+            Text("Add skills to ~/.claude/skills or ~/.agents/skills.")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -222,7 +233,35 @@ struct SkillsView: View {
         switch source {
         case .claudeGlobal: return .orange
         case .codexGlobal:  return .purple
+        case .codexAdmin:   return .indigo
+        case .codexManaged: return .teal
         case .cursorGlobal: return .blue
+        }
+    }
+
+    private func toolColor(_ label: String) -> Color {
+        if label.contains("Claude") { return .orange }
+        if label.contains("Codex") { return .purple }
+        return .secondary
+    }
+
+    private func stateColor(_ state: InstalledSkill.State) -> Color {
+        switch state {
+        case .active: return .green
+        case .disabled: return .secondary
+        case .limited: return .yellow
+        case .invalid: return .red
+        }
+    }
+
+    private func installLabel(for skill: Skill) -> String {
+        switch skill.source {
+        case .claudeGlobal:
+            return "Install Claude"
+        case .codexGlobal, .codexAdmin, .codexManaged:
+            return "Install Codex"
+        case .cursorGlobal:
+            return "Inspect only"
         }
     }
 }
@@ -340,7 +379,9 @@ struct GlobalSkillsView: View {
         let (label, color): (String, Color) = {
             switch source {
             case .claudeGlobal: return ("~/.claude/skills", .orange)
-            case .codexGlobal:  return ("~/.codex/skills",  .purple)
+            case .codexGlobal:  return ("~/.agents/skills",  .purple)
+            case .codexAdmin:   return ("/etc/codex/skills", .indigo)
+            case .codexManaged: return ("~/.codex/skills managed", .teal)
             case .cursorGlobal: return ("~/.cursor/skills-cursor", .blue)
             }
         }()
@@ -367,7 +408,7 @@ struct GlobalSkillsView: View {
                 .foregroundColor(.secondary)
             Text("No global skills found")
                 .font(.system(size: 14, weight: .semibold))
-            Text("Add skill directories to:\n~/.claude/skills/\n~/.codex/skills/\n~/.cursor/skills-cursor/")
+            Text("Add skill directories to:\n~/.claude/skills/\n~/.agents/skills/\n/etc/codex/skills/ (admin, read-only)\n~/.codex/skills/ (managed/legacy)")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)

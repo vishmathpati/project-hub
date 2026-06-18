@@ -5,14 +5,12 @@ import Foundation
 struct CopyOptions {
     var skills: Bool = true
     var agents: Bool = true
-    var cursorRules: Bool = true
     var mcpServers: Bool = false
 }
 
 struct CopyResult {
     let skillsCopied: Int
     let agentsCopied: Int
-    let rulesCopied: Int
     let mcpCopied: Int
     var errors: [String]
 }
@@ -24,40 +22,23 @@ enum ProfileCopier {
     // MARK: - Preview
 
     /// Returns counts of copyable items in the source project without performing any writes.
-    static func preview(from sourcePath: String) -> (skills: Int, agents: Int, rules: Int, mcp: Int) {
+    static func preview(from sourcePath: String) -> (skills: Int, agents: Int, mcp: Int) {
         let fm = FileManager.default
+        let sourceRoot = canonicalFilePath(ProjectRootDetector.detect(from: sourcePath))
 
-        // Skills: count dirs in .claude/skills + .agents/skills (deduplicated by folder name)
-        var skillNames: Set<String> = []
-        for dir in [".claude/skills", ".agents/skills"] {
-            let full = (sourcePath as NSString).appendingPathComponent(dir)
-            let entries = (try? fm.contentsOfDirectory(atPath: full)) ?? []
-            for entry in entries {
-                let entryPath = (full as NSString).appendingPathComponent(entry)
-                var isDir: ObjCBool = false
-                if fm.fileExists(atPath: entryPath, isDirectory: &isDir), isDir.boolValue {
-                    skillNames.insert(entry)
-                }
-            }
-        }
+        let skillCount = copyableSkillOrigins(from: sourcePath).count
 
         // Agents: .md files in .claude/agents/
-        let agentsDir = (sourcePath as NSString).appendingPathComponent(".claude/agents")
+        let agentsDir = (sourceRoot as NSString).appendingPathComponent(".claude/agents")
         let agentFiles = ((try? fm.contentsOfDirectory(atPath: agentsDir)) ?? [])
             .filter { $0.hasSuffix(".md") }
 
-        // Cursor rules: .mdc files in .cursor/rules/
-        let rulesDir = (sourcePath as NSString).appendingPathComponent(".cursor/rules")
-        let ruleFiles = ((try? fm.contentsOfDirectory(atPath: rulesDir)) ?? [])
-            .filter { $0.hasSuffix(".mdc") }
-
-        // MCP servers: count keys in .mcp.json + .cursor/mcp.json + entries in .codex/config.toml
+        // MCP servers: count project-scoped MCP configs across Claude/Codex.
         var mcpCount = 0
-        mcpCount += mcpJsonServerCount(at: (sourcePath as NSString).appendingPathComponent(".mcp.json"))
-        mcpCount += mcpJsonServerCount(at: (sourcePath as NSString).appendingPathComponent(".cursor/mcp.json"))
-        mcpCount += codexMcpServerCount(at: (sourcePath as NSString).appendingPathComponent(".codex/config.toml"))
+        mcpCount += mcpJsonServerCount(at: (sourceRoot as NSString).appendingPathComponent(".mcp.json"), key: "mcpServers")
+        mcpCount += codexMcpServerCount(at: (sourceRoot as NSString).appendingPathComponent(".codex/config.toml"))
 
-        return (skillNames.count, agentFiles.count, ruleFiles.count, mcpCount)
+        return (skillCount, agentFiles.count, mcpCount)
     }
 
     // MARK: - Copy
@@ -66,7 +47,6 @@ enum ProfileCopier {
     static func copy(from sourcePath: String, to targetPath: String, options: CopyOptions) -> CopyResult {
         var skillsCopied = 0
         var agentsCopied = 0
-        var rulesCopied  = 0
         var mcpCopied    = 0
         var errors: [String] = []
 
@@ -82,12 +62,6 @@ enum ProfileCopier {
             errors += errs
         }
 
-        if options.cursorRules {
-            let (count, errs) = copyCursorRules(from: sourcePath, to: targetPath)
-            rulesCopied = count
-            errors += errs
-        }
-
         if options.mcpServers {
             let (count, errs) = copyMCPServers(from: sourcePath, to: targetPath)
             mcpCopied = count
@@ -97,7 +71,6 @@ enum ProfileCopier {
         return CopyResult(
             skillsCopied: skillsCopied,
             agentsCopied: agentsCopied,
-            rulesCopied:  rulesCopied,
             mcpCopied:    mcpCopied,
             errors:       errors
         )
@@ -109,43 +82,51 @@ enum ProfileCopier {
         let fm = FileManager.default
         var copied = 0
         var errors: [String] = []
+        let sourceRoot = canonicalFilePath(ProjectRootDetector.detect(from: sourcePath))
+        let targetRoot = canonicalFilePath(ProjectRootDetector.detect(from: targetPath))
+        var warningKeys = Set<String>()
 
-        let pairs: [(String, String)] = [
-            (".claude/skills", ".claude/skills"),
-            (".agents/skills", ".agents/skills"),
-        ]
-
-        for (srcRel, dstRel) in pairs {
-            let srcDir = (sourcePath as NSString).appendingPathComponent(srcRel)
-            let dstDir = (targetPath as NSString).appendingPathComponent(dstRel)
-
-            guard let entries = try? fm.contentsOfDirectory(atPath: srcDir) else { continue }
-
+        for skill in copyableSkillOrigins(from: sourcePath) {
+            guard let relative = relativePath(skill.path, from: sourceRoot) else { continue }
+            let dstEntry = (targetRoot as NSString).appendingPathComponent(relative)
+            guard !fm.fileExists(atPath: dstEntry) else { continue }
             do {
-                try fm.createDirectory(atPath: dstDir, withIntermediateDirectories: true)
+                try fm.createDirectory(
+                    atPath: (dstEntry as NSString).deletingLastPathComponent,
+                    withIntermediateDirectories: true
+                )
+                try fm.copyItem(atPath: skill.path, toPath: dstEntry)
+                copied += 1
             } catch {
-                errors.append("Could not create \(dstRel): \(error.localizedDescription)")
-                continue
+                errors.append("Could not copy skill \(skill.name) from \(relative): \(error.localizedDescription)")
             }
 
-            for entry in entries.sorted() {
-                let srcEntry = (srcDir as NSString).appendingPathComponent(entry)
-                let dstEntry = (dstDir as NSString).appendingPathComponent(entry)
-
-                var isDir: ObjCBool = false
-                guard fm.fileExists(atPath: srcEntry, isDirectory: &isDir), isDir.boolValue else { continue }
-                guard !fm.fileExists(atPath: dstEntry) else { continue } // skip existing
-
-                do {
-                    try fm.copyItem(atPath: srcEntry, toPath: dstEntry)
-                    copied += 1
-                } catch {
-                    errors.append("Could not copy skill \(entry): \(error.localizedDescription)")
-                }
+            if skill.state != .active, warningKeys.insert("state:\(skill.path)").inserted {
+                errors.append("Copied \(skill.name), but its \(skill.state.rawValue.lowercased()) policy state is not migrated automatically. Scan the target project before relying on it.")
+            }
+            if !isPrimaryProjectSkillPath(skill.path, projectRoot: sourceRoot),
+               warningKeys.insert("root:\(skill.path)").inserted {
+                errors.append("Copied \(skill.name) from \(relative). If this came from a configured additional skill directory, make sure the target tool also loads that directory.")
             }
         }
 
         return (copied, errors)
+    }
+
+    private static func copyableSkillOrigins(from sourcePath: String) -> [InstalledSkill] {
+        SkillInventoryReader.installedSkills(for: sourcePath)
+            .filter(\.canRemove)
+            .sorted { lhs, rhs in
+                lhs.path.localizedCaseInsensitiveCompare(rhs.path) == .orderedAscending
+            }
+    }
+
+    private static func isPrimaryProjectSkillPath(_ path: String, projectRoot: String) -> Bool {
+        let canonicalPath = canonicalFilePath(path)
+        let canonicalRoot = canonicalFilePath(projectRoot)
+        guard canonicalPath.hasPrefix(canonicalRoot + "/") else { return false }
+        return canonicalPath.contains("/.claude/skills/")
+            || canonicalPath.contains("/.agents/skills/")
     }
 
     // MARK: - Agents
@@ -154,9 +135,11 @@ enum ProfileCopier {
         let fm = FileManager.default
         var copied = 0
         var errors: [String] = []
+        let sourceRoot = canonicalFilePath(ProjectRootDetector.detect(from: sourcePath))
+        let targetRoot = canonicalFilePath(ProjectRootDetector.detect(from: targetPath))
 
-        let srcDir = (sourcePath as NSString).appendingPathComponent(".claude/agents")
-        let dstDir = (targetPath as NSString).appendingPathComponent(".claude/agents")
+        let srcDir = (sourceRoot as NSString).appendingPathComponent(".claude/agents")
+        let dstDir = (targetRoot as NSString).appendingPathComponent(".claude/agents")
 
         guard let entries = try? fm.contentsOfDirectory(atPath: srcDir) else {
             return (0, [])
@@ -183,75 +166,31 @@ enum ProfileCopier {
         return (copied, errors)
     }
 
-    // MARK: - Cursor Rules
-
-    private static func copyCursorRules(from sourcePath: String, to targetPath: String) -> (Int, [String]) {
-        let fm = FileManager.default
-        var copied = 0
-        var errors: [String] = []
-
-        let srcDir = (sourcePath as NSString).appendingPathComponent(".cursor/rules")
-        let dstDir = (targetPath as NSString).appendingPathComponent(".cursor/rules")
-
-        guard let entries = try? fm.contentsOfDirectory(atPath: srcDir) else {
-            return (0, [])
-        }
-
-        do {
-            try fm.createDirectory(atPath: dstDir, withIntermediateDirectories: true)
-        } catch {
-            return (0, ["Could not create .cursor/rules: \(error.localizedDescription)"])
-        }
-
-        for entry in entries.sorted() where entry.hasSuffix(".mdc") {
-            let src = (srcDir as NSString).appendingPathComponent(entry)
-            let dst = (dstDir as NSString).appendingPathComponent(entry)
-            guard !fm.fileExists(atPath: dst) else { continue }
-            do {
-                try fm.copyItem(atPath: src, toPath: dst)
-                copied += 1
-            } catch {
-                errors.append("Could not copy rule \(entry): \(error.localizedDescription)")
-            }
-        }
-
-        return (copied, errors)
-    }
-
     // MARK: - MCP Servers
 
     private static func copyMCPServers(from sourcePath: String, to targetPath: String) -> (Int, [String]) {
         var totalCopied = 0
         var errors: [String] = []
+        let sourceRoot = canonicalFilePath(ProjectRootDetector.detect(from: sourcePath))
+        let targetRoot = canonicalFilePath(ProjectRootDetector.detect(from: targetPath))
 
         // .mcp.json
         let (c1, e1) = mergeMCPJson(
-            src: (sourcePath as NSString).appendingPathComponent(".mcp.json"),
-            dst: (targetPath as NSString).appendingPathComponent(".mcp.json")
+            src: (sourceRoot as NSString).appendingPathComponent(".mcp.json"),
+            dst: (targetRoot as NSString).appendingPathComponent(".mcp.json"),
+            key: "mcpServers"
         )
         totalCopied += c1
         errors += e1
 
-        // .cursor/mcp.json
-        let cursorDir = (targetPath as NSString).appendingPathComponent(".cursor")
-        if !FileManager.default.fileExists(atPath: cursorDir) {
-            try? FileManager.default.createDirectory(atPath: cursorDir, withIntermediateDirectories: true)
-        }
-        let (c2, e2) = mergeMCPJson(
-            src: (sourcePath as NSString).appendingPathComponent(".cursor/mcp.json"),
-            dst: (targetPath as NSString).appendingPathComponent(".cursor/mcp.json")
-        )
-        totalCopied += c2
-        errors += e2
-
         // .codex/config.toml
-        let codexDir = (targetPath as NSString).appendingPathComponent(".codex")
+        let codexDir = (targetRoot as NSString).appendingPathComponent(".codex")
         if !FileManager.default.fileExists(atPath: codexDir) {
             try? FileManager.default.createDirectory(atPath: codexDir, withIntermediateDirectories: true)
         }
         let (c3, e3) = mergeCodexTOML(
-            src: (sourcePath as NSString).appendingPathComponent(".codex/config.toml"),
-            dst: (targetPath as NSString).appendingPathComponent(".codex/config.toml")
+            src: (sourceRoot as NSString).appendingPathComponent(".codex/config.toml"),
+            dst: (targetRoot as NSString).appendingPathComponent(".codex/config.toml")
         )
         totalCopied += c3
         errors += e3
@@ -261,29 +200,29 @@ enum ProfileCopier {
 
     // MARK: - JSON MCP merge
 
-    /// Merges `mcpServers` keys from src JSON into dst JSON. Skips existing keys.
-    private static func mergeMCPJson(src: String, dst: String) -> (Int, [String]) {
+    /// Merges server keys from src JSON into dst JSON. Skips existing keys.
+    private static func mergeMCPJson(src: String, dst: String, key: String) -> (Int, [String]) {
         let fm = FileManager.default
         guard fm.fileExists(atPath: src) else { return (0, []) }
 
-        guard let srcData = fm.contents(atPath: src),
-              let srcJSON = try? JSONSerialization.jsonObject(with: srcData) as? [String: Any],
-              let srcServers = srcJSON["mcpServers"] as? [String: Any]
+        guard let srcJSON = loadJsonObject(at: src),
+              let srcServers = srcJSON[key] as? [String: Any]
         else {
-            return (0, ["Could not parse mcpServers in \(src)"])
+            return (0, ["Could not parse \(key) in \(src)"])
         }
 
         // Load or create destination JSON
         var dstJSON: [String: Any]
-        if fm.fileExists(atPath: dst),
-           let dstData = fm.contents(atPath: dst),
-           let parsed = try? JSONSerialization.jsonObject(with: dstData) as? [String: Any] {
+        if fm.fileExists(atPath: dst) {
+            guard let parsed = loadJsonObject(at: dst) else {
+                return (0, ["Could not parse existing destination JSON in \(dst)"])
+            }
             dstJSON = parsed
         } else {
             dstJSON = [:]
         }
 
-        var dstServers = dstJSON["mcpServers"] as? [String: Any] ?? [:]
+        var dstServers = dstJSON[key] as? [String: Any] ?? [:]
         var copied = 0
 
         for (key, value) in srcServers {
@@ -294,7 +233,7 @@ enum ProfileCopier {
 
         guard copied > 0 else { return (0, []) }
 
-        dstJSON["mcpServers"] = dstServers
+        dstJSON[key] = dstServers
 
         do {
             let outData = try JSONSerialization.data(withJSONObject: dstJSON, options: [.prettyPrinted, .sortedKeys])
@@ -357,100 +296,151 @@ enum ProfileCopier {
         return (appended, [])
     }
 
-    /// Returns array of (name, fullBlock) tuples for each `[mcp_servers."name"]` section.
+    /// Returns array of (name, fullBlock) tuples for each Codex MCP section.
     private static func extractTOMLMCPBlocks(from content: String) -> [(String, String)] {
-        guard let headerRegex = try? NSRegularExpression(
-            pattern: #"\[mcp_servers\."([^"]+)"\]"#
-        ) else { return [] }
-
-        let ns = content as NSString
-        let range = NSRange(location: 0, length: ns.length)
-        let matches = headerRegex.matches(in: content, range: range)
-
         var blocks: [(String, String)] = []
         let lines = content.components(separatedBy: "\n")
+        var index = 0
+        while index < lines.count {
+            guard let identity = codexMCPSectionIdentity(in: lines[index]) else {
+                index += 1
+                continue
+            }
 
-        // Find line indices of each header
-        var headerLineIndices: [(name: String, lineIndex: Int)] = []
-        var lineStart = 0
-        var lineIndex = 0
-        for line in lines {
-            let lineRange = NSRange(location: lineStart, length: (line as NSString).length)
-            for m in matches {
-                if m.range.location >= lineStart && m.range.location < lineStart + (line as NSString).length + 1 {
-                    if let nameRange = Range(m.range(at: 1), in: content) {
-                        headerLineIndices.append((String(content[nameRange]), lineIndex))
-                    }
+            var blockLines = [lines[index]]
+            var cursor = index + 1
+            while cursor < lines.count {
+                if let next = codexMCPSectionIdentity(in: lines[cursor]) {
+                    guard next.name == identity.name else { break }
+                } else if isTOMLSectionHeader(lines[cursor]) {
+                    break
                 }
-            }
-            lineStart += (line as NSString).length + 1
-            lineIndex += 1
-        }
-
-        // Extract block from header line to next `[` header or EOF
-        let nextSectionRegex = try? NSRegularExpression(pattern: #"^\s*\["#)
-        for (i, (name, startLine)) in headerLineIndices.enumerated() {
-            var endLine: Int
-            if i + 1 < headerLineIndices.count {
-                endLine = headerLineIndices[i + 1].lineIndex
-            } else {
-                endLine = lines.count
+                blockLines.append(lines[cursor])
+                cursor += 1
             }
 
-            // Build the block lines
-            var blockLines = [lines[startLine]]
-            for idx in (startLine + 1)..<endLine {
-                let l = lines[idx]
-                // Stop at any new top-level section header
-                if let re = nextSectionRegex {
-                    let r = NSRange(location: 0, length: (l as NSString).length)
-                    if re.firstMatch(in: l, range: r) != nil && l.contains("[") {
-                        break
-                    }
-                }
-                blockLines.append(l)
-            }
-
-            // Trim trailing empty lines
             while blockLines.last?.trimmingCharacters(in: .whitespaces).isEmpty == true {
                 blockLines.removeLast()
             }
-
-            blocks.append((name, blockLines.joined(separator: "\n")))
+            blocks.append((identity.name, blockLines.joined(separator: "\n")))
+            index = cursor
         }
 
         return blocks
     }
 
-    /// Returns set of names already declared in `[mcp_servers."name"]` headers.
-    private static func extractTOMLMCPBlockNames(from content: String) -> Set<String> {
-        guard let regex = try? NSRegularExpression(
-            pattern: #"\[mcp_servers\."([^"]+)"\]"#
-        ) else { return [] }
+    private static func codexMCPSectionIdentity(in line: String) -> (name: String, nested: String?)? {
+        guard let section = tomlSectionName(from: line) else { return nil }
+        let segments = tomlDottedSegments(section)
+        guard segments.count >= 2,
+              segments[0] == "mcp_servers",
+              !segments[1].isEmpty else { return nil }
+        let nested = segments.count > 2 ? segments.dropFirst(2).joined(separator: ".") : nil
+        return (segments[1], nested)
+    }
 
-        let ns = content as NSString
-        let matches = regex.matches(in: content, range: NSRange(location: 0, length: ns.length))
-        var names = Set<String>()
-        for m in matches {
-            if let r = Range(m.range(at: 1), in: content) {
-                names.insert(String(content[r]))
+    private static func tomlSectionName(from line: String) -> String? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("["),
+              !trimmed.hasPrefix("[["),
+              let close = trimmed.firstIndex(of: "]") else { return nil }
+        return String(trimmed[trimmed.index(after: trimmed.startIndex)..<close])
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    private static func tomlDottedSegments(_ value: String) -> [String] {
+        var parts: [String] = []
+        var current = ""
+        var inSingle = false
+        var inDouble = false
+        var escaped = false
+
+        for ch in value {
+            if escaped {
+                current.append(ch)
+                escaped = false
+                continue
             }
+            if inDouble && ch == "\\" {
+                escaped = true
+                current.append(ch)
+                continue
+            }
+            if ch == "\"", !inSingle {
+                inDouble.toggle()
+                continue
+            }
+            if ch == "'", !inDouble {
+                inSingle.toggle()
+                continue
+            }
+            if ch == ".", !inSingle, !inDouble {
+                parts.append(trimTOMLSegment(current))
+                current = ""
+                continue
+            }
+            current.append(ch)
         }
-        return names
+
+        parts.append(trimTOMLSegment(current))
+        return parts
+    }
+
+    private static func trimTOMLSegment(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count >= 2,
+           (trimmed.hasPrefix("\"") && trimmed.hasSuffix("\""))
+            || (trimmed.hasPrefix("'") && trimmed.hasSuffix("'")) {
+            return String(trimmed.dropFirst().dropLast())
+        }
+        return trimmed
+    }
+
+    private static func isTOMLSectionHeader(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return trimmed.hasPrefix("[") && trimmed.contains("]")
+    }
+
+    /// Returns set of names already declared in Codex MCP server headers.
+    private static func extractTOMLMCPBlockNames(from content: String) -> Set<String> {
+        Set(extractTOMLMCPBlocks(from: content).map(\.0))
     }
 
     // MARK: - Preview helpers
 
-    private static func mcpJsonServerCount(at path: String) -> Int {
-        guard let data = FileManager.default.contents(atPath: path),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let servers = json["mcpServers"] as? [String: Any]
+    private static func mcpJsonServerCount(at path: String, key: String) -> Int {
+        guard let json = loadJsonObject(at: path),
+              let servers = json[key] as? [String: Any]
         else { return 0 }
         return servers.count
+    }
+
+    private static func loadJsonObject(at path: String) -> [String: Any]? {
+        guard let raw = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+        let stripped = ConfigWriter.stripJsonComments(raw)
+        guard let data = stripped.data(using: .utf8) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
     private static func codexMcpServerCount(at path: String) -> Int {
         guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { return 0 }
         return extractTOMLMCPBlockNames(from: content).count
+    }
+
+    private static func relativePath(_ path: String, from root: String) -> String? {
+        let canonicalPath = canonicalFilePath(path)
+        let canonicalRoot = canonicalFilePath(root)
+        guard canonicalPath == canonicalRoot || canonicalPath.hasPrefix(canonicalRoot + "/") else {
+            return nil
+        }
+        if canonicalPath == canonicalRoot { return "" }
+        return String(canonicalPath.dropFirst(canonicalRoot.count + 1))
+    }
+
+    private static func canonicalFilePath(_ path: String) -> String {
+        URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
     }
 }

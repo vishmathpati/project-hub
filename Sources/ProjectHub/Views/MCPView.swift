@@ -10,9 +10,15 @@ struct MCPView: View {
     @State private var showImport = false
     @State private var editingServer: (toolID: String, name: String)? = nil
     @State private var confirmDelete: (toolID: String, name: String)? = nil
+    @State private var pendingToggle: ProjectMCPToggle? = nil
+    @State private var toggleError: ProjectMCPError? = nil
     @State private var reloadTick = 0
 
-    private let projectScopedToolIDs = ["claude-code", "cursor", "codex", "vscode", "roo"]
+    private var projectScopedToolIDs: [String] {
+        ALL_TOOL_META
+            .map(\.id)
+            .filter { ToolSpecs.projectScopedTools.contains($0) }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -64,14 +70,6 @@ struct MCPView: View {
         )) {
             Button("Delete", role: .destructive) {
                 if let d = confirmDelete {
-                    _ = mcpStore.replaceServerConfig(
-                        toolID: d.toolID,
-                        scope: .project,
-                        projectRoot: project.path,
-                        name: d.name,
-                        config: [:]
-                    )
-                    // Actually use removeServer
                     try? ConfigWriter.removeServer(
                         toolID: d.toolID,
                         scope: .project,
@@ -88,6 +86,33 @@ struct MCPView: View {
                 Text("Remove \"\(d.name)\" from \(ALL_TOOL_META.first(where: { $0.id == d.toolID })?.label ?? d.toolID)?")
             }
         }
+        .confirmationDialog(
+            pendingToggle?.title ?? "Change MCP availability",
+            isPresented: Binding(
+                get: { pendingToggle != nil },
+                set: { if !$0 { pendingToggle = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let item = pendingToggle {
+                Button(item.actionLabel) {
+                    applyToggle(item)
+                    pendingToggle = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            if let item = pendingToggle {
+                Text(item.message)
+            }
+        }
+        .alert(item: $toggleError) { error in
+            Alert(
+                title: Text("Could not update server"),
+                message: Text(error.message),
+                dismissButton: .default(Text("OK"))
+            )
+        }
     }
 
     private var editingBinding: Binding<IdentifiableMCPServer?> {
@@ -99,24 +124,129 @@ struct MCPView: View {
 
     // MARK: - Data helpers
 
-    private func projectServers(for toolID: String) -> [(name: String, detail: String, disabled: Bool)] {
-        let servers = ConfigWriter.readAllServers(toolID: toolID, scope: .project, projectRoot: project.path)
-        return servers.map { (name: $0.key, detail: serverDetail($0.value), disabled: false) }
-            .sorted { $0.name < $1.name }
+    private func projectServers(for toolID: String) -> [ProjectMCPServerRow] {
+        let claudeApproval = toolID == "claude-code"
+            ? MCPReader.claudeCodeProjectMCPApprovalState(projectPath: project.path)
+            : MCPReader.ClaudeProjectMCPApprovalState()
+        let projectMCPPath = (project.path as NSString).appendingPathComponent(".mcp.json")
+
+        let projectRows = ConfigWriter.readAllServerEntries(toolID: toolID, scope: .project, projectRoot: project.path)
+            .map {
+                let approvalSources = claudeApproval.disabledSources(for: $0.name)
+                return ProjectMCPServerRow(
+                    originID: "\(toolID)::project::\($0.name)",
+                    toolID: toolID,
+                    source: toolID == "claude-code" ? .claudeCode : mcpSource(for: toolID),
+                    name: $0.name,
+                    detail: $0.detail,
+                    sourceLabel: "Project",
+                    sourcePathLabel: ToolSpecs.spec(for: toolID, scope: .project, projectRoot: project.path)?.path
+                        .replacingOccurrences(of: project.path + "/", with: "") ?? "project MCP config",
+                    isReadOnly: false,
+                    readOnlyReason: nil,
+                    disabled: $0.isDisabled || claudeApproval.disabled.contains($0.name),
+                    disabledByConfig: $0.isDisabled,
+                    disabledByClaudeApproval: claudeApproval.disabled.contains($0.name),
+                    claudeApprovalDisableSources: approvalSources,
+                    canResolveClaudeApprovalFromProjectMCP: approvalSources.contains(projectMCPPath)
+                )
+            }
+
+        let localRows = localClaudeProjectRows(for: toolID)
+        let compatibilityRows = compatibilityProjectRows(
+            for: toolID,
+            excluding: projectRows + localRows
+        )
+
+        return (projectRows + localRows + compatibilityRows)
+            .sorted {
+                if $0.name != $1.name { return $0.name < $1.name }
+                return $0.originID < $1.originID
+            }
     }
 
     private var allServers: [(toolID: String, name: String)] {
         projectScopedToolIDs.flatMap { toolID in
-            ConfigWriter.readAllServers(toolID: toolID, scope: .project, projectRoot: project.path)
-                .keys.map { (toolID: toolID, name: $0) }
+            projectServers(for: toolID).map { (toolID: toolID, name: $0.name) }
         }
     }
 
-    private func serverDetail(_ cfg: [String: Any]) -> String {
-        if let url = cfg["url"] as? String { return url }
-        let cmd  = cfg["command"] as? String ?? ""
-        let args = cfg["args"] as? [String] ?? []
-        return ([cmd] + args).filter { !$0.isEmpty }.joined(separator: " ")
+    private func localClaudeProjectRows(for toolID: String) -> [ProjectMCPServerRow] {
+        guard toolID == "claude-code" else { return [] }
+        return MCPReader.fromClaudeCodeLocalProjectState(project.path).map { server in
+            ProjectMCPServerRow(
+                originID: "claude-code::local-private::\(server.name)",
+                toolID: "claude-code",
+                source: server.source,
+                name: server.name,
+                detail: server.detail,
+                sourceLabel: "Private",
+                sourcePathLabel: server.source.configRelativePath,
+                isReadOnly: true,
+                readOnlyReason: "Stored by Claude Code as local project state. Use Claude Code to edit this private scope.",
+                disabled: server.isDisabled,
+                disabledByConfig: false,
+                disabledByClaudeApproval: false,
+                claudeApprovalDisableSources: [],
+                canResolveClaudeApprovalFromProjectMCP: false
+            )
+        }
+    }
+
+    private func compatibilityProjectRows(
+        for toolID: String,
+        excluding existingRows: [ProjectMCPServerRow]
+    ) -> [ProjectMCPServerRow] {
+        var seen = Set(existingRows.map(projectRowContentKey))
+        var output: [ProjectMCPServerRow] = []
+        for row in CompatibilityScanner.mcpInventory(projectRoot: project.path) {
+            guard row.appToolID == toolID,
+                  row.scope == .project || row.scope == .localProjectUser else {
+                continue
+            }
+            let server = row.server
+            let candidate = ProjectMCPServerRow(
+                originID: "\(row.surfaceID)::\(server.id)",
+                toolID: toolID,
+                source: toolID == "claude-code" && row.scope == .localProjectUser ? .claudeCodeLocal : mcpSource(for: toolID),
+                name: server.name,
+                detail: server.detail,
+                sourceLabel: row.surfaceLabel,
+                sourcePathLabel: relativePathLabel(server.sourcePath ?? row.path ?? "compatibility MCP source"),
+                isReadOnly: true,
+                readOnlyReason: server.readOnlyReason,
+                disabled: server.isDisabled,
+                disabledByConfig: server.isDisabled,
+                disabledByClaudeApproval: false,
+                claudeApprovalDisableSources: [],
+                canResolveClaudeApprovalFromProjectMCP: false
+            )
+            guard seen.insert(projectRowContentKey(candidate)).inserted else { continue }
+            output.append(candidate)
+        }
+        return output
+    }
+
+    private func projectRowContentKey(_ row: ProjectMCPServerRow) -> String {
+        [
+            row.toolID,
+            row.source.rawValue,
+            row.name,
+            row.detail,
+            row.disabled ? "disabled" : "enabled"
+        ].joined(separator: "\u{1e}")
+    }
+
+    private func relativePathLabel(_ path: String) -> String {
+        path.replacingOccurrences(of: project.path + "/", with: "")
+    }
+
+    private func mcpSource(for toolID: String) -> MCPConfigSource {
+        switch toolID {
+        case "claude-code": return .claudeCode
+        case "codex": return .codex
+        default: return .claudeCode
+        }
     }
 
     // MARK: - Top bar
@@ -166,7 +296,7 @@ struct MCPView: View {
 
     // MARK: - Tool section
 
-    private func toolSection(toolID: String, servers: [(name: String, detail: String, disabled: Bool)]) -> some View {
+    private func toolSection(toolID: String, servers: [ProjectMCPServerRow]) -> some View {
         let c = ToolPalette.color(for: toolID)
         let label = ALL_TOOL_META.first(where: { $0.id == toolID })?.label ?? toolID
         let configPath = ToolSpecs.spec(for: toolID, scope: .project, projectRoot: project.path)?.path
@@ -203,7 +333,7 @@ struct MCPView: View {
             Divider().opacity(0.5)
 
             VStack(spacing: 1) {
-                ForEach(servers, id: \.name) { server in
+                ForEach(servers) { server in
                     serverRow(server: server, toolID: toolID, color: c)
                 }
             }
@@ -213,15 +343,25 @@ struct MCPView: View {
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(c.opacity(0.20), lineWidth: 1))
     }
 
-    private func serverRow(server: (name: String, detail: String, disabled: Bool), toolID: String, color: Color) -> some View {
+    private func serverRow(server: ProjectMCPServerRow, toolID: String, color: Color) -> some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(color.opacity(0.6))
+                .fill(server.disabled ? Color.secondary.opacity(0.55) : color.opacity(0.6))
                 .frame(width: 6, height: 6)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(server.name)
                     .font(.system(size: 12, weight: .semibold))
+                if server.disabled {
+                    Text("Disabled")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                Text("\(server.sourceLabel) • \(server.sourcePathLabel)")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                 if !server.detail.isEmpty {
                     Text(server.detail)
                         .font(.system(size: 10, design: .monospaced))
@@ -233,28 +373,83 @@ struct MCPView: View {
 
             Spacer()
 
-            Button {
-                editingServer = (toolID: toolID, name: server.name)
-            } label: {
-                Image(systemName: "pencil")
+            if server.isReadOnly {
+                Image(systemName: "lock")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help("Edit")
+                    .help(server.readOnlyReason ?? "Read-only MCP source")
+            } else {
+                Button {
+                    pendingToggle = ProjectMCPToggle(server: server)
+                } label: {
+                    Image(systemName: server.disabled ? "eye" : "eye.slash")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(server.enableBlockedByExternalClaudeApproval)
+                .help(server.enableBlockedByExternalClaudeApproval ? server.externalClaudeApprovalMessage : (server.disabled ? "Enable in project" : "Disable in project"))
 
-            Button {
-                confirmDelete = (toolID: toolID, name: server.name)
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 11))
-                    .foregroundColor(.red.opacity(0.6))
+                Button {
+                    editingServer = (toolID: toolID, name: server.name)
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Edit")
+
+                Button {
+                    confirmDelete = (toolID: toolID, name: server.name)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11))
+                        .foregroundColor(.red.opacity(0.6))
+                }
+                .buttonStyle(.plain)
+                .help("Remove from project")
             }
-            .buttonStyle(.plain)
-            .help("Remove from project")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
+    }
+
+    private func applyToggle(_ item: ProjectMCPToggle) {
+        guard !item.server.isReadOnly else {
+            toggleError = ProjectMCPError(message: item.server.readOnlyReason ?? "This MCP source is read-only.")
+            return
+        }
+
+        if item.enable, item.server.disabledByClaudeApproval {
+            guard item.server.canResolveClaudeApprovalFromProjectMCP else {
+                toggleError = ProjectMCPError(message: item.server.externalClaudeApprovalMessage)
+                return
+            }
+            let path = (project.path as NSString).appendingPathComponent(".mcp.json")
+            do {
+                try ConfigWriter.resolveClaudeMCPApprovalConflict(path: path, serverNames: [item.server.name])
+            } catch {
+                toggleError = ProjectMCPError(message: error.localizedDescription)
+                return
+            }
+        }
+
+        if !item.enable || item.server.disabledByConfig {
+            let result = mcpStore.toggleServerDisabled(
+                toolID: item.server.toolID,
+                scope: .project,
+                projectRoot: project.path,
+                name: item.server.name,
+                currently: item.server.disabledByConfig
+            )
+            guard result.ok else {
+                toggleError = ProjectMCPError(message: result.error ?? "Unknown error")
+                return
+            }
+        }
+
+        reloadTick += 1
     }
 
     // MARK: - Empty state
@@ -297,4 +492,80 @@ private struct IdentifiableMCPServer: Identifiable {
     let id = UUID()
     let toolID: String
     let name: String
+}
+
+private struct ProjectMCPServerRow: Identifiable {
+    var id: String { originID }
+    let originID: String
+    let toolID: String
+    let source: MCPConfigSource
+    let name: String
+    let detail: String
+    let sourceLabel: String
+    let sourcePathLabel: String
+    let isReadOnly: Bool
+    let readOnlyReason: String?
+    let disabled: Bool
+    let disabledByConfig: Bool
+    let disabledByClaudeApproval: Bool
+    let claudeApprovalDisableSources: [String]
+    let canResolveClaudeApprovalFromProjectMCP: Bool
+
+    var enableBlockedByExternalClaudeApproval: Bool {
+        disabled && disabledByClaudeApproval && !canResolveClaudeApprovalFromProjectMCP
+    }
+
+    var externalClaudeApprovalMessage: String {
+        let sources = claudeApprovalDisableSources.map { ($0 as NSString).lastPathComponent }.joined(separator: ", ")
+        let suffix = sources.isEmpty ? "Claude settings" : sources
+        return "Disabled by \(suffix). Review that Claude settings source before enabling."
+    }
+}
+
+private struct ProjectMCPToggle: Identifiable {
+    var id: String { "\(server.id)::\(enable ? "enable" : "disable")" }
+    let server: ProjectMCPServerRow
+    let enable: Bool
+
+    init(server: ProjectMCPServerRow) {
+        self.server = server
+        self.enable = server.disabled
+    }
+
+    var title: String {
+        enable ? "Enable MCP server?" : "Disable MCP server?"
+    }
+
+    var actionLabel: String {
+        enable ? "Enable \(server.name)" : "Disable \(server.name)"
+    }
+
+    var message: String {
+        let relativePath: String
+        switch server.toolID {
+        case "claude-code":
+            relativePath = ".mcp.json"
+        case "codex":
+            relativePath = ".codex/config.toml"
+        default:
+            relativePath = "project MCP config"
+        }
+
+        if enable, server.disabledByClaudeApproval, !server.disabledByConfig {
+            if !server.canResolveClaudeApprovalFromProjectMCP {
+                return "This server is disabled by Claude settings outside .mcp.json. Review \(server.claudeApprovalDisableSources.map { ($0 as NSString).lastPathComponent }.joined(separator: ", ")) before enabling it."
+            }
+            return "This removes \(server.name) from disabledMcpjsonServers in \(relativePath). Packages, credentials, and other servers stay unchanged."
+        }
+
+        let verb = enable
+            ? "moves \(server.name) back to the active project MCP set"
+            : "moves \(server.name) to the disabled project MCP set"
+        return "This \(verb) in \(relativePath). Packages, credentials, and other servers stay unchanged."
+    }
+}
+
+private struct ProjectMCPError: Identifiable {
+    let id = UUID()
+    let message: String
 }

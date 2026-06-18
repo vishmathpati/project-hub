@@ -24,10 +24,23 @@ struct MCPCopyToAppsSheet: View {
 
     @State private var running = false
     @State private var resultText: String? = nil
+    @State private var resultMessages: [String] = []
 
     private var candidateTools: [ToolSummary] {
         mcpStore.detectedTools.filter { $0.toolID != sourceToolID
             && ConfigWriter.supportsNativeWrite(toolID: $0.toolID) }
+    }
+
+    private var sourceConfig: [String: Any]? {
+        ConfigWriter.readServer(toolID: sourceToolID, name: serverName)
+            ?? scannedSourceEntry.map(configFromScannedSource)
+    }
+
+    private var scannedSourceEntry: ServerEntry? {
+        mcpStore.detectedTools
+            .first(where: { $0.toolID == sourceToolID })?
+            .servers
+            .first(where: { $0.name == serverName && !$0.isReadOnly })
     }
 
     private var projectScopedToolMeta: [(id: String, label: String, short: String)] {
@@ -46,6 +59,7 @@ struct MCPCopyToAppsSheet: View {
                 case .universal:  universalView
                 case .byProject:  byProjectView
                 }
+                copyPreviewSection
                 footer
             } else {
                 resultView
@@ -129,6 +143,8 @@ struct MCPCopyToAppsSheet: View {
                         ForEach(candidateTools) { tool in
                             let c = ToolPalette.color(for: tool.toolID)
                             let already = tool.servers.contains(where: { $0.name == serverName })
+                            let blocker = copyBlocker(toolID: tool.toolID, scope: .user)
+                            let blocked = blocker != nil
                             Button(action: { toggleApp(tool.toolID) }) {
                                 HStack(spacing: 10) {
                                     ZStack {
@@ -139,8 +155,16 @@ struct MCPCopyToAppsSheet: View {
                                             .font(.system(size: 11, weight: .semibold))
                                             .foregroundColor(c)
                                     }
-                                    Text(tool.label)
-                                        .font(.system(size: 12, weight: .medium))
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(tool.label)
+                                            .font(.system(size: 12, weight: .medium))
+                                        if let blocker {
+                                            Text(blocker)
+                                                .font(.system(size: 9))
+                                                .foregroundColor(.secondary)
+                                                .lineLimit(2)
+                                        }
+                                    }
                                     if already {
                                         Text("— already installed, will overwrite")
                                             .font(.system(size: 10))
@@ -156,8 +180,10 @@ struct MCPCopyToAppsSheet: View {
                                 .padding(.vertical, 7)
                                 .background(selectedApps.contains(tool.toolID) ? c.opacity(0.08) : Color.clear)
                                 .clipShape(RoundedRectangle(cornerRadius: 7))
+                                .opacity(blocked ? 0.58 : 1)
                             }
                             .buttonStyle(.plain)
+                            .disabled(blocked)
                         }
                     }
                 }
@@ -263,6 +289,8 @@ struct MCPCopyToAppsSheet: View {
                     ForEach(projectScopedToolMeta, id: \.id) { meta in
                         let c = ToolPalette.color(for: meta.id)
                         let already = projectToolAlreadyHasServer(toolID: meta.id)
+                        let blocker = copyBlocker(toolID: meta.id, scope: .project)
+                        let blocked = blocker != nil
                         Button(action: { toggleProjectTool(meta.id) }) {
                             HStack(spacing: 10) {
                                 ZStack {
@@ -279,6 +307,12 @@ struct MCPCopyToAppsSheet: View {
                                     Text(projectConfigPath(toolID: meta.id))
                                         .font(.system(size: 9))
                                         .foregroundColor(.secondary)
+                                    if let blocker {
+                                        Text(blocker)
+                                            .font(.system(size: 9))
+                                            .foregroundColor(.secondary)
+                                            .lineLimit(2)
+                                    }
                                 }
                                 if already {
                                     Text("— will overwrite")
@@ -295,8 +329,10 @@ struct MCPCopyToAppsSheet: View {
                             .padding(.vertical, 7)
                             .background(selectedProjectTools.contains(meta.id) ? c.opacity(0.08) : Color.clear)
                             .clipShape(RoundedRectangle(cornerRadius: 7))
+                            .opacity(blocked ? 0.58 : 1)
                         }
                         .buttonStyle(.plain)
+                        .disabled(blocked)
                     }
                 }
             }
@@ -353,6 +389,47 @@ struct MCPCopyToAppsSheet: View {
         .padding(.vertical, 10)
     }
 
+    @ViewBuilder
+    private var copyPreviewSection: some View {
+        if hasSelection {
+            Divider()
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("PREVIEW")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.secondary.opacity(0.75))
+                    Spacer()
+                    Text("Applied exactly or refused if changed")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+
+                if sourceConfig == nil {
+                    Text("Project Hub could not read this source server before previewing.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.orange)
+                } else {
+                    ScrollView {
+                        DiffPreviewBlock(
+                            servers: previewServers,
+                            selectedTools: selectedCopyToolIDs,
+                            scope: copyScope,
+                            projectRoot: copyProjectRoot
+                        )
+                    }
+                    .frame(maxHeight: 120)
+                    Text("Copy writes use this preview with stale-file protection; if a target config changes before Copy, Project Hub refuses that destination.")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxHeight: 190)
+        }
+    }
+
     // MARK: - Result
 
     private var resultView: some View {
@@ -362,6 +439,19 @@ struct MCPCopyToAppsSheet: View {
                     .foregroundColor(.green).font(.system(size: 20))
                 Text(resultText ?? "").font(.system(size: 12))
                 Spacer()
+            }
+            if !resultMessages.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(resultMessages, id: \.self) { message in
+                        Text(message)
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(8)
+                .background(Color(NSColor.controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 7))
             }
             HStack {
                 Spacer()
@@ -380,10 +470,18 @@ struct MCPCopyToAppsSheet: View {
     // MARK: - Helpers
 
     private func toggleApp(_ id: String) {
+        guard copyBlocker(toolID: id, scope: .user) == nil else {
+            selectedApps.remove(id)
+            return
+        }
         if selectedApps.contains(id) { selectedApps.remove(id) } else { selectedApps.insert(id) }
     }
 
     private func toggleProjectTool(_ id: String) {
+        guard copyBlocker(toolID: id, scope: .project) == nil else {
+            selectedProjectTools.remove(id)
+            return
+        }
         if selectedProjectTools.contains(id) { selectedProjectTools.remove(id) } else { selectedProjectTools.insert(id) }
     }
 
@@ -395,8 +493,20 @@ struct MCPCopyToAppsSheet: View {
 
     private func selectProject(_ project: Project) {
         selectedProject = project
-        selectedProjectTools = Set(detectedProjectToolIDs(for: project))
-        if selectedProjectTools.isEmpty { selectedProjectTools = ["claude-code"] }
+        selectedProjectTools = Set(detectedProjectToolIDs(for: project).filter {
+            copyBlocker(toolID: $0, scope: .project) == nil
+        })
+        if selectedProjectTools.isEmpty,
+           copyBlocker(toolID: "claude-code", scope: .project) == nil {
+            selectedProjectTools = ["claude-code"]
+        }
+    }
+
+    private func copyBlocker(toolID: String, scope: ConfigScope) -> String? {
+        guard let config = sourceConfig else {
+            return "Project Hub could not read this source server before copying."
+        }
+        return ConfigWriter.nativeWriteBlocker(toolID: toolID, scope: scope, name: serverName, config: config)
     }
 
     private func pickFolder() -> String? {
@@ -419,41 +529,169 @@ struct MCPCopyToAppsSheet: View {
     private func projectConfigPath(toolID: String) -> String {
         switch toolID {
         case "claude-code": return ".mcp.json"
-        case "cursor":      return ".cursor/mcp.json"
-        case "vscode":      return ".vscode/mcp.json"
-        case "roo":         return ".roo/mcp.json"
         case "codex":       return ".codex/config.toml"
         default:            return ""
         }
+    }
+
+    private var selectedCopyToolIDs: [String] {
+        switch tab {
+        case .universal:
+            return candidateTools
+                .map(\.toolID)
+                .filter { selectedApps.contains($0) && copyBlocker(toolID: $0, scope: .user) == nil }
+        case .byProject:
+            return projectScopedToolMeta
+                .map(\.id)
+                .filter { selectedProjectTools.contains($0) && copyBlocker(toolID: $0, scope: .project) == nil }
+        }
+    }
+
+    private var copyScope: ConfigScope {
+        tab == .universal ? .user : .project
+    }
+
+    private var copyProjectRoot: String? {
+        tab == .byProject ? selectedProject?.path : nil
+    }
+
+    private var previewServers: [ParsedServer] {
+        guard let sourceConfig else { return [] }
+        return [ParsedServer(name: serverName, config: sourceConfig)]
+    }
+
+    private func configFromScannedSource(_ entry: ServerEntry) -> [String: Any] {
+        var config: [String: Any] = [:]
+
+        if let command = entry.command {
+            config["command"] = command
+        }
+        if !entry.args.isEmpty {
+            config["args"] = entry.args
+        }
+        if let cwd = entry.cwd {
+            config["cwd"] = cwd
+        }
+        if let url = entry.url {
+            config["url"] = url
+        }
+        if entry.transport != "stdio" {
+            config["type"] = entry.transport
+        }
+        if !entry.env.isEmpty {
+            config["env"] = entry.env
+        }
+        if !entry.headers.isEmpty {
+            config["headers"] = entry.headers
+        }
+        if let headersHelper = entry.headersHelper {
+            config["headersHelper"] = headersHelper
+        }
+        if !entry.oauth.isEmpty {
+            config["oauth"] = entry.oauth
+        }
+        if let bearerTokenEnvVar = entry.bearerTokenEnvVar {
+            config["bearer_token_env_var"] = bearerTokenEnvVar
+        }
+        if !entry.envVars.isEmpty {
+            config["env_vars"] = entry.envVars
+        }
+        if let envFile = entry.envFile {
+            config["envFile"] = envFile
+        }
+        if let sandboxEnabled = entry.sandboxEnabled {
+            config["sandboxEnabled"] = sandboxEnabled
+        }
+        if let sandboxSummary = entry.sandboxSummary {
+            config["sandbox"] = sandboxSummary
+        }
+        if let devSummary = entry.devSummary {
+            config["dev"] = devSummary
+        }
+        if !entry.enabledTools.isEmpty {
+            config["enabledTools"] = entry.enabledTools
+        }
+        if !entry.alwaysAllowTools.isEmpty {
+            config["alwaysAllow"] = entry.alwaysAllowTools
+        }
+        if !entry.disabledTools.isEmpty {
+            config["disabledTools"] = entry.disabledTools
+        }
+        if let defaultToolApprovalMode = entry.defaultToolApprovalMode {
+            config["defaultToolApprovalMode"] = defaultToolApprovalMode
+        }
+        if !entry.toolApprovalModes.isEmpty {
+            config["toolApprovalModes"] = entry.toolApprovalModes
+        }
+        if !entry.watchPaths.isEmpty {
+            config["watchPaths"] = entry.watchPaths
+        }
+        if let serverTimeoutSeconds = entry.serverTimeoutSeconds {
+            config["timeout"] = serverTimeoutSeconds
+        }
+        if let startupTimeoutSeconds = entry.startupTimeoutSeconds {
+            config["startup_timeout_sec"] = startupTimeoutSeconds
+        }
+        if let toolTimeoutSeconds = entry.toolTimeoutSeconds {
+            config["tool_timeout_sec"] = toolTimeoutSeconds
+        }
+
+        return config
     }
 
     // MARK: - Run
 
     private func run() {
         running = true
+        resultMessages = []
         var totalOk = 0
         var totalFail = 0
 
-        switch tab {
-        case .universal:
-            let outcome = mcpStore.copyServer(name: serverName, from: sourceToolID, to: Array(selectedApps))
-            totalOk   += outcome.successes.count
-            totalFail += outcome.failures.count
+        guard let config = sourceConfig else {
+            running = false
+            resultText = "Copy failed — Project Hub could not read the source server."
+            return
+        }
 
-        case .byProject:
-            if let project = selectedProject,
-               let config = ConfigWriter.readServer(toolID: sourceToolID, name: serverName) {
-                for toolID in selectedProjectTools {
-                    do {
-                        try ConfigWriter.writeServer(
-                            toolID: toolID, scope: .project,
-                            projectRoot: project.path, name: serverName, config: config)
-                        totalOk += 1
-                    } catch {
-                        totalFail += 1
-                    }
-                }
+        let scope = copyScope
+        let root = copyProjectRoot
+        let batch = [(name: serverName, config: config)]
+        let targetToolIDs = selectedCopyToolIDs
+
+        guard !targetToolIDs.isEmpty else {
+            running = false
+            resultText = "Copy failed — no eligible destination configs were selected."
+            return
+        }
+
+        for toolID in targetToolIDs {
+            guard let path = ConfigWriter.previewPath(toolID: toolID, scope: scope, projectRoot: root),
+                  let preview = ConfigWriter.previewWriteBatch(
+                    toolID: toolID,
+                    scope: scope,
+                    projectRoot: root,
+                    servers: batch
+                  ) else {
+                totalFail += 1
+                resultMessages.append("\(label(for: toolID)) skipped: preview could not be built.")
+                continue
             }
+
+            do {
+                try ConfigWriter.applyTextPreview(
+                    configPath: path,
+                    expectedBefore: preview.before,
+                    approvedAfter: preview.after
+                )
+                totalOk += 1
+            } catch {
+                totalFail += 1
+                resultMessages.append("\(label(for: toolID)) failed: \(error.localizedDescription)")
+            }
+        }
+
+        if totalOk > 0 {
+            mcpStore.refresh()
         }
 
         running = false
@@ -464,5 +702,9 @@ struct MCPCopyToAppsSheet: View {
         } else {
             resultText = "Copied to \(totalOk) destination\(totalOk == 1 ? "" : "s"); \(totalFail) failed."
         }
+    }
+
+    private func label(for toolID: String) -> String {
+        ALL_TOOL_META.first(where: { $0.id == toolID })?.label ?? toolID
     }
 }

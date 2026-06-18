@@ -7,6 +7,8 @@ import Combine
 final class MCPStore: ObservableObject {
     @Published var tools:      [ToolSummary] = []
     @Published var isLoading:  Bool          = false
+    @Published var isVerifyingHealth: Bool   = false
+    @Published private var verifiedHealthReports: [String: MCPHealthReport] = [:]
     @Published var searchText: String        = ""
 
     // Only detected tools, in display order. Hidden tools excluded from UI.
@@ -28,6 +30,66 @@ final class MCPStore: ObservableObject {
 
     var serverCount: Int { allServerNames.count }
 
+    var healthReports: [MCPHealthReport] {
+        detectedTools.flatMap { tool in
+            tool.servers.map { health(for: $0, toolID: tool.toolID) }
+        }
+    }
+
+    var healthSummary: [MCPHealthStatus: Int] {
+        MCPHealthChecker.summarize(healthReports)
+    }
+
+    func health(for server: ServerEntry, toolID: String) -> MCPHealthReport {
+        let key = healthKey(toolID: toolID, serverID: server.id)
+        if let verified = verifiedHealthReports[key] {
+            return verified
+        }
+        let tool = tools.first(where: { $0.toolID == toolID })
+        return MCPHealthChecker.evaluate(
+            server: server,
+            toolID: toolID,
+            configPath: configPath(for: server, tool: tool)
+        )
+    }
+
+    func verifyHealth() {
+        guard !isVerifyingHealth else { return }
+        let snapshot = detectedTools
+        guard !snapshot.isEmpty else { return }
+        isVerifyingHealth = true
+        verifiedHealthReports = [:]
+
+        Task {
+            for tool in snapshot {
+                for server in tool.servers {
+                    let report: MCPHealthReport
+                    if self.shouldUseConservativeVerify(for: server, toolID: tool.toolID) {
+                        report = MCPHealthReport(
+                            toolID: tool.toolID,
+                            serverName: server.name,
+                            status: .unknown,
+                            summary: "Runtime managed by \(server.sourceLabel ?? "owning app")",
+                            fixHint: "Verify this server in the owning app. Project Hub does not launch app-managed extension commands."
+                        )
+                    } else {
+                        report = await MCPHealthChecker.verify(
+                            server: server,
+                            toolID: tool.toolID,
+                            configPath: self.configPath(for: server, tool: tool)
+                        )
+                    }
+                    await MainActor.run {
+                        self.verifiedHealthReports[self.healthKey(toolID: tool.toolID, serverID: server.id)] = report
+                    }
+                }
+            }
+            await MainActor.run {
+                self.isVerifyingHealth = false
+            }
+        }
+    }
+
     func matches(_ name: String) -> Bool {
         let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
         if q.isEmpty { return true }
@@ -41,6 +103,7 @@ final class MCPStore: ObservableObject {
             let result = ConfigReader.shared.readAllTools()
             await MainActor.run {
                 self.tools     = result
+                self.verifiedHealthReports = [:]
                 self.isLoading = false
             }
         }
@@ -73,6 +136,10 @@ final class MCPStore: ObservableObject {
         var successes: [String] = []
         var failures:  [(String, String)] = []
         for toolID in toolIDs {
+            if hasOnlyReadOnlyMatches(toolID: toolID, name: name) {
+                failures.append((toolID, "Read-only MCP source"))
+                continue
+            }
             guard ConfigWriter.supportsNativeWrite(toolID: toolID) else {
                 failures.append((toolID, "Format not supported"))
                 continue
@@ -88,10 +155,47 @@ final class MCPStore: ObservableObject {
         return (successes, failures)
     }
 
+    @discardableResult
+    func updateServerCredentials(
+        name: String,
+        values: [String: String],
+        requirements: [ImportCredentialRequirement],
+        across toolIDs: [String]
+    ) -> (successes: [String], failures: [(toolID: String, message: String)]) {
+        var successes: [String] = []
+        var failures:  [(String, String)] = []
+        for toolID in toolIDs {
+            if hasOnlyReadOnlyMatches(toolID: toolID, name: name) {
+                failures.append((toolID, "Read-only MCP source"))
+                continue
+            }
+            guard ConfigWriter.supportsNativeWrite(toolID: toolID) else {
+                failures.append((toolID, "Format not supported"))
+                continue
+            }
+            do {
+                try ConfigWriter.updateServerCredentials(
+                    toolID: toolID,
+                    name: name,
+                    values: values,
+                    requirements: requirements
+                )
+                successes.append(toolID)
+            } catch {
+                failures.append((toolID, error.localizedDescription))
+            }
+        }
+        refresh()
+        return (successes, failures)
+    }
+
     // MARK: - Remove
 
     @discardableResult
     func removeServer(toolID: String, name: String) -> (ok: Bool, error: String?) {
+        if hasOnlyReadOnlyMatches(toolID: toolID, name: name) {
+            return (false, "This MCP source is read-only here. Use the Compatibility tab or the owning app/config to change it.")
+        }
         guard ConfigWriter.supportsNativeWrite(toolID: toolID) else {
             return (false, "This app's config format (TOML/YAML) isn't supported yet. Remove it manually.")
         }
@@ -113,6 +217,10 @@ final class MCPStore: ObservableObject {
 
         let hosts = toolsHosting(name: name)
         for toolID in hosts {
+            if hasOnlyReadOnlyMatches(toolID: toolID, name: name) {
+                failures.append((toolID, "Read-only MCP source"))
+                continue
+            }
             guard ConfigWriter.supportsNativeWrite(toolID: toolID) else {
                 failures.append((toolID, "Unsupported format — remove manually"))
                 continue
@@ -138,6 +246,10 @@ final class MCPStore: ObservableObject {
     ) -> (successes: [String], failures: [(toolID: String, message: String)]) {
         var successes: [String] = []
         var failures:  [(String, String)] = []
+
+        if hasOnlyReadOnlyMatches(toolID: sourceToolID, name: name) {
+            return ([], [(sourceToolID, "This MCP source is read-only here. Use Compatibility to inspect it or import from a writable config.")])
+        }
 
         guard let config = ConfigWriter.readServer(toolID: sourceToolID, name: name) else {
             return ([], [(sourceToolID, "Couldn't read '\(name)' from \(sourceToolID)")])
@@ -178,6 +290,9 @@ final class MCPStore: ObservableObject {
         name: String,
         config: [String: Any]
     ) -> (ok: Bool, error: String?) {
+        if scope == .user && hasOnlyReadOnlyMatches(toolID: toolID, name: name) {
+            return (false, "This MCP source is read-only here. Use the Compatibility tab or the owning app/config to change it.")
+        }
         guard ConfigWriter.supportsNativeWrite(toolID: toolID) else {
             return (false, "This app's config format isn't supported yet.")
         }
@@ -194,16 +309,91 @@ final class MCPStore: ObservableObject {
 
     @discardableResult
     func toggleServerDisabled(toolID: String, name: String, currently disabled: Bool) -> (ok: Bool, error: String?) {
+        toggleServerDisabled(toolID: toolID, scope: .user, projectRoot: nil, name: name, currently: disabled)
+    }
+
+    func previewCodexPluginPolicyToggle(
+        toolID: String,
+        server: ServerEntry,
+        currently disabled: Bool
+    ) -> CodexPluginMCPPolicyPreview? {
+        guard toolID == "codex",
+              server.canToggleCodexPluginPolicy,
+              let configPath = server.codexPluginPolicyConfigPath,
+              let pluginID = server.codexPluginID else {
+            return nil
+        }
+        let enabled = disabled
+        let profileName = enabled ? nil : server.codexPluginPolicyProfileName
+        guard let preview = ConfigWriter.previewSetCodexPluginMCPServerEnabled(
+            configPath: configPath,
+            pluginID: pluginID,
+            serverName: server.name,
+            enabled: enabled,
+            profileName: profileName
+        ) else {
+            return nil
+        }
+        return CodexPluginMCPPolicyPreview(
+            toolID: toolID,
+            serverName: server.name,
+            configPath: configPath,
+            pluginID: pluginID,
+            profileName: profileName,
+            enabled: enabled,
+            before: preview.before,
+            after: preview.after
+        )
+    }
+
+    @discardableResult
+    func applyCodexPluginPolicyPreview(_ preview: CodexPluginMCPPolicyPreview) -> (ok: Bool, error: String?) {
+        do {
+            try ConfigWriter.applyCodexPluginMCPServerEnabledPreview(
+                configPath: preview.configPath,
+                expectedBefore: preview.before,
+                approvedAfter: preview.after
+            )
+            refresh()
+            return (true, nil)
+        } catch {
+            return (false, error.localizedDescription)
+        }
+    }
+
+    @discardableResult
+    func toggleServerDisabled(
+        toolID: String,
+        scope: ConfigScope,
+        projectRoot: String?,
+        name: String,
+        currently disabled: Bool
+    ) -> (ok: Bool, error: String?) {
+        if scope == .user && hasOnlyReadOnlyMatches(toolID: toolID, name: name) {
+            return (false, "This MCP source is read-only here. Use the Compatibility tab or the owning app/config to change it.")
+        }
         guard ConfigWriter.supportsNativeWrite(toolID: toolID) else {
-            return (false, "This app's config format (TOML/YAML) doesn't support toggling.")
+            return (false, "This app's config format doesn't support toggling.")
         }
         do {
             if disabled {
-                try ConfigWriter.enableServer(toolID: toolID, name: name)
+                try ConfigWriter.setServerEnabled(
+                    toolID: toolID,
+                    scope: scope,
+                    projectRoot: projectRoot,
+                    name: name,
+                    enabled: true
+                )
             } else {
-                try ConfigWriter.disableServer(toolID: toolID, name: name)
+                try ConfigWriter.setServerEnabled(
+                    toolID: toolID,
+                    scope: scope,
+                    projectRoot: projectRoot,
+                    name: name,
+                    enabled: false
+                )
             }
-            refresh()
+            if scope == .user { refresh() }
             return (true, nil)
         } catch {
             return (false, error.localizedDescription)
@@ -229,5 +419,36 @@ final class MCPStore: ObservableObject {
     func hasUndoableChange(toolID: String) -> Bool {
         guard let spec = ToolSpecs.spec(for: toolID) else { return false }
         return !ConfigWriter.backups(forPath: spec.path).isEmpty
+    }
+
+    private func healthKey(toolID: String, serverName: String) -> String {
+        guard let server = tools.first(where: { $0.toolID == toolID })?.servers.first(where: { $0.name == serverName }) else {
+            return "\(toolID)/\(serverName)"
+        }
+        return healthKey(toolID: toolID, serverID: server.id)
+    }
+
+    private func healthKey(toolID: String, serverID: String) -> String {
+        "\(toolID)/\(serverID)"
+    }
+
+    private func configPath(for server: ServerEntry, tool: ToolSummary?) -> String? {
+        guard server.isReadOnly,
+              let sourcePath = server.sourcePath?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !sourcePath.isEmpty else {
+            return tool?.configPath
+        }
+        return sourcePath
+    }
+
+    private func shouldUseConservativeVerify(for server: ServerEntry, toolID: String) -> Bool {
+        toolID == "claude-desktop"
+            && server.isReadOnly
+            && server.sourceLabel?.hasPrefix("Claude Desktop extension:") == true
+    }
+
+    private func hasOnlyReadOnlyMatches(toolID: String, name: String) -> Bool {
+        let matches = tools.first(where: { $0.toolID == toolID })?.servers.filter { $0.name == name } ?? []
+        return !matches.isEmpty && matches.allSatisfy(\.isReadOnly)
     }
 }

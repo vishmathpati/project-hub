@@ -9,7 +9,7 @@ struct HooksView: View {
     @State private var hooks: [HookEntry] = []
 
     // Group by tool name in a stable order
-    private let toolOrder = ["Claude Code", "Codex", "Cursor"]
+    private let toolOrder = ["Claude Code", "Codex"]
 
     private var groupedHooks: [(tool: String, entries: [HookEntry])] {
         toolOrder.compactMap { tool in
@@ -142,7 +142,7 @@ struct HooksView: View {
             Image(systemName: "info.circle")
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
-            Text("Hooks are read-only here. Edit settings.json to change them.")
+            Text("Hooks are read-only here. Edit Claude settings or Codex hooks/config files to change them.")
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
         }
@@ -192,7 +192,6 @@ struct HooksView: View {
         switch tool {
         case "Claude Code": return "c.circle.fill"
         case "Codex":       return "chevron.left.forwardslash.chevron.right"
-        case "Cursor":      return "cursorarrow"
         default:            return "wrench.fill"
         }
     }
@@ -201,7 +200,6 @@ struct HooksView: View {
         switch tool {
         case "Claude Code": return .orange
         case "Codex":       return .blue
-        case "Cursor":      return .purple
         default:            return .secondary
         }
     }

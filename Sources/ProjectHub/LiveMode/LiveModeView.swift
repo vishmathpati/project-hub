@@ -284,16 +284,39 @@ struct LiveModeView: View {
     }
 
     private func toggleSkill(item: SkillTokenItem, enable: Bool, snapshot: ContextSnapshot) {
-        let fm          = FileManager.default
-        let skillsDir   = (snapshot.projectPath as NSString).appendingPathComponent(".claude/skills")
-        let disabledDir = (skillsDir as NSString).appendingPathComponent("_disabled")
-        let enabledPath  = (skillsDir as NSString).appendingPathComponent(item.id)
-        let disabledPath = (disabledDir as NSString).appendingPathComponent(item.id)
+        let fm = FileManager.default
+        let canonicalPath = URL(fileURLWithPath: item.path)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
+        guard canonicalPath.contains("/.claude/skills/") else {
+            refreshSnapshot()
+            return
+        }
+
+        let skillName = (canonicalPath as NSString).lastPathComponent
+        let parentDir = (canonicalPath as NSString).deletingLastPathComponent
+        let enabledDir: String
+        let disabledDir: String
+        let enabledPath: String
+        let disabledPath: String
+
+        if (parentDir as NSString).lastPathComponent == "_disabled" {
+            disabledDir = parentDir
+            enabledDir = (parentDir as NSString).deletingLastPathComponent
+            disabledPath = canonicalPath
+            enabledPath = (enabledDir as NSString).appendingPathComponent(skillName)
+        } else {
+            enabledDir = parentDir
+            disabledDir = (enabledDir as NSString).appendingPathComponent("_disabled")
+            enabledPath = canonicalPath
+            disabledPath = (disabledDir as NSString).appendingPathComponent(skillName)
+        }
 
         do {
             if enable {
                 if fm.fileExists(atPath: disabledPath) {
-                    try fm.createDirectory(atPath: skillsDir, withIntermediateDirectories: true)
+                    try fm.createDirectory(atPath: enabledDir, withIntermediateDirectories: true)
                     if fm.fileExists(atPath: enabledPath) { try fm.removeItem(atPath: enabledPath) }
                     try fm.moveItem(atPath: disabledPath, toPath: enabledPath)
                 }
