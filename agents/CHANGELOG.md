@@ -7,6 +7,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 
 ## [2026-06-18] · Codex
 
+### Fixed
+- Built a fresh release `ProjectHub.app`, installed it to `/Applications/ProjectHub.app`, verified the app bundle signature, and confirmed `/Applications` contains only one Project Hub app bundle.
+
+## [2026-06-18] · Codex
+
 ### Added
 - Restored and merged the recovered Compatibility branch into active `main`, including the Compatibility scanner/view, MCP health and import coverage, Codex plugin/profile surfaces, and regression coverage that had lived only in the recovered worktree.
 - Added Claude Code additional-directory skill roots to Compatibility skill-support surfaces and restored read-only adjacent editor project MCP visibility for Cursor, VS Code, and Roo config files.
