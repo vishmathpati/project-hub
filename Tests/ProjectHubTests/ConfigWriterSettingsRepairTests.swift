@@ -54,8 +54,10 @@ final class ConfigWriterSettingsRepairTests: XCTestCase {
             ))
 
             XCTAssertTrue(preview.after.contains("[mcp_servers.registry-remote]"))
-            XCTAssertTrue(preview.after.contains("http_headers = { Authorization = \"Bearer ${API_TOKEN}\", X-Input = \"${input:token}\", X-Static = \"yes\" }"))
+            XCTAssertTrue(preview.after.contains("bearer_token_env_var = \"API_TOKEN\""))
+            XCTAssertTrue(preview.after.contains("http_headers = { X-Input = \"${input:token}\", X-Static = \"yes\" }"))
             XCTAssertTrue(preview.after.contains("env_http_headers = { X-API-Key = \"X_API_KEY\" }"))
+            XCTAssertFalse(preview.after.contains("Authorization = \"Bearer ${API_TOKEN}\""))
             XCTAssertFalse(preview.after.contains("X-API-Key = \"${X_API_KEY}\""))
         }
     }

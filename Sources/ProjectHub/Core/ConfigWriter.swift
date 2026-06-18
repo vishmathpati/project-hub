@@ -3700,7 +3700,7 @@ enum ConfigWriter {
     }
 
     private static func codexProjectSectionValues(toml: String, projectRoot: String) -> [String: String] {
-        let target = Project.canonicalize(projectRoot)
+        let target = canonicalConfigPath(projectRoot)
         var values: [String: String] = [:]
         var inTargetProject = false
 
@@ -3712,7 +3712,7 @@ enum ConfigWriter {
                     inTargetProject = false
                     continue
                 }
-                inTargetProject = Project.canonicalize(project) == target
+                inTargetProject = canonicalConfigPath(project) == target
                 continue
             }
 
@@ -3737,7 +3737,7 @@ enum ConfigWriter {
         let lines = toml.components(separatedBy: "\n")
         var targetStart: Int?
         var targetEnd = lines.count
-        let target = Project.canonicalize(projectRoot)
+        let target = canonicalConfigPath(projectRoot)
 
         for (index, rawLine) in lines.enumerated() {
             let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
@@ -3750,7 +3750,7 @@ enum ConfigWriter {
             guard trimmed.hasPrefix("["),
                   let section = tomlSectionName(from: trimmed),
                   let project = codexProjectPath(fromSection: section) else { continue }
-            if Project.canonicalize(project) == target {
+            if canonicalConfigPath(project) == target {
                 targetStart = index
             }
         }
@@ -3777,7 +3777,6 @@ enum ConfigWriter {
                 updated[index] = "\(prefix)\(spacing)\(tomlStr(trustLevel))\(parts.comment)"
                 return updated.joined(separator: "\n")
             }
-
             updated.insert("trust_level = \(tomlStr(trustLevel))", at: targetStart + 1)
             return updated.joined(separator: "\n")
         }
@@ -3791,6 +3790,14 @@ enum ConfigWriter {
         }
         output += "[projects.\(tomlStr(projectRoot))]\ntrust_level = \(tomlStr(trustLevel))\n"
         return output
+    }
+
+    private static func canonicalConfigPath(_ raw: String) -> String {
+        let expanded = (raw as NSString).expandingTildeInPath
+        return URL(fileURLWithPath: expanded)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
     }
 
     private static func codexProjectPath(fromSection section: String) -> String? {

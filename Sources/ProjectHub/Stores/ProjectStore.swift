@@ -412,6 +412,18 @@ final class ProjectStore: ObservableObject {
             append("codex")
         }
 
+        if exists(".cursor/mcp.json") {
+            append("cursor")
+        }
+
+        if exists(".vscode/mcp.json") {
+            append("vscode")
+        }
+
+        if exists(".roo/mcp.json") {
+            append("roo")
+        }
+
         return ids
     }
 
@@ -565,6 +577,9 @@ enum ProjectRootDetector {
             "CLAUDE.md",
             ".mcp.json",
             ".codex/config.toml",
+            ".cursor/mcp.json",
+            ".vscode/mcp.json",
+            ".roo/mcp.json",
             ".agents/skills",
             ".claude/settings.json",
             ".claude/launch.json",

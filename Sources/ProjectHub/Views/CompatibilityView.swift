@@ -30,6 +30,8 @@ struct CompatibilityView: View {
     @State private var codexProfileNames: [String] = []
     @State private var postFixActions: [CompatibilityManualAction] = []
     @State private var copiedReport = false
+    @State private var scanning = false
+    @State private var scanRequestID = UUID()
 
     init(project: Project? = nil) {
         self.fixedProject = project
@@ -159,8 +161,14 @@ struct CompatibilityView: View {
 
             Button(action: refresh) {
                 HStack(spacing: 4) {
-                    Image(systemName: "arrow.clockwise")
-                    Text("Scan")
+                    if scanning {
+                        ProgressView()
+                            .scaleEffect(0.5)
+                            .frame(width: 12, height: 12)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    Text(scanning ? "Scanning" : "Scan")
                 }
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(.white)
@@ -170,6 +178,7 @@ struct CompatibilityView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
+            .disabled(scanning)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -6827,13 +6836,30 @@ struct CompatibilityView: View {
 
     private func refresh() {
         ensureSelectedProject()
-        reloadCodexProfileNames()
-        normalizeCodexRuntimeProfileSelection()
-        report = CompatibilityScanner.scan(
-            projectRoot: scanRoot,
-            codexProfileSelection: codexRuntimeProfileSelection
-        )
-        liveReports = [:]
+        let requestID = UUID()
+        let requestedRoot = scanRoot
+        let requestedProfileName = codexRuntimeProfileName
+
+        scanRequestID = requestID
+        scanning = true
+
+        Task.detached(priority: .userInitiated) {
+            let profileNames = CompatibilityScanner.codexConfiguredProfileNames()
+            let normalizedProfileName = profileNames.contains(requestedProfileName) ? requestedProfileName : ""
+            let scanResult = CompatibilityScanner.scan(
+                projectRoot: requestedRoot,
+                codexProfileSelection: CodexProfileSelection.cliRuntimeOverride(normalizedProfileName)
+            )
+
+            await MainActor.run {
+                guard scanRequestID == requestID else { return }
+                codexProfileNames = profileNames
+                codexRuntimeProfileName = normalizedProfileName
+                report = scanResult
+                liveReports = [:]
+                scanning = false
+            }
+        }
     }
 
     private func reloadCodexProfileNames() {

@@ -2098,3 +2098,19 @@
 [19:17] fixed: Recorded Profile Copy cleanup: active copy UI/API now carries Claude/Codex skills, Claude agents, Claude `.mcp.json`, and Codex `.codex/config.toml` only; stale Cursor Rules copy state and result handling were removed.
 [19:17] fixed: Recorded focused profile-copy validation: ProjectMCPReader profile-copy slice, ProfileCopierSkillTests, swift build, and git diff --check passed.
 [19:19] fixed: Recorded active-view fallback cleanup in Project MCP, Copy MCP, and Projects helper switches plus build/whitespace validation.
+[23:44] fixed: Compatibility scan now runs off the SwiftUI main path with a busy state and deterministic XCTest auth probing when no fake Claude command is supplied.
+[23:48] fixed: Added Claude Code additional-directory skill roots to compatibility skill-support surfaces and aligned the support detail copy.
+[23:55] fixed: Corrected additional-directory skill-root dedupe to use file-path canonicalization so symlinked local project state surfaces retain distinct runtime skill roots.
+[16:18] tried_failed: Full swift test was stopped after repeatedly spending minutes in scanner project-root canonicalization during plugin/managed-policy tests; optimizing the hotspot before rerun.
+[16:19] fixed: Replaced project-root canonicalization with file-path canonicalization in compatibility skill override/read paths to remove scanner test and UI scan hotspot.
+[16:24] fixed: Replaced project-root canonicalization with file-path canonicalization for Codex project-section matching in ConfigWriter trust helpers.
+[16:26] fixed: Updated user-scope Codex MCP header writer test to expect established bearer_token_env_var normalization for Bearer ${ENV} Authorization headers.
+[16:35] found_bug: Full swift test exposed stubbed adjacent project MCP detection returning no visibility findings — Sources/ProjectHub/Core/CompatibilityScanner.swift — P1
+[16:42] fixed: Restored adjacent editor project MCP visibility findings for Cursor, VS Code, and Roo project MCP files.
+[16:43] fixed: Focused adjacent project MCP visibility tests passed after detector restoration.
+[16:45] fixed: CompatibilityProjectMCPTests passed all 21 tests after adjacent MCP detector restoration.
+[16:50] found_bug: Full swift test still fails 14 assertions across health checker copy, Project MCP reader/root detection for VS Code/Roo project configs, and skill inventory additional-directory expectations.
+[16:58] fixed: Restored read-only Cursor/VS Code/Roo project MCP discovery and aligned stale headersHelper/additional-directory skill expectations.
+[17:02] fixed: Focused full-failure cluster passed after reader/root/expectation fixes.
+[17:11] fixed: Full Project Hub test suite passed after recovered compatibility and reader fixes.
+[17:12] fixed: Final recovered-branch build and whitespace checks passed.

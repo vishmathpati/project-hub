@@ -717,7 +717,7 @@ final class MCPHealthCheckerTests: XCTestCase {
         )
 
         XCTAssertEqual(report.status, .unknown)
-        XCTAssertEqual(report.summary, "Dynamic auth headers helper configured")
+        XCTAssertEqual(report.summary, "Auth managed by target tool via headersHelper")
         XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
     }
 

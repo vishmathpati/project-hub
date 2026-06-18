@@ -623,7 +623,81 @@ enum CompatibilityScanner {
     }
 
     private static func detectAdjacentProjectMCPConfigs(projectRoot: String?) -> [CompatibilityIssue] {
-        []
+        guard let projectRoot else { return [] }
+
+        struct AdjacentProjectMCPConfig {
+            let id: String
+            let label: String
+            let relativePath: String
+            let serverKeys: [String]
+        }
+
+        let candidates = [
+            AdjacentProjectMCPConfig(
+                id: "cursor",
+                label: "Cursor",
+                relativePath: ".cursor/mcp.json",
+                serverKeys: ["mcpServers"]
+            ),
+            AdjacentProjectMCPConfig(
+                id: "vscode",
+                label: "VS Code",
+                relativePath: ".vscode/mcp.json",
+                serverKeys: ["servers"]
+            ),
+            AdjacentProjectMCPConfig(
+                id: "roo",
+                label: "Roo Code",
+                relativePath: ".roo/mcp.json",
+                serverKeys: ["mcpServers"]
+            )
+        ]
+
+        return candidates.compactMap { candidate in
+            let path = (projectRoot as NSString).appendingPathComponent(candidate.relativePath)
+            guard FileManager.default.fileExists(atPath: path) else { return nil }
+
+            let names = adjacentProjectMCPServerNames(path: path, serverKeys: candidate.serverKeys)
+            let detail: String
+            let subjectPath: String?
+            if names.isEmpty {
+                detail = "\(candidate.label) defines \(candidate.relativePath), but Project Hub could not read any MCP servers from it. This project MCP file is loaded by \(candidate.label), not by Claude Code or Codex."
+                subjectPath = nil
+            } else {
+                let display = names.map { "\"\($0)\"" }.joined(separator: ", ")
+                detail = "\(candidate.label) defines \(display) in \(candidate.relativePath). That project MCP file is loaded by \(candidate.label), not by Claude Code or Codex."
+                subjectPath = names.joined(separator: ",")
+            }
+
+            return CompatibilityIssue(
+                id: UUID(),
+                code: .projectMCPNotUsedByPrimaryTools,
+                severity: .info,
+                toolID: nil,
+                surfaceID: "adjacent-project-mcp-\(candidate.id)",
+                title: "\(candidate.label) project MCP is editor-specific",
+                detail: detail,
+                path: path,
+                subjectPath: subjectPath,
+                fixHint: "Copy the server into project .mcp.json for Claude Code or .codex/config.toml for Codex if it should be available in the primary tools."
+            )
+        }
+    }
+
+    private static func adjacentProjectMCPServerNames(path: String, serverKeys: [String]) -> [String] {
+        guard let raw = try? String(contentsOfFile: path, encoding: .utf8) else { return [] }
+        let stripped = ConfigWriter.stripJsonComments(raw)
+        guard let data = stripped.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return []
+        }
+
+        for key in serverKeys {
+            guard let value = root[key] as? [String: Any],
+                  let servers = serverConfigMap(value) else { continue }
+            return servers.keys.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        }
+        return []
     }
 
     static func compatibilityMatrix(projectRoot: String?) -> [CompatibilityMatrixEntry] {
@@ -1540,6 +1614,22 @@ enum CompatibilityScanner {
             surfaces.append(contentsOf: Self.codexProjectConfigSurfaces(projectRoot: root, selectedPath: selectedPath))
             let skillStart = selectedPath ?? root
             surfaces.append(contentsOf: Self.claudeRepositorySkillSurfaces(start: skillStart))
+            let additionalDirectorySkillConfig = Self.claudeMemoryConfiguration(from: surfaces, projectRoot: projectRoot)
+            var existingClaudeSkillRoots = Set(surfaces
+                .filter { $0.toolID == .claudeCode && $0.kind == .skills }
+                .compactMap(\.path)
+                .map(canonicalFilePath))
+            let additionalDirectorySkillSurfaces = Self.claudeAdditionalDirectorySkillSurfaces(
+                from: additionalDirectorySkillConfig,
+                excluding: existingClaudeSkillRoots
+            )
+            surfaces.append(contentsOf: additionalDirectorySkillSurfaces)
+            existingClaudeSkillRoots.formUnion(additionalDirectorySkillSurfaces.compactMap(\.path).map(canonicalFilePath))
+            surfaces.append(contentsOf: Self.claudeLocalProjectAdditionalDirectorySkillSurfaces(
+                projectRoot: projectRoot,
+                claudeJSONPath: claudeJSONPath,
+                excluding: existingClaudeSkillRoots
+            ))
             surfaces.append(contentsOf: Self.codexRepositorySkillSurfaces(start: skillStart))
             surfaces.append(contentsOf: Self.codexRepositoryInstructionSurfaces(
                 start: instructionStart,
@@ -1955,6 +2045,97 @@ enum CompatibilityScanner {
         }
 
         return entries
+    }
+
+    private static func claudeAdditionalDirectorySkillSurfaces(
+        from config: ClaudeMemoryConfiguration,
+        excluding existingRoots: Set<String>
+    ) -> [CompatibilityMatrixEntry] {
+        var seenRoots = existingRoots
+        return config.additionalDirectories.enumerated().compactMap { index, entry in
+            let skillsRoot = URL(fileURLWithPath: entry.path)
+                .appendingPathComponent(".claude/skills")
+                .path
+            guard seenRoots.insert(canonicalFilePath(skillsRoot)).inserted else { return nil }
+            return CompatibilityMatrixEntry(
+                id: "claude-code-additional-directory-skills|\(entry.path)",
+                toolID: .claudeCode,
+                kind: .skills,
+                scope: entry.source.scope,
+                label: "Claude Code additional-directory skills",
+                path: skillsRoot,
+                format: .directory,
+                fileControlled: true,
+                canWriteSafely: true,
+                writeMethod: .file,
+                requiresRestartAfterWrite: false,
+                supportsDisable: false,
+                supportsOAuth: false,
+                supportsEnvExpansion: false,
+                precedence: 50 + index,
+                note: "Skill root inferred from Claude Code additionalDirectories. Source: \(entry.source.label)."
+            )
+        }
+    }
+
+    private static func claudeLocalProjectAdditionalDirectorySkillSurfaces(
+        projectRoot: String?,
+        claudeJSONPath: String,
+        excluding existingRoots: Set<String>
+    ) -> [CompatibilityMatrixEntry] {
+        guard let projectRoot,
+              let root = readJSONDictionary(at: claudeJSONPath),
+              let state = claudeProjectState(projectRoot: projectRoot, root: root) else {
+            return []
+        }
+
+        let source = CompatibilityMatrixEntry(
+            id: "claude-code-local-project-state|\(projectRoot)",
+            toolID: .claudeCode,
+            kind: .settings,
+            scope: .localProjectUser,
+            label: "Claude Code local project state",
+            path: claudeJSONPath,
+            format: .jsonc,
+            fileControlled: false,
+            canWriteSafely: false,
+            writeMethod: .unsupported,
+            requiresRestartAfterWrite: false,
+            supportsDisable: false,
+            supportsOAuth: false,
+            supportsEnvExpansion: false,
+            precedence: 32,
+            note: "Private Claude Code runtime state for the selected project. Project Hub uses it only as evidence, not as a write target."
+        )
+
+        var seenRoots = existingRoots
+        return claudeAdditionalDirectories(in: state).enumerated().compactMap { index, rawPath in
+            guard let directory = resolveClaudeAdditionalDirectory(rawPath, surface: source, projectRoot: projectRoot) else {
+                return nil
+            }
+            let skillsRoot = URL(fileURLWithPath: directory)
+                .appendingPathComponent(".claude/skills")
+                .path
+            guard seenRoots.insert(canonicalFilePath(skillsRoot)).inserted else { return nil }
+            return CompatibilityMatrixEntry(
+                id: "claude-code-local-project-additional-directory-skills|\(directory)",
+                toolID: .claudeCode,
+                kind: .skills,
+                scope: .localProjectUser,
+                label: "Claude Code local additional-directory skills",
+                path: skillsRoot,
+                format: .directory,
+                fileControlled: true,
+                canWriteSafely: true,
+                writeMethod: .file,
+                requiresRestartAfterWrite: false,
+                supportsDisable: false,
+                supportsOAuth: false,
+                supportsEnvExpansion: false,
+                precedence: 55 + index,
+                note: "Skill root inferred from Claude Code local project additionalDirectories."
+            )
+        }
     }
 
     private static func claudeAdditionalDirectoryMemoryEnabled() -> Bool {
@@ -10151,6 +10332,10 @@ enum CompatibilityScanner {
     }
 
     private static func claudeCodeAuthStatus() -> ClaudeCodeAuthStatusProbe {
+        let env = ProcessInfo.processInfo.environment
+        if runningUnderXCTest && env["PROJECTHUB_CLAUDE_COMMAND_PATH"] == nil {
+            return .unavailable
+        }
         guard let commandPath = claudeCodeCommandPath() else { return .unavailable }
 
         let process = Process()
@@ -10181,6 +10366,11 @@ enum CompatibilityScanner {
         default:
             return .unavailable
         }
+    }
+
+    private static var runningUnderXCTest: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            || NSClassFromString("XCTestCase") != nil
     }
 
     private static func claudeCodeCommandPath() -> String? {
@@ -10551,7 +10741,7 @@ enum CompatibilityScanner {
         let overrides = readCodexSkillOverrides(from: matrix)
         let claudePolicies = readClaudeSkillPolicies(from: matrix)
         let overrideBySkillMD = overrides.reduce(into: [String: SkillOverride]()) { partial, override in
-            partial["\(override.toolID.rawValue):\(Project.canonicalize(override.path))"] = override
+            partial["\(override.toolID.rawValue):\(canonicalFilePath(override.path))"] = override
         }
         let availableMCPServersByTool = servers.reduce(into: [CompatibilityToolID: [ServerEntry]]()) { partial, server in
             guard serverCanSatisfySkillDependency(server),
@@ -10601,7 +10791,7 @@ enum CompatibilityScanner {
                     name = bareName
                 }
                 let version = skillVersion(at: skillMD)
-                let override = overrideBySkillMD["\(surface.toolID.rawValue):\(Project.canonicalize(skillMD))"]
+                let override = overrideBySkillMD["\(surface.toolID.rawValue):\(canonicalFilePath(skillMD))"]
                 let claudeOverride = surface.toolID == .claudeCode
                     ? claudePolicies.overridesByName[name] ?? claudePolicies.overridesByName[bareName]
                     : nil
@@ -10704,7 +10894,7 @@ enum CompatibilityScanner {
                     ))
                 }
                 observations.append(CompatibilitySkillObservation(
-                    id: "\(surface.id):\(Project.canonicalize(dir))",
+                    id: "\(surface.id):\(canonicalFilePath(dir))",
                     toolID: surface.toolID,
                     surfaceID: surface.id,
                     name: name,
@@ -10746,8 +10936,8 @@ enum CompatibilityScanner {
             }
         }
 
-        let observedSkillMDs = Set(observations.map { Project.canonicalize(($0.path as NSString).appendingPathComponent("SKILL.md")) })
-        for override in overrides where !observedSkillMDs.contains(Project.canonicalize(override.path)) {
+        let observedSkillMDs = Set(observations.map { canonicalFilePath(($0.path as NSString).appendingPathComponent("SKILL.md")) })
+        for override in overrides where !observedSkillMDs.contains(canonicalFilePath(override.path)) {
             issues.append(issue(.skillMissingSkillMD, .warning, override.source, "Skill override points at missing SKILL.md", "\(tilde(override.path)) is referenced by [[skills.config]] but was not found in any scanned skill root.", "Remove or update the stale skill override in config.toml."))
         }
 
@@ -11043,7 +11233,7 @@ enum CompatibilityScanner {
             scope: .project,
             roots: claudeCodeRoots,
             summary: claudeCodeRoots.isEmpty ? "No Claude Code skill roots in this scan" : "Claude Code filesystem and plugin skills supported",
-            detail: "Claude Code uses personal, project, nested, and plugin-managed skill roots. Existing filesystem skill directories are live-watched; creating a top-level skills directory after session start can still require restarting Claude Code. settings.json permissions.additionalDirectories grants file access but does not load skills. Managed strictPluginOnlyCustomization blocks filesystem skill roots but still allows plugin-provided or managed skills.",
+            detail: "Claude Code uses personal, project, nested, runtime additional-directory, and plugin-managed skill roots. Existing filesystem skill directories are live-watched; creating a top-level skills directory after session start can still require restarting Claude Code. Managed strictPluginOnlyCustomization blocks filesystem skill roots but still allows plugin-provided or managed skills.",
             requiresRestartAfterWrite: false
         ))
 
@@ -11094,7 +11284,7 @@ enum CompatibilityScanner {
         for surface in surfaces {
             guard let path = surface.path,
                   let raw = try? String(contentsOfFile: path, encoding: .utf8) else { continue }
-            let seenKey = "\(surface.toolID.rawValue):\(Project.canonicalize(path))"
+            let seenKey = "\(surface.toolID.rawValue):\(canonicalFilePath(path))"
             guard seen.insert(seenKey).inserted else { continue }
             for item in parseCodexSkillConfigTOML(raw) {
                 let skillMD = resolveCodexSkillOverridePath(item.path, configPath: path)

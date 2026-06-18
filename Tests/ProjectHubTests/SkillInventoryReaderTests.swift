@@ -2,7 +2,7 @@ import XCTest
 @testable import ProjectHub
 
 final class SkillInventoryReaderTests: XCTestCase {
-    func testInventoryIncludesClaudeParentAndNestedButNotSettingsAdditionalDirectoryRoots() throws {
+    func testInventoryIncludesClaudeParentNestedAndSettingsAdditionalDirectoryRoots() throws {
         let root = try makeTempProject()
         let app = root.appendingPathComponent("packages/app", isDirectory: true)
         let nested = app.appendingPathComponent("features/widget", isDirectory: true)
@@ -26,8 +26,8 @@ final class SkillInventoryReaderTests: XCTestCase {
             XCTAssertTrue(names.contains("root-skill"))
             XCTAssertTrue(names.contains("app-skill"))
             XCTAssertTrue(names.contains("widget-skill"))
-            XCTAssertFalse(names.contains("shared-skill"))
-            XCTAssertFalse(skills.contains { $0.name == "shared-skill" && $0.sourceLabel == "Claude Code additional-directory skills" })
+            XCTAssertTrue(names.contains("shared-skill"))
+            XCTAssertTrue(skills.contains { $0.name == "shared-skill" && $0.sourceLabel == "Claude Code additional-directory skills" })
         }
     }
 

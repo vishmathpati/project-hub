@@ -19,6 +19,9 @@ enum MCPReader {
     static func servers(for projectPath: String) -> [MCPServerInfo] {
         var results: [MCPServerInfo] = []
         results += fromClaudeCode(projectPath)
+        results += fromCursor(projectPath)
+        results += fromVSCode(projectPath)
+        results += fromRoo(projectPath)
         results += fromCodex(projectPath)
         results += fromCompatibilityInventory(projectPath)
         return dedupeServers(results)
