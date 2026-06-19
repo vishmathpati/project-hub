@@ -4,6 +4,7 @@ import SwiftUI
 
 struct PluginsView: View {
     @EnvironmentObject var projectStore: ProjectStore
+    @ObservedObject var store: PluginInventoryStore
 
     private enum ScanTarget: String, CaseIterable, Identifiable {
         case global
@@ -21,10 +22,24 @@ struct PluginsView: View {
 
     @State private var scanTarget: ScanTarget = .global
     @State private var selectedProjectID: UUID? = nil
-    @State private var report: CompatibilityScanResult? = nil
-    @State private var scanning = false
     @State private var expandedPluginID: String? = nil
-    @State private var scanError: String? = nil
+
+    private var scanKey: String {
+        switch scanTarget {
+        case .global:
+            return "global"
+        case .project:
+            return "project:\(scanRoot ?? "<none>")"
+        }
+    }
+
+    private var report: CompatibilityScanResult? {
+        store.report(for: scanKey)
+    }
+
+    private var scanning: Bool {
+        store.isScanning(scanKey)
+    }
 
     private var selectedProject: Project? {
         if let selectedProjectID,
@@ -54,15 +69,11 @@ struct PluginsView: View {
             }
         }
         .onChange(of: scanTarget) { _, _ in
-            report = nil
             expandedPluginID = nil
-            scanError = nil
         }
         .onChange(of: selectedProjectID) { _, _ in
             if scanTarget == .project {
-                report = nil
                 expandedPluginID = nil
-                scanError = nil
             }
         }
         .onChange(of: projectStore.projects.map(\.id)) { _, ids in
@@ -158,8 +169,6 @@ struct PluginsView: View {
     private var content: some View {
         if scanning && report == nil {
             loadingState
-        } else if let scanError {
-            errorState(scanError)
         } else if report == nil {
             emptyScanState
         } else if pluginGroups.isEmpty {
@@ -375,39 +384,9 @@ struct PluginsView: View {
         .padding(30)
     }
 
-    private func errorState(_ message: String) -> some View {
-        VStack(spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 28))
-                .foregroundColor(.orange)
-            Text("Plugin scan failed")
-                .font(.system(size: 14, weight: .semibold))
-            Text(message)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(30)
-    }
-
     private func scan() {
-        guard !scanning else { return }
-        scanning = true
-        scanError = nil
         expandedPluginID = nil
-        let root = scanRoot
-
-        Task {
-            let result = await Task.detached(priority: .userInitiated) {
-                CompatibilityScanner.scan(projectRoot: root)
-            }.value
-
-            await MainActor.run {
-                report = result
-                scanning = false
-            }
-        }
+        store.scan(key: scanKey, projectRoot: scanRoot)
     }
 
     private func metric(value: String, label: String, icon: String) -> some View {
@@ -458,6 +437,36 @@ struct PluginsView: View {
 
     private func shortPath(_ path: String) -> String {
         CompatibilityScanner.tilde(path)
+    }
+}
+
+@MainActor
+final class PluginInventoryStore: ObservableObject {
+    @Published private var reports: [String: CompatibilityScanResult] = [:]
+    @Published private var scanningKeys: Set<String> = []
+
+    func report(for key: String) -> CompatibilityScanResult? {
+        reports[key]
+    }
+
+    func isScanning(_ key: String) -> Bool {
+        scanningKeys.contains(key)
+    }
+
+    func scan(key: String, projectRoot: String?) {
+        guard !scanningKeys.contains(key) else { return }
+        scanningKeys.insert(key)
+
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                CompatibilityScanner.scan(projectRoot: projectRoot)
+            }.value
+
+            await MainActor.run {
+                reports[key] = result
+                scanningKeys.remove(key)
+            }
+        }
     }
 }
 

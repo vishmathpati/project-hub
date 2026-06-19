@@ -9,6 +9,7 @@ struct ContentView: View {
     @EnvironmentObject var mcpStore:     MCPStore
     private let showsExpandButton: Bool
     @State private var tab: AppTab = .projects
+    @StateObject private var pluginInventoryStore = PluginInventoryStore()
 
     init(showsExpandButton: Bool = true) {
         self.showsExpandButton = showsExpandButton
@@ -457,7 +458,7 @@ struct ContentView: View {
         case .skills:
             GlobalSkillsView()
         case .plugins:
-            PluginsView()
+            PluginsView(store: pluginInventoryStore)
         case .mcp:
             GlobalMCPView()
         case .compat:

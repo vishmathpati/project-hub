@@ -8,6 +8,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [2026-06-19] · Codex
 
 ### Fixed
+- Fixed the Plugins tab losing its successful scan result after leaving and returning to the tab by moving scan results into a ContentView-owned cache keyed by Global/project target, then rebuilt and reinstalled `/Applications/ProjectHub.app` with code signing and single-bundle verification.
+
+## [2026-06-19] · Codex
+
+### Fixed
 - Merged the Skills/Plugins redesign branch into main, pushed main to GitHub, cleaned stale Swift build artifacts, rebuilt the release app, installed `/Applications/ProjectHub.app`, verified code signing, removed the repo-local staging bundle, and confirmed `/Applications` contains only one ProjectHub app bundle.
 
 ## [2026-06-19] · Codex

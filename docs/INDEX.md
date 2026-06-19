@@ -131,7 +131,7 @@ skills-global:
 plugins-global:
   flow: PluginsView → explicit Scan button → CompatibilityScanner.scan(projectRoot:) → CompatibilityScanResult.plugins → grouped PluginInventoryGroup rows
   data: CompatibilityPluginObservation (ephemeral); no persisted plugin model
-  guards: scan stays explicit and single-flight; plugin page is read-only inventory and must not duplicate CompatibilityScanner plugin detection logic
+  guards: scan stays explicit and single-flight; last scan results are cached per global/project target for the active window so tab switching does not clear the inventory; plugin page is read-only inventory and must not duplicate CompatibilityScanner plugin detection logic
   shared with: compatibility (plugin evidence), skills-global (plugin-owned skills), mcp-global (plugin-owned MCP evidence)
 
 mcp-global:
