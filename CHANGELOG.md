@@ -7,6 +7,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [2026-06-19] · Codex
 
+### Fixed
+- Merged the Skills/Plugins redesign branch into main, pushed main to GitHub, cleaned stale Swift build artifacts, rebuilt the release app, installed `/Applications/ProjectHub.app`, verified code signing, removed the repo-local staging bundle, and confirmed `/Applications` contains only one ProjectHub app bundle.
+
+## [2026-06-19] · Codex
+
 ### Added
 - Added a dedicated Plugins tab for Claude/Codex plugin bundle inventory, with explicit global/project scans, grouped plugin rows, component chips, state, paths, surfaces, and restart evidence.
 

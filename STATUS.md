@@ -10,7 +10,7 @@ The top-level Skills page is now a deduped capability index with expandable glob
 ## Health
 
 - ✅ Working: desktop app shell, menu bar companion, redesigned Projects workspace, deduped Skills, Plugins inventory, MCP, Compatibility, Agents, Hooks, CLAUDE.md editor, Cursor Rules, Profile copy
-- ✅ Verified: installed `/Applications/ProjectHub.app` shows the redesigned desktop layout; current checkout passes `swift build`, focused skill/plugin tests, full `swift test` (586 tests), `git diff --check`, release build, code signing, and `/Applications` bundle check passed
+- ✅ Verified: main is pushed at the Skills/Plugins merge commit; installed `/Applications/ProjectHub.app` shows the redesigned desktop layout; current checkout passes `swift build`, focused skill/plugin tests, full `swift test` (586 tests), `git diff --check`, clean release build, code signing, and `/Applications` single-bundle check
 - ⚠️ Unknown: Live Mode (BeaconView, ContextEstimator, ProjectWatcher) — in source, needs verification
 - 🔴 Broken: (none known)
 - 🔒 Blocked: (none)
@@ -25,13 +25,14 @@ The top-level Skills page is now a deduped capability index with expandable glob
 ## Recent Sessions (rolling — keep last 5)
 
 - 2026-06-19 · Codex: redesigned Skills into a deduped expandable capability index and added a separate Plugins inventory tab.
+- 2026-06-19 · Codex: committed, pushed, merged, and rebuilt the Skills/Plugins redesign into `/Applications/ProjectHub.app` with no duplicate installed bundles.
 - 2026-06-19 · Codex: redesigned the full desktop UI so it no longer looks like a stretched menu-bar panel; installed and verified `/Applications/ProjectHub.app`.
 - 2026-06-18 · Codex: promoted Project Hub from menu-bar-first to desktop-first app shell with compact menu-bar panel retained.
 - 2026-05-05 · Claude Code: init-project — project separated from mcpbolt repo, full protocol suite created
 
 ## Next Actions
 
-1. Review the new Skills and Plugins pages in the running app before applying this detached-worktree change to main
+1. Review the new Skills and Plugins pages in the installed app
 2. Run app, test Live Mode panel (BeaconView + context tracking)
 3. Update ROADMAP.md — all v0.1–v0.5 features are already shipped, add Live Mode + post-launch direction
 4. Decide the Project Hub version number and landing page timing
