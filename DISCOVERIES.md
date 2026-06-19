@@ -5,3 +5,4 @@
 ## Log
 
 [2026-06-19] Desktop shell — Keeping compact and desktop presentations in the same SwiftUI views works when the full-window path owns sidebar/toolbar framing and ProjectsView switches to a split workspace.
+[2026-06-19] Inventory browser — Dense capability pages work better as deduped expandable rows with chips and evidence sections; long descriptions belong inside details, not the scan-first list.

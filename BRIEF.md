@@ -87,3 +87,11 @@ Rejected keeping the app menu-bar-first because the product now has too many ope
 The full desktop window should not reuse compact menu-bar layout language. The desktop path now uses sidebar navigation, toolbar summaries/actions, a split Projects workspace, and desktop project-detail navigation, while the compact popover remains intentionally compact.
 
 Rejected expanding product scope during the visual redesign. This change keeps the same stores and feature views and only changes presentation/layout for the desktop surface.
+
+---
+
+## v1.3 — 2026-06-19 13:24 · Codex
+
+Skills and plugins are separate inventory concepts. The Skills page is the capability index: one row per unique skill, expandable into origins and project availability. The Plugins page is the bundle index: one row per plugin bundle, expandable into components, install evidence, state, and paths.
+
+Rejected keeping plugin evidence inside Compatibility only because users need a normal navigation surface for plugin bundles, not just diagnostics. Rejected showing long skill descriptions in the Skills list because the page's primary job is inventory and location, not documentation reading.

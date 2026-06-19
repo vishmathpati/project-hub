@@ -272,8 +272,49 @@ struct GlobalSkillsView: View {
     @EnvironmentObject var skillStore: SkillStore
     @EnvironmentObject var projectStore: ProjectStore
 
+    private enum CatalogTab: String, CaseIterable, Identifiable {
+        case global
+        case project
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .global: return "Global Skills"
+            case .project: return "Project Skills"
+            }
+        }
+    }
+
+    @State private var selectedTab: CatalogTab = .global
+    @State private var expandedGlobalSkillID: String? = nil
+    @State private var expandedProjectSkillID: String? = nil
+    @State private var selectedProjectID: UUID? = nil
+    @State private var projectUsagesBySkillID: [String: [SkillStore.ProjectSkillUsage]] = [:]
+    @State private var loadingProjectUsageIDs: Set<String> = []
+
+    private var globalGroups: [SkillStore.GlobalSkillGroup] {
+        SkillStore.deduplicatedGlobalSkills(skillStore.globalSkills)
+    }
+
+    private var selectedProject: Project? {
+        if let selectedProjectID,
+           let project = projectStore.projects.first(where: { $0.id == selectedProjectID }) {
+            return project
+        }
+        return projectStore.projects.first
+    }
+
+    private var projectSkillGroups: [ProjectSkillGroup] {
+        guard let selectedProject else { return [] }
+        return ProjectSkillGroup.groups(
+            from: skillStore.installedSkills(for: selectedProject.path)
+                .filter { $0.scopeLabel == "Project" || $0.scopeLabel == "Private" }
+        )
+    }
+
     private var installCountRefreshKey: String {
-        let skillKey = skillStore.globalSkills.map(\.name).sorted().joined(separator: "|")
+        let skillKey = globalGroups.map(\.name).sorted().joined(separator: "|")
         let projectKey = projectStore.projects.map(\.path).sorted().joined(separator: "|")
         return "\(skillKey)#\(projectKey)"
     }
@@ -282,12 +323,22 @@ struct GlobalSkillsView: View {
         VStack(spacing: 0) {
             bar
             Divider()
-            if skillStore.isRefreshing {
-                loadingState
-            } else if skillStore.globalSkills.isEmpty {
-                emptyState
-            } else {
-                list
+            switch selectedTab {
+            case .global:
+                globalContent
+            case .project:
+                projectContent
+            }
+        }
+        .onAppear {
+            if selectedProjectID == nil {
+                selectedProjectID = projectStore.projects.first?.id
+            }
+        }
+        .onChange(of: projectStore.projects.map(\.id)) { _, ids in
+            guard let selectedProjectID, ids.contains(selectedProjectID) else {
+                self.selectedProjectID = ids.first
+                return
             }
         }
         .task(id: installCountRefreshKey) {
@@ -296,35 +347,99 @@ struct GlobalSkillsView: View {
     }
 
     private var bar: some View {
-        HStack(spacing: 8) {
-            Text("\(skillStore.globalSkills.count) global skill\(skillStore.globalSkills.count == 1 ? "" : "s")")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-            if skillStore.isRefreshingInstallCounts {
-                ProgressView()
-                    .controlSize(.mini)
-                Text("Counting installs")
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Picker("Skill catalog", selection: $selectedTab) {
+                    ForEach(CatalogTab.allCases) { tab in
+                        Text(tab.title).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 230)
+
+                Spacer(minLength: 8)
+
+                Button(action: { skillStore.refresh() }) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(skillStore.isRefreshing)
+                .help("Refresh skills")
+            }
+
+            HStack(spacing: 8) {
+                Text(summaryText)
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                if skillStore.isRefreshingInstallCounts {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text("Counting projects")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                if selectedTab == .project && !projectStore.projects.isEmpty {
+                    projectPicker
+                }
             }
-            Spacer()
-            Button(action: { skillStore.refresh() }) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.secondary)
-            }
-            .buttonStyle(.plain)
-            .disabled(skillStore.isRefreshing)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
     }
 
-    private var list: some View {
+    private var summaryText: String {
+        switch selectedTab {
+        case .global:
+            let count = globalGroups.count
+            let origins = skillStore.globalSkills.count
+            return "\(count) unique global skill\(count == 1 ? "" : "s") · \(origins) origin\(origins == 1 ? "" : "s")"
+        case .project:
+            if let selectedProject {
+                return "\(projectSkillGroups.count) project skill\(projectSkillGroups.count == 1 ? "" : "s") in \(selectedProject.displayName)"
+            }
+            return "No saved projects"
+        }
+    }
+
+    private var projectPicker: some View {
+        Picker("Project", selection: Binding(
+            get: { selectedProjectID ?? projectStore.projects.first?.id },
+            set: { selectedProjectID = $0 }
+        )) {
+            ForEach(projectStore.projects) { project in
+                Text(project.displayName).tag(Optional(project.id))
+            }
+        }
+        .labelsHidden()
+        .frame(maxWidth: 190)
+    }
+
+    @ViewBuilder
+    private var globalContent: some View {
+        if skillStore.isRefreshing {
+            loadingState
+        } else if globalGroups.isEmpty {
+            emptyGlobalState
+        } else {
+            globalList
+        }
+    }
+
+    private var globalList: some View {
         ScrollView {
             VStack(spacing: 6) {
-                ForEach(skillStore.globalSkills) { skill in
-                    globalSkillCard(skill)
+                ForEach(globalGroups) { group in
+                    globalSkillRow(group)
                 }
             }
             .padding(.horizontal, 12)
@@ -332,74 +447,340 @@ struct GlobalSkillsView: View {
         }
     }
 
-    private func globalSkillCard(_ skill: Skill) -> some View {
-        let installedCount = skillStore.globalSkillInstallCounts[skill.name] ?? 0
+    private func globalSkillRow(_ group: SkillStore.GlobalSkillGroup) -> some View {
+        let installedCount = skillStore.globalSkillInstallCounts[group.id] ?? 0
+        let expanded = expandedGlobalSkillID == group.id
 
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(skill.name)
-                        .font(.system(size: 13, weight: .semibold))
-                    sourceLabel(skill.source)
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeOut(duration: 0.16)) {
+                    expandedGlobalSkillID = expanded ? nil : group.id
                 }
-                Spacer()
-                if installedCount > 0 {
-                    HStack(spacing: 3) {
-                        Image(systemName: "folder.fill")
-                            .font(.system(size: 9))
-                        Text("\(installedCount)")
-                            .font(.system(size: 11, weight: .semibold))
+                if !expanded {
+                    loadProjectUsage(for: group)
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 14)
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(group.name)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 5) {
+                                ForEach(group.toolLabels, id: \.self) { label in
+                                    badge(label, color: toolColor(label))
+                                }
+                                ForEach(group.sourceLabels, id: \.self) { label in
+                                    badge(label, color: sourceLabelColor(label))
+                                }
+                                if group.hasReadOnlyOrigins {
+                                    badge("Read-only", color: .secondary)
+                                }
+                            }
+                        }
                     }
-                    .foregroundColor(.accentColor)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(Color.accentColor.opacity(0.12))
-                    .clipShape(Capsule())
-                    .help("\(installedCount) project\(installedCount == 1 ? "" : "s") have this skill installed")
+
+                    Spacer(minLength: 8)
+
+                    metric(value: "\(group.originCount)", label: "origin\(group.originCount == 1 ? "" : "s")", icon: "externaldrive")
+                    metric(value: "\(installedCount)", label: "project\(installedCount == 1 ? "" : "s")", icon: "folder.fill")
+                }
+                .padding(10)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                globalSkillDetail(group)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
+            }
+        }
+        .background(Color(NSColor.controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8)
+            .stroke(Color(NSColor.separatorColor).opacity(0.4), lineWidth: 0.5))
+    }
+
+    private func globalSkillDetail(_ group: SkillStore.GlobalSkillGroup) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+
+            if !group.primaryDescription.isEmpty {
+                Text(group.primaryDescription)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+            }
+
+            detailSection(title: "Origins") {
+                VStack(spacing: 5) {
+                    ForEach(group.skills, id: \.path) { skill in
+                        originRow(
+                            title: SkillStore.GlobalSkillGroup.sourceLabel(skill.source),
+                            subtitle: shortPath(skill.path),
+                            badges: SkillStore.GlobalSkillGroup.toolLabels(for: skill.source)
+                        )
+                    }
                 }
             }
-            if !skill.description.isEmpty {
-                Text(skill.description)
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                    .lineLimit(3)
-            }
-            if !skill.triggers.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 4) {
-                        ForEach(skill.triggers, id: \.self) { trigger in
-                            Text(trigger)
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundColor(.secondary)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.secondary.opacity(0.10))
-                                .clipShape(Capsule())
+
+            detailSection(title: "Projects") {
+                if loadingProjectUsageIDs.contains(group.id) {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.mini)
+                        Text("Checking saved projects")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    .padding(.vertical, 3)
+                } else {
+                    let usages = projectUsagesBySkillID[group.id] ?? []
+                    if usages.isEmpty {
+                        Text("No saved projects are safe for background inspection.")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    } else {
+                        VStack(spacing: 5) {
+                            ForEach(usages) { usage in
+                                projectUsageRow(usage)
+                            }
                         }
                     }
                 }
             }
         }
-        .padding(10)
+    }
+
+    private func projectUsageRow(_ usage: SkillStore.ProjectSkillUsage) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: usage.state == .installed ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(usage.state == .installed ? .accentColor : .secondary)
+                .frame(width: 16, height: 16)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 5) {
+                    Text(usage.project.displayName)
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                    badge(usage.state.label, color: usage.state == .installed ? .accentColor : .secondary)
+                }
+                if usage.origins.isEmpty {
+                    Text("Available through global skill roots")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                } else {
+                    Text(usage.origins.map { "\($0.sourceLabel) · \(shortPath($0.path))" }.joined(separator: "  |  "))
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                }
+            }
+            Spacer(minLength: 8)
+        }
+        .padding(7)
+        .background(Color(NSColor.windowBackgroundColor).opacity(0.55))
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+    }
+
+    @ViewBuilder
+    private var projectContent: some View {
+        if projectStore.projects.isEmpty {
+            emptyProjectState
+        } else if projectSkillGroups.isEmpty {
+            emptySelectedProjectState
+        } else {
+            projectSkillList
+        }
+    }
+
+    private var projectSkillList: some View {
+        ScrollView {
+            VStack(spacing: 6) {
+                ForEach(projectSkillGroups) { group in
+                    projectSkillRow(group)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+        }
+    }
+
+    private func projectSkillRow(_ group: ProjectSkillGroup) -> some View {
+        let expanded = expandedProjectSkillID == group.id
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeOut(duration: 0.16)) {
+                    expandedProjectSkillID = expanded ? nil : group.id
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 14)
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(group.name)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 5) {
+                                ForEach(group.toolLabels, id: \.self) { label in
+                                    badge(label, color: toolColor(label))
+                                }
+                                ForEach(group.scopeLabels, id: \.self) { label in
+                                    badge(label, color: label == "Private" ? .blue : .secondary)
+                                }
+                                ForEach(group.stateLabels, id: \.self) { label in
+                                    badge(label, color: stateColor(label))
+                                }
+                                if group.readOnly {
+                                    badge("Read-only", color: .secondary)
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(minLength: 8)
+                    metric(value: "\(group.origins.count)", label: "origin\(group.origins.count == 1 ? "" : "s")", icon: "externaldrive")
+                }
+                .padding(10)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                projectSkillDetail(group)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
+            }
+        }
         .background(Color(NSColor.controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8)
             .stroke(Color(NSColor.separatorColor).opacity(0.4), lineWidth: 0.5))
     }
 
-    private func sourceLabel(_ source: SkillSource) -> some View {
-        let (label, color): (String, Color) = {
-            switch source {
-            case .claudeGlobal: return ("~/.claude/skills", .orange)
-            case .codexGlobal:  return ("~/.agents/skills",  .purple)
-            case .codexAdmin:   return ("/etc/codex/skills", .indigo)
-            case .codexManaged: return ("~/.codex/skills managed", .teal)
-            case .cursorGlobal: return ("~/.cursor/skills-cursor", .blue)
+    private func projectSkillDetail(_ group: ProjectSkillGroup) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+            if let description = group.description, !description.isEmpty {
+                Text(description)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
             }
-        }()
-        return Text(label)
-            .font(.system(size: 9, design: .monospaced))
-            .foregroundColor(color.opacity(0.8))
+            detailSection(title: "Project Origins") {
+                VStack(spacing: 5) {
+                    ForEach(group.origins) { origin in
+                        originRow(
+                            title: origin.sourceLabel,
+                            subtitle: shortPath(origin.path),
+                            badges: origin.toolLabels + [origin.scopeLabel, origin.state.label]
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func detailSection<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.secondary)
+            content()
+        }
+    }
+
+    private func originRow(title: String, subtitle: String, badges: [String]) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 5) {
+                    Text(title)
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                    ForEach(uniqueStrings(badges), id: \.self) { label in
+                        badge(label, color: toolColor(label))
+                    }
+                }
+                Text(subtitle)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 8)
+        }
+        .padding(7)
+        .background(Color(NSColor.windowBackgroundColor).opacity(0.55))
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+    }
+
+    private func metric(value: String, label: String, icon: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .medium))
+            Text("\(value) \(label)")
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .foregroundColor(.secondary)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Color.secondary.opacity(0.10))
+        .clipShape(Capsule())
+    }
+
+    private func badge(_ label: String, color: Color) -> some View {
+        Text(label)
+            .font(.system(size: 9, weight: .bold))
+            .foregroundColor(color)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.10))
+            .clipShape(Capsule())
+    }
+
+    private func loadProjectUsage(for group: SkillStore.GlobalSkillGroup) {
+        guard projectUsagesBySkillID[group.id] == nil,
+              !loadingProjectUsageIDs.contains(group.id) else { return }
+
+        loadingProjectUsageIDs.insert(group.id)
+        let projects = projectStore.projects
+        let globalSkills = group.skills
+        let skillName = group.name
+        let groupID = group.id
+
+        Task {
+            let usages = await Task.detached(priority: .utility) {
+                SkillStore.projectUsages(
+                    forSkillNamed: skillName,
+                    globalSkills: globalSkills,
+                    projects: projects
+                )
+            }.value
+
+            await MainActor.run {
+                projectUsagesBySkillID[groupID] = usages
+                loadingProjectUsageIDs.remove(groupID)
+            }
+        }
     }
 
     private var loadingState: some View {
@@ -413,7 +794,7 @@ struct GlobalSkillsView: View {
         .padding(30)
     }
 
-    private var emptyState: some View {
+    private var emptyGlobalState: some View {
         VStack(spacing: 10) {
             Image(systemName: "book.closed")
                 .font(.system(size: 28))
@@ -427,5 +808,133 @@ struct GlobalSkillsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(30)
+    }
+
+    private var emptyProjectState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "folder")
+                .font(.system(size: 28))
+                .foregroundColor(.secondary)
+            Text("No saved projects")
+                .font(.system(size: 14, weight: .semibold))
+            Text("Add a project before inspecting project-local skills.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(30)
+    }
+
+    private var emptySelectedProjectState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "book.closed")
+                .font(.system(size: 28))
+                .foregroundColor(.secondary)
+            Text("No project skills")
+                .font(.system(size: 14, weight: .semibold))
+            Text("This project has no skills inside its project or private skill roots.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(30)
+    }
+
+    private func sourceLabelColor(_ label: String) -> Color {
+        if label.contains("Claude") { return .orange }
+        if label.contains("admin") { return .indigo }
+        if label.contains("managed") { return .teal }
+        if label.contains("Codex") { return .purple }
+        if label.contains("Cursor") { return .blue }
+        return .secondary
+    }
+
+    private func toolColor(_ label: String) -> Color {
+        if label.contains("Claude") { return .orange }
+        if label.contains("Codex") { return .purple }
+        if label == "Working" || label == "Installed" { return .accentColor }
+        if label == "Limited" { return .yellow }
+        if label == "Broken" { return .red }
+        if label == "Private" { return .blue }
+        return .secondary
+    }
+
+    private func stateColor(_ label: String) -> Color {
+        switch label {
+        case "Working":
+            return .accentColor
+        case "Limited":
+            return .yellow
+        case "Broken":
+            return .red
+        default:
+            return .secondary
+        }
+    }
+
+    private func shortPath(_ path: String) -> String {
+        CompatibilityScanner.tilde(path)
+    }
+
+    private func uniqueStrings(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var output: [String] = []
+        for value in values where seen.insert(value).inserted {
+            output.append(value)
+        }
+        return output
+    }
+}
+
+private struct ProjectSkillGroup: Identifiable {
+    var id: String { name.lowercased() }
+    let name: String
+    let origins: [InstalledSkill]
+
+    var description: String? {
+        origins.first { !$0.description.isEmpty }?.description
+    }
+
+    var toolLabels: [String] {
+        unique(origins.flatMap(\.toolLabels))
+    }
+
+    var scopeLabels: [String] {
+        unique(origins.map(\.scopeLabel))
+    }
+
+    var stateLabels: [String] {
+        unique(origins.map { $0.state.label })
+    }
+
+    var readOnly: Bool {
+        origins.contains { !$0.canEdit || !$0.canRemove }
+    }
+
+    static func groups(from origins: [InstalledSkill]) -> [ProjectSkillGroup] {
+        Dictionary(grouping: origins, by: { $0.name.lowercased() })
+            .values
+            .compactMap { group in
+                guard let first = group.sorted(by: originSort).first else { return nil }
+                return ProjectSkillGroup(name: first.name, origins: group.sorted(by: originSort))
+            }
+            .sorted {
+                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+    }
+
+    private static func originSort(_ lhs: InstalledSkill, _ rhs: InstalledSkill) -> Bool {
+        if lhs.scopeLabel != rhs.scopeLabel { return lhs.scopeLabel < rhs.scopeLabel }
+        return lhs.path.localizedCaseInsensitiveCompare(rhs.path) == .orderedAscending
+    }
+
+    private func unique(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var output: [String] = []
+        for value in values where seen.insert(value).inserted {
+            output.append(value)
+        }
+        return output
     }
 }
