@@ -4,6 +4,101 @@ import Foundation
 
 @MainActor
 final class SkillStore: ObservableObject {
+    struct GlobalSkillGroup: Identifiable {
+        var id: String { name.lowercased() }
+        let name: String
+        let skills: [Skill]
+
+        var originCount: Int { skills.count }
+
+        var primaryDescription: String {
+            skills.first { !$0.description.isEmpty }?.description ?? ""
+        }
+
+        var sources: [SkillSource] {
+            Self.uniqueSources(skills.map(\.source))
+        }
+
+        var sourceLabels: [String] {
+            sources.map(Self.sourceLabel)
+        }
+
+        var toolLabels: [String] {
+            var labels: [String] = []
+            for source in sources {
+                for label in Self.toolLabels(for: source) where !labels.contains(label) {
+                    labels.append(label)
+                }
+            }
+            return labels
+        }
+
+        var hasReadOnlyOrigins: Bool {
+            skills.contains { $0.source == .codexAdmin || $0.source == .codexManaged }
+        }
+
+        static func toolLabels(for source: SkillSource) -> [String] {
+            switch source {
+            case .claudeGlobal:
+                return ["Claude Code"]
+            case .codexGlobal, .codexAdmin, .codexManaged:
+                return ["Codex CLI", "Codex Desktop"]
+            case .cursorGlobal:
+                return ["Cursor"]
+            }
+        }
+
+        static func sourceLabel(_ source: SkillSource) -> String {
+            switch source {
+            case .claudeGlobal: return "Claude global"
+            case .codexGlobal: return "Codex global"
+            case .codexAdmin: return "Codex admin"
+            case .codexManaged: return "Codex managed"
+            case .cursorGlobal: return "Cursor global"
+            }
+        }
+
+        private static func uniqueSources(_ sources: [SkillSource]) -> [SkillSource] {
+            var seen = Set<SkillSource>()
+            var output: [SkillSource] = []
+            for source in sources where seen.insert(source).inserted {
+                output.append(source)
+            }
+            return output.sorted { lhs, rhs in
+                sourceSortOrder(lhs) < sourceSortOrder(rhs)
+            }
+        }
+
+        private static func sourceSortOrder(_ source: SkillSource) -> Int {
+            switch source {
+            case .claudeGlobal: return 0
+            case .codexGlobal: return 1
+            case .codexAdmin: return 2
+            case .codexManaged: return 3
+            case .cursorGlobal: return 4
+            }
+        }
+    }
+
+    struct ProjectSkillUsage: Identifiable {
+        enum State {
+            case installed
+            case available
+
+            var label: String {
+                switch self {
+                case .installed: return "Installed"
+                case .available: return "Available"
+                }
+            }
+        }
+
+        var id: String { project.id.uuidString }
+        let project: Project
+        let state: State
+        let origins: [InstalledSkill]
+    }
+
     @Published private(set) var globalSkills: [Skill] = []
     @Published private(set) var globalSkillInstallCounts: [String: Int] = [:]
     @Published private(set) var isRefreshing: Bool = false
@@ -142,17 +237,62 @@ final class SkillStore: ObservableObject {
         home: String = NSHomeDirectory(),
         installedSkillsProvider: (String) -> [InstalledSkill]
     ) -> [String: Int] {
-        let globalSkillNames = Set(globalSkills.map(\.name))
+        let globalSkillNames = Set(globalSkills.map { $0.name.lowercased() })
         guard !globalSkillNames.isEmpty else { return [:] }
 
         var counts: [String: Int] = [:]
         for project in projects where ProjectStore.isSafeForBackgroundInspection(project.path, home: home) {
-            let installedNames = Set(installedSkillsProvider(project.path).map(\.name))
+            let installedNames = Set(installedSkillsProvider(project.path).map { $0.name.lowercased() })
             for name in installedNames where globalSkillNames.contains(name) {
                 counts[name, default: 0] += 1
             }
         }
         return counts
+    }
+
+    nonisolated static func deduplicatedGlobalSkills(_ skills: [Skill]) -> [GlobalSkillGroup] {
+        Dictionary(grouping: skills, by: { $0.name.lowercased() })
+            .values
+            .compactMap { group in
+                guard let first = group.sorted(by: skillSort).first else { return nil }
+                return GlobalSkillGroup(
+                    name: first.name,
+                    skills: group.sorted(by: skillSort)
+                )
+            }
+            .sorted {
+                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+    }
+
+    nonisolated static func projectUsages(
+        forSkillNamed skillName: String,
+        globalSkills: [Skill],
+        projects: [Project],
+        home: String = NSHomeDirectory(),
+        installedSkillsProvider: (String) -> [InstalledSkill] = { SkillInventoryReader.installedSkills(for: $0) }
+    ) -> [ProjectSkillUsage] {
+        let hasGlobalAvailability = globalSkills.contains {
+            $0.name.caseInsensitiveCompare(skillName) == .orderedSame
+        }
+        guard hasGlobalAvailability else { return [] }
+
+        var usage: [ProjectSkillUsage] = []
+        for project in projects where ProjectStore.isSafeForBackgroundInspection(project.path, home: home) {
+            let origins = installedSkillsProvider(project.path)
+                .filter { $0.name.caseInsensitiveCompare(skillName) == .orderedSame }
+            usage.append(ProjectSkillUsage(
+                project: project,
+                state: origins.isEmpty ? .available : .installed,
+                origins: origins
+            ))
+        }
+        return usage.sorted {
+            if stateSortOrder($0.state) != stateSortOrder($1.state) {
+                return stateSortOrder($0.state) < stateSortOrder($1.state)
+            }
+            return $0.project.displayName.localizedCaseInsensitiveCompare($1.project.displayName) == .orderedAscending
+        }
     }
 
     nonisolated private static func scanInstalledSkills(for projectPath: String) -> [InstalledSkill] {
@@ -170,5 +310,19 @@ final class SkillStore: ObservableObject {
             .standardizedFileURL
             .resolvingSymlinksInPath()
             .path
+    }
+
+    nonisolated private static func skillSort(_ lhs: Skill, _ rhs: Skill) -> Bool {
+        if lhs.source.rawValue != rhs.source.rawValue {
+            return lhs.source.rawValue < rhs.source.rawValue
+        }
+        return lhs.path.localizedCaseInsensitiveCompare(rhs.path) == .orderedAscending
+    }
+
+    nonisolated private static func stateSortOrder(_ state: ProjectSkillUsage.State) -> Int {
+        switch state {
+        case .installed: return 0
+        case .available: return 1
+        }
     }
 }

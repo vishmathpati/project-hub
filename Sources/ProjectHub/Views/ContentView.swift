@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Root content view (5 tabs: Projects | Skills | MCP | Compat | Settings)
+// MARK: - Root content view (6 tabs: Projects | Skills | Plugins | MCP | Compat | Settings)
 
 struct ContentView: View {
     @EnvironmentObject var projectStore: ProjectStore
@@ -17,6 +17,7 @@ struct ContentView: View {
     private enum AppTab: Int, CaseIterable, Identifiable {
         case projects
         case skills
+        case plugins
         case mcp
         case compat
         case settings
@@ -27,6 +28,7 @@ struct ContentView: View {
             switch self {
             case .projects: return "Projects"
             case .skills: return "Skills"
+            case .plugins: return "Plugins"
             case .mcp: return "MCP"
             case .compat: return "Compat"
             case .settings: return "Settings"
@@ -36,7 +38,8 @@ struct ContentView: View {
         var sidebarDetail: String {
             switch self {
             case .projects: return "Folders and worktrees"
-            case .skills: return "Global skill library"
+            case .skills: return "Skill availability"
+            case .plugins: return "Bundles and components"
             case .mcp: return "Servers and tools"
             case .compat: return "Scan and verify"
             case .settings: return "Preferences"
@@ -47,6 +50,7 @@ struct ContentView: View {
             switch self {
             case .projects: return "folder.fill"
             case .skills: return "book.closed.fill"
+            case .plugins: return "puzzlepiece.extension.fill"
             case .mcp: return "server.rack"
             case .compat: return "checklist.checked"
             case .settings: return "gearshape.fill"
@@ -263,7 +267,10 @@ struct ContentView: View {
             }
             return "\(total) project\(total == 1 ? "" : "s") · \(hidden) worktree\(hidden == 1 ? "" : "s") hidden"
         case .skills:
-            return "\(skillStore.globalSkills.count) global skill\(skillStore.globalSkills.count == 1 ? "" : "s")"
+            let count = SkillStore.deduplicatedGlobalSkills(skillStore.globalSkills).count
+            return "\(count) unique skill\(count == 1 ? "" : "s")"
+        case .plugins:
+            return "Claude and Codex plugin bundles"
         case .mcp:
             return "\(mcpStore.serverCount) server\(mcpStore.serverCount == 1 ? "" : "s") across \(mcpStore.detectedTools.count) tool\(mcpStore.detectedTools.count == 1 ? "" : "s")"
         case .compat:
@@ -394,6 +401,7 @@ struct ContentView: View {
         HStack(spacing: 5) {
             tabButton(title: "Projects", icon: "folder.fill",              tag: .projects)
             tabButton(title: "Skills",   icon: "book.closed.fill",         tag: .skills)
+            tabButton(title: "Plugins",  icon: "puzzlepiece.extension.fill", tag: .plugins)
             tabButton(title: "MCP",      icon: "server.rack",              tag: .mcp)
             tabButton(title: "Compat",   icon: "checklist.checked",        tag: .compat)
             tabButton(title: "Settings", icon: "gearshape.fill",           tag: .settings)
@@ -413,11 +421,13 @@ struct ContentView: View {
                 Image(systemName: icon)
                     .font(.system(size: 10, weight: .semibold))
                 Text(title)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
             }
             .foregroundColor(active ? .white : .secondary)
             .frame(maxWidth: .infinity)
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 6)
             .padding(.vertical, 7)
             .background(
                 Group {
@@ -446,6 +456,8 @@ struct ContentView: View {
             ProjectsView(presentation: showsExpandButton ? .compact : .desktop)
         case .skills:
             GlobalSkillsView()
+        case .plugins:
+            PluginsView()
         case .mcp:
             GlobalMCPView()
         case .compat:

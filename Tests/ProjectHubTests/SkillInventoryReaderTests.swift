@@ -158,6 +158,82 @@ final class SkillInventoryReaderTests: XCTestCase {
         XCTAssertEqual(counts["deploy"], 1)
     }
 
+    func testGlobalSkillGroupsDeduplicateNamesCaseInsensitively() {
+        let groups = SkillStore.deduplicatedGlobalSkills([
+            Skill(name: "Deploy", description: "Claude copy", triggers: [], source: .claudeGlobal, path: "/claude/deploy"),
+            Skill(name: "deploy", description: "Codex copy", triggers: [], source: .codexGlobal, path: "/codex/deploy"),
+            Skill(name: "lint", description: "", triggers: [], source: .codexGlobal, path: "/codex/lint"),
+        ])
+
+        XCTAssertEqual(groups.map(\.name), ["Deploy", "lint"])
+        let deploy = groups.first { $0.id == "deploy" }
+        XCTAssertEqual(deploy?.originCount, 2)
+        XCTAssertEqual(Set(deploy?.toolLabels ?? []), Set(["Claude Code", "Codex CLI", "Codex Desktop"]))
+    }
+
+    func testGlobalInstallCountsNormalizeSkillNamesCaseInsensitively() {
+        let globalSkills = [
+            Skill(name: "Deploy", description: "", triggers: [], source: .claudeGlobal, path: "/global/deploy")
+        ]
+        let projects = [
+            Project(id: UUID(), path: "/projects/one", displayName: "one", addedAt: Date(), lastOpenedAt: Date())
+        ]
+
+        let counts = SkillStore.installedProjectCounts(
+            globalSkills: globalSkills,
+            projects: projects
+        ) { path in
+            [installedSkill(name: "deploy", path: "\(path)/.claude/skills/deploy")]
+        }
+
+        XCTAssertEqual(counts["deploy"], 1)
+        XCTAssertNil(counts["Deploy"])
+    }
+
+    func testProjectUsagesShowsInstalledFirstAndSkipsProtectedProjects() throws {
+        let home = try makeTempProject()
+        let globalSkills = [
+            Skill(name: "deploy", description: "", triggers: [], source: .claudeGlobal, path: "/global/deploy")
+        ]
+        let protected = Project(
+            id: UUID(),
+            path: home.appendingPathComponent("Desktop/projecthub", isDirectory: true).path,
+            displayName: "protected",
+            addedAt: Date(),
+            lastOpenedAt: Date()
+        )
+        let installed = Project(
+            id: UUID(),
+            path: home.appendingPathComponent("Arel OS/Projects/Active/installed", isDirectory: true).path,
+            displayName: "installed",
+            addedAt: Date(),
+            lastOpenedAt: Date()
+        )
+        let available = Project(
+            id: UUID(),
+            path: home.appendingPathComponent("Arel OS/Projects/Active/available", isDirectory: true).path,
+            displayName: "available",
+            addedAt: Date(),
+            lastOpenedAt: Date()
+        )
+
+        var scannedPaths: [String] = []
+        let usages = SkillStore.projectUsages(
+            forSkillNamed: "Deploy",
+            globalSkills: globalSkills,
+            projects: [protected, available, installed],
+            home: home.path
+        ) { path in
+            scannedPaths.append(path)
+            guard path == installed.path else { return [] }
+            return [installedSkill(name: "deploy", path: "\(path)/.claude/skills/deploy")]
+        }
+
+        XCTAssertEqual(scannedPaths, [available.path, installed.path])
+        XCTAssertEqual(usages.map { $0.project.displayName }, ["installed", "available"])
+        XCTAssertEqual(usages.map(\.state.label), ["Installed", "Available"])
+    }
+
     func testInventoryCarriesDuplicateAndVersionDiagnostics() throws {
         let root = try makeTempProject()
         let app = root.appendingPathComponent("packages/app", isDirectory: true)
