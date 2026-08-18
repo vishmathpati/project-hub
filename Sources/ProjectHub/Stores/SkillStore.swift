@@ -45,6 +45,8 @@ final class SkillStore: ObservableObject {
                 return ["Codex CLI", "Codex Desktop"]
             case .cursorGlobal:
                 return ["Cursor"]
+            case .providerGlobal:
+                return ["Provider"]
             }
         }
 
@@ -55,6 +57,7 @@ final class SkillStore: ObservableObject {
             case .codexAdmin: return "Codex admin"
             case .codexManaged: return "Codex managed"
             case .cursorGlobal: return "Cursor global"
+            case .providerGlobal: return "Provider global"
             }
         }
 
@@ -76,6 +79,7 @@ final class SkillStore: ObservableObject {
             case .codexAdmin: return 2
             case .codexManaged: return 3
             case .cursorGlobal: return 4
+            case .providerGlobal: return 5
             }
         }
     }
@@ -107,7 +111,10 @@ final class SkillStore: ObservableObject {
     private var installCountTask: Task<Void, Never>?
 
     init() {
-        refresh()
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            self?.refresh()
+        }
     }
 
     func refresh() {
@@ -174,6 +181,86 @@ final class SkillStore: ObservableObject {
         }
     }
 
+    func copy(_ skill: Skill, to projectPath: String) {
+        install(skill: skill, to: projectPath)
+    }
+
+    @discardableResult
+    func createSkill(named rawName: String, providerID: String, projectPath: String?) -> String? {
+        let name = rawName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "-")
+            .lowercased()
+        guard !name.isEmpty else { return nil }
+        let spec = ProviderCatalog.specs().first { $0.id == providerID }
+        let base: String
+        if let projectPath {
+            let relative = spec?.projectSkillDirs.first ?? ".claude/skills"
+            base = (projectPath as NSString).appendingPathComponent(relative)
+        } else if let global = spec?.globalSkillDirs.first {
+            base = global
+        } else {
+            base = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/skills")
+        }
+        let dir = (base as NSString).appendingPathComponent(name)
+        let md = (dir as NSString).appendingPathComponent("SKILL.md")
+        do {
+            try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            try """
+            ---
+            name: \(name)
+            description: 
+            ---
+            # \(name)
+            """.write(toFile: md, atomically: true, encoding: .utf8)
+            return dir
+        } catch {
+            return nil
+        }
+    }
+
+    func copyInstalled(_ skill: InstalledSkill, to projectPath: String) {
+        let base: String
+        if skill.claudePath != nil {
+            base = (projectPath as NSString).appendingPathComponent(".claude/skills")
+        } else if skill.codexPath != nil {
+            base = (projectPath as NSString).appendingPathComponent(".agents/skills")
+        } else {
+            base = (projectPath as NSString).appendingPathComponent(".cursor/skills")
+        }
+        let destDir = (base as NSString).appendingPathComponent(skill.name)
+        let fm = FileManager.default
+        guard !fm.fileExists(atPath: destDir) else { return }
+        do {
+            try fm.createDirectory(atPath: base, withIntermediateDirectories: true)
+            try fm.copyItem(atPath: skill.path, toPath: destDir)
+        } catch {
+            return
+        }
+    }
+
+    func copyAcrossProviders(_ skill: Skill, in projectPath: String) {
+        var roots: [String] = []
+        var seen = Set<String>()
+        for spec in ProviderCatalog.specs() {
+            for relative in spec.projectSkillDirs {
+                let dir = (projectPath as NSString).appendingPathComponent(relative)
+                if seen.insert(dir).inserted { roots.append(dir) }
+            }
+        }
+        let fm = FileManager.default
+        for baseDir in roots {
+            let destDir = (baseDir as NSString).appendingPathComponent(skill.name)
+            if fm.fileExists(atPath: destDir) { continue }
+            do {
+                try fm.createDirectory(atPath: baseDir, withIntermediateDirectories: true)
+                try fm.copyItem(atPath: skill.path, toPath: destDir)
+            } catch {
+                continue
+            }
+        }
+    }
+
     /// Remove only the selected installed skill origin.
     func remove(skill: InstalledSkill, from projectPath: String) {
         guard skill.canRemove else { return }
@@ -197,7 +284,9 @@ final class SkillStore: ObservableObject {
         case .codexGlobal, .codexAdmin, .codexManaged:
             return [((projectPath as NSString).appendingPathComponent(".agents/skills"), skill.name)]
         case .cursorGlobal:
-            return []
+            return [((projectPath as NSString).appendingPathComponent(".cursor/skills"), skill.name)]
+        case .providerGlobal:
+            return [((projectPath as NSString).appendingPathComponent(".agents/skills"), skill.name)]
         }
     }
 
@@ -207,7 +296,7 @@ final class SkillStore: ObservableObject {
             return installed.contains { $0.name == skill.name && $0.claudePath != nil }
         case .codexGlobal, .codexAdmin, .codexManaged:
             return installed.contains { $0.name == skill.name && $0.codexPath != nil }
-        case .cursorGlobal:
+        case .cursorGlobal, .providerGlobal:
             return installed.contains { $0.name == skill.name }
         }
     }
@@ -217,12 +306,23 @@ final class SkillStore: ObservableObject {
     nonisolated private static func scanGlobalSkills() -> [Skill] {
         let home = NSHomeDirectory()
         let codexHome = ProjectHubPaths.codexHome(home: home)
-        let dirs: [(String, SkillSource)] = [
-            ((home as NSString).appendingPathComponent(".claude/skills"),        .claudeGlobal),
-            ((home as NSString).appendingPathComponent(".agents/skills"),         .codexGlobal),
-            ("/etc/codex/skills",                                                .codexAdmin),
-            ((codexHome as NSString).appendingPathComponent("skills"),           .codexManaged),
+        var dirs: [(String, SkillSource)] = [
+            ("/etc/codex/skills",                                      .codexAdmin),
+            ((codexHome as NSString).appendingPathComponent("skills"), .codexManaged),
         ]
+        var seen = Set(dirs.map(\.0))
+        for spec in ProviderCatalog.specs(home: home) {
+            let source: SkillSource
+            switch spec.id {
+            case "claude-code": source = .claudeGlobal
+            case "codex": source = .codexGlobal
+            case "cursor": source = .cursorGlobal
+            default: source = .providerGlobal
+            }
+            for dir in spec.globalSkillDirs where seen.insert(dir).inserted {
+                dirs.append((dir, source))
+            }
+        }
 
         var all: [Skill] = []
         for (dir, source) in dirs {

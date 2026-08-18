@@ -1,5 +1,5 @@
 # Status — Project Hub
-> Last updated: 2026-06-19 · Codex
+> Last updated: 2026-08-18 · Grok
 
 ## Current State
 
@@ -13,6 +13,7 @@ Plugin scan results now stay visible when navigating away from Plugins and retur
 - ✅ Working: desktop app shell, menu bar companion, redesigned Projects workspace, deduped Skills, Plugins inventory, MCP, Compatibility, Agents, Hooks, CLAUDE.md editor, Cursor Rules, Profile copy
 - ✅ Verified: main is pushed at the Skills/Plugins merge commit; installed `/Applications/ProjectHub.app` includes the plugin-scan persistence fix; current checkout passes `swift build`, focused plugin tests, full `swift test` baseline (586 tests), `git diff --check`, clean release build, code signing, and `/Applications` single-bundle check
 - ⚠️ Unknown: Live Mode (BeaconView, ContextEstimator, ProjectWatcher) — in source, needs verification
+- 🔧 In progress: Live Mode still needs a manual pass. Current-build roadmap except secondary providers is in `/Applications/ProjectHub.app`.
 - 🔴 Broken: (none known)
 - 🔒 Blocked: (none)
 
@@ -25,6 +26,7 @@ Plugin scan results now stay visible when navigating away from Plugins and retur
 
 ## Recent Sessions (rolling — keep last 5)
 
+- 2026-08-18 · Grok: finished current-build roadmap except secondary providers. Providers create/edit/enable, Usage remaining bars, MCP/Settings no longer run CompatibilityScanner on tab open. Reinstalled `/Applications/ProjectHub.app`.
 - 2026-06-19 · Codex: redesigned Skills into a deduped expandable capability index and added a separate Plugins inventory tab.
 - 2026-06-19 · Codex: fixed Plugins scan results resetting after navigation and rebuilt `/Applications/ProjectHub.app`.
 - 2026-06-19 · Codex: committed, pushed, merged, and rebuilt the Skills/Plugins redesign into `/Applications/ProjectHub.app` with no duplicate installed bundles.
@@ -33,7 +35,7 @@ Plugin scan results now stay visible when navigating away from Plugins and retur
 
 ## Next Actions
 
-1. Manually confirm the installed Plugins tab keeps scan results after switching away and back
-2. Run app, test Live Mode panel (BeaconView + context tracking)
-3. Update ROADMAP.md — all v0.1–v0.5 features are already shipped, add Live Mode + post-launch direction
+1. Confirm Providers Controls create/edit/enable on a real project
+2. Confirm Usage remaining bars for Claude/Codex
+3. Live Mode still needs a manual pass
 4. Decide the Project Hub version number and landing page timing

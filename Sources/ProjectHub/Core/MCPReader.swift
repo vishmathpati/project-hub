@@ -23,7 +23,11 @@ enum MCPReader {
         results += fromVSCode(projectPath)
         results += fromRoo(projectPath)
         results += fromCodex(projectPath)
-        results += fromCompatibilityInventory(projectPath)
+        results += fromOpenCode(projectPath)
+        results += fromAntigravity(projectPath)
+        results += fromPi(projectPath)
+        results += fromCommandCode(projectPath)
+        results += fromGrok(projectPath)
         return dedupeServers(results)
     }
 
@@ -92,6 +96,26 @@ enum MCPReader {
         fromProjectTool("codex", source: .codex, projectPath: projectPath)
     }
 
+    static func fromOpenCode(_ projectPath: String) -> [MCPServerInfo] {
+        fromProjectTool("opencode", source: .opencode, projectPath: projectPath)
+    }
+
+    static func fromAntigravity(_ projectPath: String) -> [MCPServerInfo] {
+        fromProjectTool("antigravity", source: .antigravity, projectPath: projectPath)
+    }
+
+    static func fromPi(_ projectPath: String) -> [MCPServerInfo] {
+        fromProjectTool("pi", source: .pi, projectPath: projectPath)
+    }
+
+    static func fromCommandCode(_ projectPath: String) -> [MCPServerInfo] {
+        fromProjectTool("command-code", source: .commandCode, projectPath: projectPath)
+    }
+
+    static func fromGrok(_ projectPath: String) -> [MCPServerInfo] {
+        fromProjectTool("grok", source: .grok, projectPath: projectPath)
+    }
+
     // MARK: - Helpers
 
     private static func fromProjectTool(
@@ -111,35 +135,6 @@ enum MCPReader {
                 )
             }
             .sorted(by: sortServers)
-    }
-
-    private static func fromCompatibilityInventory(_ projectPath: String) -> [MCPServerInfo] {
-        CompatibilityScanner.mcpInventory(projectRoot: projectPath)
-            .filter { row in
-                row.scope == .project || row.scope == .localProjectUser
-            }
-            .compactMap { row in
-                guard let source = mcpSource(for: row) else { return nil }
-                return MCPServerInfo(
-                    source: source,
-                    name: row.server.name,
-                    detail: row.server.detail,
-                    isDisabled: row.server.isDisabled,
-                    sourcePath: row.server.sourcePath
-                )
-            }
-            .sorted(by: sortServers)
-    }
-
-    private static func mcpSource(for row: CompatibilityMCPInventoryRow) -> MCPConfigSource? {
-        switch row.toolID {
-        case .claudeCode:
-            return row.scope == .localProjectUser ? .claudeCodeLocal : .claudeCode
-        case .codexCLI, .codexDesktop:
-            return .codex
-        case .claudeDesktop:
-            return nil
-        }
     }
 
     private static func dedupeServers(_ servers: [MCPServerInfo]) -> [MCPServerInfo] {

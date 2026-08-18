@@ -2943,36 +2943,10 @@ enum CompatibilityScanner {
     }
 
     private static func existingClaudeNestedSkillRoots(from startURL: URL, excluding excludedPaths: Set<String>) -> [URL] {
-        let fm = FileManager.default
-        guard let enumerator = fm.enumerator(
-            at: startURL,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [],
-            errorHandler: nil
-        ) else {
-            return []
-        }
-
-        var roots: [URL] = []
-        let skippedDirectories = Set([".git", ".build", "node_modules", "DerivedData", ".swiftpm"])
-        for case let url as URL in enumerator {
-            guard let resourceValues = try? url.resourceValues(forKeys: [.isDirectoryKey]),
-                  resourceValues.isDirectory == true else {
-                continue
-            }
-            if skippedDirectories.contains(url.lastPathComponent) {
-                enumerator.skipDescendants()
-                continue
-            }
-            guard url.lastPathComponent == "skills",
-                  url.deletingLastPathComponent().lastPathComponent == ".claude",
-                  !excludedPaths.contains(url.path) else {
-                continue
-            }
-            roots.append(url)
-            enumerator.skipDescendants()
-        }
-        return roots.sorted { $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending }
+        KnownSkillRoots.existingNestedClaudeSkillDirectories(
+            from: startURL,
+            excluding: excludedPaths
+        )
     }
 
     private static let claudePluginSkillSurfacePrefix = "claude-code-plugin-skills|"
@@ -13798,24 +13772,4 @@ private func splitTOMLArray(_ text: String) -> [String] {
     }
     if !current.isEmpty { items.append(current) }
     return items
-}
-
-// MARK: - Store
-
-@MainActor
-final class CompatibilityStore: ObservableObject {
-    @Published private(set) var result: CompatibilityScanResult?
-    @Published private(set) var isScanning = false
-
-    func scan(projectRoot: String?) {
-        guard !isScanning else { return }
-        isScanning = true
-        Task.detached(priority: .userInitiated) {
-            let result = CompatibilityScanner.scan(projectRoot: projectRoot)
-            await MainActor.run {
-                self.result = result
-                self.isScanning = false
-            }
-        }
-    }
 }

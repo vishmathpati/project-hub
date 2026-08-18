@@ -67,9 +67,11 @@ struct PluginsView: View {
             if selectedProjectID == nil {
                 selectedProjectID = projectStore.projects.first?.id
             }
+            store.restore(key: scanKey, projectRoot: scanRoot)
         }
         .onChange(of: scanTarget) { _, _ in
             expandedPluginID = nil
+            store.restore(key: scanKey, projectRoot: scanRoot)
         }
         .onChange(of: selectedProjectID) { _, _ in
             if scanTarget == .project {
@@ -453,14 +455,22 @@ final class PluginInventoryStore: ObservableObject {
         scanningKeys.contains(key)
     }
 
+    func restore(key: String, projectRoot: String?) {
+        guard reports[key] == nil else { return }
+        if let cached = ConfigScanCache.load(projectRoot: projectRoot) {
+            reports[key] = cached
+        }
+    }
+
     func scan(key: String, projectRoot: String?) {
         guard !scanningKeys.contains(key) else { return }
         scanningKeys.insert(key)
 
         Task {
-            let result = await Task.detached(priority: .userInitiated) {
+            let result = await Task.detached(priority: .utility) {
                 CompatibilityScanner.scan(projectRoot: projectRoot)
             }.value
+            ConfigScanCache.save(result)
 
             await MainActor.run {
                 reports[key] = result

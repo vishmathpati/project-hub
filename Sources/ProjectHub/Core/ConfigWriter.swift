@@ -68,6 +68,26 @@ enum ToolSpecs {
                 return .init(id: toolID,
                              path: "\(root)/.codex/config.toml",
                              kind: .toml(key: "mcp_servers"))
+            case "opencode":
+                return .init(id: toolID,
+                             path: "\(root)/opencode.json",
+                             kind: .json(key: "mcp"))
+            case "antigravity":
+                return .init(id: toolID,
+                             path: "\(root)/.agents/mcp_config.json",
+                             kind: .json(key: "mcpServers"))
+            case "pi":
+                return .init(id: toolID,
+                             path: "\(root)/.pi/mcp.json",
+                             kind: .json(key: "mcpServers"))
+            case "command-code":
+                return .init(id: toolID,
+                             path: "\(root)/.mcp.json",
+                             kind: .json(key: "mcpServers"))
+            case "grok":
+                return .init(id: toolID,
+                             path: "\(root)/.grok/config.toml",
+                             kind: .toml(key: "mcp_servers"))
             default:
                 return nil
             }
@@ -126,13 +146,32 @@ enum ToolSpecs {
             return .init(id: toolID,
                          path: "\(home)/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
                          kind: .json(key: "mcpServers"))
+        case "antigravity":
+            return .init(id: toolID,
+                         path: "\(home)/.gemini/config/mcp_config.json",
+                         kind: .json(key: "mcpServers"))
+        case "pi":
+            return .init(id: toolID,
+                         path: "\(home)/.pi/agent/mcp.json",
+                         kind: .json(key: "mcpServers"))
+        case "command-code":
+            return .init(id: toolID,
+                         path: "\(home)/.commandcode/mcp.json",
+                         kind: .json(key: "mcpServers"))
+        case "grok":
+            return .init(id: toolID,
+                         path: "\(home)/.grok/config.toml",
+                         kind: .toml(key: "mcp_servers"))
         default:
             return nil
         }
     }
 
     /// Tool IDs that support project scope.
-    static let projectScopedTools: Set<String> = ["claude-code", "codex"]
+    static let projectScopedTools: Set<String> = [
+        "claude-code", "codex", "cursor", "vscode", "opencode",
+        "antigravity", "pi", "command-code", "grok"
+    ]
 }
 
 enum ConfigWriter {

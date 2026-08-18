@@ -58,6 +58,22 @@ struct ToolPalette {
             color: Color(red: 0.13, green: 0.65, blue: 0.82),
             icon:  "scroll.fill"
         ),
+        "antigravity": Entry(
+            color: Color(red: 0.30, green: 0.50, blue: 0.96),
+            icon:  "sparkle"
+        ),
+        "pi": Entry(
+            color: Color(red: 0.15, green: 0.55, blue: 0.70),
+            icon:  "circle.hexagongrid.fill"
+        ),
+        "command-code": Entry(
+            color: Color(red: 0.90, green: 0.40, blue: 0.20),
+            icon:  "command"
+        ),
+        "grok": Entry(
+            color: Color(red: 0.72, green: 0.76, blue: 0.84),
+            icon:  "asterisk.circle.fill"
+        ),
     ]
 
     static func color(for toolID: String) -> Color {

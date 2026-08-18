@@ -7,7 +7,8 @@ enum ClaudeMdReader {
     // MARK: - File path
 
     private static func filePath(for projectPath: String) -> String {
-        (projectPath as NSString).appendingPathComponent("CLAUDE.md")
+        InstructionDocument(relativePath: "CLAUDE.md", title: "CLAUDE.md")
+            .absolutePath(in: projectPath)
     }
 
     // MARK: - Public API

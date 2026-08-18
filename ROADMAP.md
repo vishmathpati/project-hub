@@ -1,36 +1,63 @@
 # Project Hub Roadmap
 
-## v0.1 — Current
+Shipped history (v0.1–v0.5) is at the bottom. The list below is the current build. This is the only progress list.
 
-- Projects: auto-detect from Claude Code (.claude.json), Codex CLI (state.sqlite + config.toml), filesystem
-- Skills: install/remove SKILL.md skills per project from global library
-- Agents: manage .claude/agents/*.md sub-agents (create, view, delete) per project
-- MCP: read-only display of .mcp.json / .codex/config.toml / .cursor/mcp.json per project
+## Current build
 
-## v0.2 — In-app skill editing + Cursor rules
+### 1. Fast scan
+- [x] Stop walking the whole project to find skills
+- [x] Save the last Compat / Plugins scan
+- [x] Let a worktree be added as its own project
+- [x] Split the remaining scanner so each page reads only its own files
 
-- Edit SKILL.md content in-app with a Tiptap-style or monospaced editor
-- Show Cursor project rules (.cursorrules, .cursor/rules/) in a dedicated tab
-- Create new skills from scratch (scaffold the SKILL.md frontmatter + body)
-- Filter skills by source (Claude / Codex / Cursor)
+### 2. Instruction files
+- [x] Edit `AGENTS.md` in the project
+- [x] Edit `CLAUDE.md`, `.claude/CLAUDE.md`, and `CLAUDE.local.md`
+- [x] Edit `GEMINI.md` if it exists
 
-## v0.3 — Config profiles (copy between projects)
+### 3. Features already in the code, not on screen
+- [x] Put Cursor Rules back on the project page
+- [x] Scan Cursor skills
+- [x] Show Cursor, VS Code, OpenCode, and Zed on the main MCP page
 
-- Copy all skills from one project to another in one click
-- Copy all agents from one project to another
-- "Profile" concept: named bundles of skills + agents that can be stamped onto any project
-- Export profile as a ZIP for sharing
+### 4. New primary providers
+- [x] Antigravity (Google)
+- [x] Pi — skills, extensions, MCP only if the MCP extension is installed
+- [x] Command Code
+- [x] Grok CLI
+- [x] Providers page with per-provider controls
 
-## v0.4 — Hooks viewer
+### 5. Copy
+- [x] Copy one skill to another project
+- [x] Copy one skill Claude ↔ Codex
 
-- Read Claude Code hooks from .claude/settings.json and ~/.claude/settings.json
-- Read Codex hooks (pre/post command) from .codex/config.toml
-- Display each hook: event name, command, enabled/disabled state
-- Toggle hooks on/off without leaving the app (writes back to settings file)
+### 6. Usage
+- [x] Local token usage from files already on disk (Claude, Codex, Pi, Command Code)
 
-## v0.5 — CLAUDE.md editor
+### 7. Secondary providers
+Only if the same reader already covers them. No extra work.
 
-- Per-project CLAUDE.md editor with syntax highlighting
-- Templates library: starter CLAUDE.md templates for common project types (Node, Python, Swift, Next.js, etc.)
-- Global CLAUDE.md viewer (~/.claude/CLAUDE.md)
-- Diff view: show what changed since last commit (git diff on CLAUDE.md)
+---
+
+## Already shipped
+
+### v0.1
+- Projects: auto-detect from Claude Code, Codex CLI, filesystem
+- Skills: install/remove SKILL.md per project
+- Agents: Claude `.claude/agents/*.md`
+- MCP: read-only project files
+
+### v0.2
+- In-app skill editing
+- Cursor rules reader
+- Create skills
+- Filter skills by source
+
+### v0.3
+- Copy profile (skills / agents / MCP) across projects
+
+### v0.4
+- Hooks viewer (read-only)
+
+### v0.5
+- CLAUDE.md editor with templates

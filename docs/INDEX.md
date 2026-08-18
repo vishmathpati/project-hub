@@ -16,13 +16,15 @@
 |------|--------------|---------|
 | Dashboard window | Primary full desktop app window | Default launch/reopen/menu-bar-left-click surface, sidebar navigation, toolbar summary/actions, resizable, macOS full-screen capable |
 | Popover (480×680) | Compact menu bar panel, 6 tabs | Secondary quick-access surface |
-| Projects tab | Desktop split workspace for tracked + auto-discovered project folders, with compact stacked layout in the popover | Add, scan, rename, remove, open in Finder, drill in, inspect hidden worktrees |
+| Projects tab | Desktop split workspace for tracked + auto-discovered project folders, with compact stacked layout in the popover | Add, scan, rename, remove, open in Finder, drill in, add a related worktree as its own project |
 | Skills tab (global) | Deduped global and project-local skill availability across Claude/Codex roots | Expand unique skills to inspect origins, tool support, project usage, and project-local sources without long list descriptions |
 | Plugins tab | Claude/Codex plugin bundles and components | Explicit plugin scan, grouped plugin inventory, install evidence, state, component, path, and restart metadata |
-| MCP tab (global) | All MCP servers across all 12 AI tools | Search, import, edit, copy between tools, enable/disable |
-| Compat tab | MCP/plugins/skills/settings/auth/project compatibility diagnostics | Explicit single-flight scan, plugin inventory, filters, MCP verify, safe-fix previews |
-| Settings tab | App preferences | Launch at login, etc. [VERIFY contents] |
-| Project Detail | Per-project sub-tabs (6) | Skills, Agents, MCP, Rules, Hooks, CLAUDE.md |
+| Providers tab | Ten primary providers and their files | Create/edit skills, enable/disable MCP, copy skills/MCP, list instructions/agents/hooks/plugins |
+| MCP tab (global) | MCP servers for the 10 primary tools | Search, import, edit, copy between tools, enable/disable. Secondary tools stay off this page |
+| Compat tab | MCP/plugins/skills/settings/auth/project compatibility diagnostics | Explicit single-flight scan, last result persisted to Application Support, plugin inventory, filters, MCP verify, safe-fix previews |
+| Usage tab | Remaining plan limits and last session | Claude 5-hour/weekly bars, Codex rate-limit bars, honest empty cards for Cursor/VS Code/Antigravity/OpenCode/Zed, Pi/Command Code last session |
+| Settings tab | App preferences | Launch at login, primary provider homes, skill search paths |
+| Project Detail | Per-project sub-tabs (7) | Health, Skills, Agents, MCP, Hooks, Instructions, Rules |
 | Live Mode panel | Floating always-on-top context monitor | Token usage ring, skill/MCP toggles, active project detection |
 
 **Features:**
@@ -30,13 +32,15 @@
 | Feature | View | Status |
 |---------|------|--------|
 | Desktop-first app shell with menu bar companion | AppDelegate / DashboardWindow / ContentView | live |
-| Project auto-discovery (Claude, Codex, filesystem, hidden worktree bucket; protected storage skipped unless explicitly added) | Projects tab | live |
+| Project auto-discovery (Claude, Codex, filesystem, related worktree bucket; protected storage skipped unless explicitly added) | Projects tab | live |
 | Profile copy across projects | CopyProfileSheet | live |
 | Deduped skill availability browser | Skills tab | live |
 | Plugin bundle inventory | Plugins tab | live |
 | Per-project skill install / remove / edit | ProjectDetail › Skills | live |
 | Per-project Claude sub-agent create / delete | ProjectDetail › Agents | live |
-| Global MCP server manager (12 tools) | MCP tab | live |
+| Global MCP server manager (10 primary tools) | MCP tab | live |
+| Providers page with per-provider controls | Providers tab | live |
+| Local usage bars (Claude/Codex) and last session | Usage tab | live |
 | Per-project MCP config view / edit | ProjectDetail › MCP | live |
 | Per-project Cursor rules CRUD | ProjectDetail › Rules | live |
 | Per-project hooks viewer (read-only) | ProjectDetail › Hooks | live |
@@ -79,7 +83,7 @@ Saved project rows are sanitized on load so old false positives such as tool hom
 | Codex config TOML | Project detection, MCP | Filesystem: `~/.codex/config.toml` (regex-parsed) |
 | macOS `lsof` | Live Mode active-project detection | Shell: `lsof -F pn -d cwd -c claude` — may be slow |
 
-**No network calls.** All data is local filesystem only.
+Claude usage bars optionally read `https://api.anthropic.com/api/oauth/usage` with the local Claude Code Keychain token. Everything else is local filesystem only.
 
 ### Key Files
 

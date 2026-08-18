@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Root content view (6 tabs: Projects | Skills | Plugins | MCP | Compat | Settings)
+// MARK: - Root content view
 
 struct ContentView: View {
     @EnvironmentObject var projectStore: ProjectStore
@@ -15,12 +15,14 @@ struct ContentView: View {
         self.showsExpandButton = showsExpandButton
     }
 
-    private enum AppTab: Int, CaseIterable, Identifiable {
+    private enum AppTab: Int, CaseIterable, Identifiable, Hashable {
         case projects
+        case providers
         case skills
         case plugins
         case mcp
         case compat
+        case usage
         case settings
 
         var id: Int { rawValue }
@@ -28,10 +30,12 @@ struct ContentView: View {
         var title: String {
             switch self {
             case .projects: return "Projects"
+            case .providers: return "Providers"
             case .skills: return "Skills"
             case .plugins: return "Plugins"
             case .mcp: return "MCP"
             case .compat: return "Compat"
+            case .usage: return "Usage"
             case .settings: return "Settings"
             }
         }
@@ -39,10 +43,12 @@ struct ContentView: View {
         var sidebarDetail: String {
             switch self {
             case .projects: return "Folders and worktrees"
+            case .providers: return "Apps, files, and controls"
             case .skills: return "Skill availability"
             case .plugins: return "Bundles and components"
             case .mcp: return "Servers and tools"
             case .compat: return "Scan and verify"
+            case .usage: return "Local tokens, cost, and limits"
             case .settings: return "Preferences"
             }
         }
@@ -50,10 +56,12 @@ struct ContentView: View {
         var icon: String {
             switch self {
             case .projects: return "folder.fill"
+            case .providers: return "square.grid.2x2.fill"
             case .skills: return "book.closed.fill"
             case .plugins: return "puzzlepiece.extension.fill"
             case .mcp: return "server.rack"
             case .compat: return "checklist.checked"
+            case .usage: return "chart.bar.fill"
             case .settings: return "gearshape.fill"
             }
         }
@@ -82,141 +90,34 @@ struct ContentView: View {
     // MARK: - Desktop shell
 
     private var desktopShell: some View {
-        HStack(spacing: 0) {
-            desktopSidebar
-            Divider()
+        NavigationSplitView {
+            List(selection: $tab) {
+                Section {
+                    ForEach(AppTab.allCases) { item in
+                        Label(item.title, systemImage: item.icon)
+                            .tag(item)
+                    }
+                }
+            }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 176, ideal: 200, max: 240)
+        } detail: {
             VStack(spacing: 0) {
                 desktopToolbar
                 Divider()
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(NSColor.windowBackgroundColor))
+                    .background(HubTheme.page)
             }
         }
         .frame(minWidth: 900, minHeight: 620)
-    }
-
-    private var desktopSidebar: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.accentColor.opacity(0.14))
-                        .frame(width: 36, height: 36)
-                    Image(systemName: "square.stack.3d.up.fill")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(.accentColor)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Project Hub")
-                        .font(.system(size: 15, weight: .semibold))
-                    Text("Local workspace control")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                }
-            }
-            .padding(.top, 2)
-
-            VStack(spacing: 6) {
-                ForEach(AppTab.allCases) { item in
-                    desktopNavButton(item)
-                }
-            }
-
-            Spacer(minLength: 12)
-
-            VStack(spacing: 8) {
-                sidebarMetric(
-                    title: "Projects",
-                    value: "\(projectStore.projects.count + projectStore.discovered.count)",
-                    icon: "folder"
-                )
-                sidebarMetric(
-                    title: "MCP servers",
-                    value: "\(mcpStore.serverCount)",
-                    icon: "server.rack"
-                )
-            }
-        }
-        .padding(16)
-        .frame(width: 246)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.55))
-    }
-
-    private func desktopNavButton(_ item: AppTab) -> some View {
-        let active = tab == item
-        return Button {
-            withAnimation(.easeOut(duration: 0.16)) {
-                tab = item
-            }
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: item.icon)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(active ? .accentColor : .secondary)
-                    .frame(width: 22)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(item.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.primary)
-                    Text(item.sidebarDetail)
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 8)
-
-                if active {
-                    Circle()
-                        .fill(Color.accentColor)
-                        .frame(width: 6, height: 6)
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
-            .contentShape(RoundedRectangle(cornerRadius: 8))
-            .background(active ? Color.accentColor.opacity(0.10) : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(active ? Color.accentColor.opacity(0.22) : Color.clear, lineWidth: 0.5)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func sidebarMetric(title: String, value: String, icon: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.secondary)
-                .frame(width: 18)
-            Text(title)
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-            Spacer()
-            Text(value)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.primary)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(Color(NSColor.windowBackgroundColor).opacity(0.65))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(NSColor.separatorColor).opacity(0.35), lineWidth: 0.5)
-        )
     }
 
     private var desktopToolbar: some View {
         HStack(alignment: .center, spacing: 14) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(tab.title)
-                    .font(.system(size: 23, weight: .semibold))
+                    .font(.system(size: 20, weight: .semibold))
                 Text(toolbarDetail(for: tab))
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
@@ -253,9 +154,9 @@ struct ContentView: View {
 
             moreMenu(foreground: .secondary)
         }
-        .padding(.horizontal, 22)
-        .padding(.vertical, 16)
-        .background(Color(NSColor.windowBackgroundColor))
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(HubTheme.page)
     }
 
     private func toolbarDetail(for item: AppTab) -> String {
@@ -267,6 +168,8 @@ struct ContentView: View {
                 return "\(total) project\(total == 1 ? "" : "s")"
             }
             return "\(total) project\(total == 1 ? "" : "s") · \(hidden) worktree\(hidden == 1 ? "" : "s") hidden"
+        case .providers:
+            return "Claude, Codex, Cursor, VS Code, Antigravity, OpenCode, Zed, Pi, Command Code, Grok"
         case .skills:
             let count = SkillStore.deduplicatedGlobalSkills(skillStore.globalSkills).count
             return "\(count) unique skill\(count == 1 ? "" : "s")"
@@ -276,6 +179,8 @@ struct ContentView: View {
             return "\(mcpStore.serverCount) server\(mcpStore.serverCount == 1 ? "" : "s") across \(mcpStore.detectedTools.count) tool\(mcpStore.detectedTools.count == 1 ? "" : "s")"
         case .compat:
             return "Local compatibility, plugin, auth, and settings checks"
+        case .usage:
+            return "Quota first, estimated spend second"
         case .settings:
             return "Project Hub preferences and local support paths"
         }
@@ -319,30 +224,22 @@ struct ContentView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(Color.white.opacity(0.12))
-                    .frame(width: 30, height: 30)
-                Image(systemName: "square.stack.3d.up.fill")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(.cyan)
-            }
+            Image(systemName: "square.stack.3d.up.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.accentColor)
+                .frame(width: 26, height: 26)
+                .background(Color.accentColor.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
 
             Text("Project Hub")
-                .font(.system(size: 15, weight: .bold))
-                .foregroundColor(.white)
+                .font(.system(size: 14, weight: .semibold))
 
             Spacer()
 
             let total = projectStore.projects.count + projectStore.discovered.count
-            statPill(value: "\(total)",
-                     label: "project\(total == 1 ? "" : "s")",
-                     icon: "folder.fill")
-
-            let serverCount = mcpStore.serverCount
-            if serverCount > 0 {
-                statPill(value: "\(serverCount)", label: "MCP", icon: "server.rack")
-            }
+            Text("\(total) projects")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
 
             Button(action: {
                 projectStore.scan()
@@ -350,14 +247,7 @@ struct ContentView: View {
             }) {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.white.opacity(projectStore.isScanning ? 1.0 : 0.65))
-                    .rotationEffect(.degrees(projectStore.isScanning ? 360 : 0))
-                    .animation(
-                        projectStore.isScanning
-                            ? .linear(duration: 0.8).repeatForever(autoreverses: false)
-                            : .default,
-                        value: projectStore.isScanning
-                    )
+                    .foregroundColor(.secondary)
             }
             .buttonStyle(.plain)
             .help("Refresh")
@@ -368,18 +258,18 @@ struct ContentView: View {
                 }) {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white.opacity(0.7))
+                        .foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
                 .help("Expand to window")
             }
 
-            moreMenu(foreground: .white.opacity(0.7))
+            moreMenu(foreground: .secondary)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity)
-        .background(ContentView.headerGrad)
+        .background(HubTheme.page)
     }
 
     private func statPill(value: String, label: String, icon: String) -> some View {
@@ -400,11 +290,13 @@ struct ContentView: View {
 
     private var tabBar: some View {
         HStack(spacing: 5) {
-            tabButton(title: "Projects", icon: "folder.fill",              tag: .projects)
-            tabButton(title: "Skills",   icon: "book.closed.fill",         tag: .skills)
+            tabButton(title: "Projects",  icon: "folder.fill",               tag: .projects)
+            tabButton(title: "Providers", icon: "square.grid.2x2.fill",     tag: .providers)
+            tabButton(title: "Skills",    icon: "book.closed.fill",         tag: .skills)
             tabButton(title: "Plugins",  icon: "puzzlepiece.extension.fill", tag: .plugins)
             tabButton(title: "MCP",      icon: "server.rack",              tag: .mcp)
             tabButton(title: "Compat",   icon: "checklist.checked",        tag: .compat)
+            tabButton(title: "Usage",    icon: "chart.bar.fill",           tag: .usage)
             tabButton(title: "Settings", icon: "gearshape.fill",           tag: .settings)
         }
         .padding(.horizontal, 12)
@@ -413,11 +305,7 @@ struct ContentView: View {
 
     private func tabButton(title: String, icon: String, tag: AppTab) -> some View {
         let active = tab == tag
-        return Button(action: {
-            withAnimation(.spring(response: 0.25, dampingFraction: 0.78)) {
-                self.tab = tag
-            }
-        }) {
+        return Button(action: { tab = tag }) {
             HStack(spacing: 4) {
                 Image(systemName: icon)
                     .font(.system(size: 10, weight: .semibold))
@@ -426,23 +314,15 @@ struct ContentView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
             }
-            .foregroundColor(active ? .white : .secondary)
+            .foregroundColor(active ? .accentColor : .secondary)
             .frame(maxWidth: .infinity)
             .padding(.horizontal, 6)
             .padding(.vertical, 7)
-            .background(
-                Group {
-                    if active {
-                        AnyView(ContentView.headerGrad)
-                    } else {
-                        AnyView(Color(NSColor.controlBackgroundColor))
-                    }
-                }
-            )
+            .background(active ? Color.accentColor.opacity(0.12) : Color(NSColor.controlBackgroundColor))
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(active ? Color.clear : Color(NSColor.separatorColor).opacity(0.6), lineWidth: 0.5)
+                    .stroke(HubTheme.hairline, lineWidth: 0.5)
             )
         }
         .buttonStyle(.plain)
@@ -455,6 +335,8 @@ struct ContentView: View {
         switch tab {
         case .projects:
             ProjectsView(presentation: showsExpandButton ? .compact : .desktop)
+        case .providers:
+            ProvidersView()
         case .skills:
             GlobalSkillsView()
         case .plugins:
@@ -463,6 +345,8 @@ struct ContentView: View {
             GlobalMCPView()
         case .compat:
             CompatibilityView()
+        case .usage:
+            UsageView()
         case .settings:
             SettingsView()
         }

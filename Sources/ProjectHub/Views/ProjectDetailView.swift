@@ -232,8 +232,9 @@ struct ProjectDetailView: View {
                 subTabButton(title: "MCP",      icon: "server.rack",              tag: 3)
             }
             HStack(spacing: 4) {
-                subTabButton(title: "Hooks",    icon: "bolt.fill",                tag: 4)
-                subTabButton(title: "CLAUDE.md",icon: "doc.text.fill",            tag: 5)
+                subTabButton(title: "Hooks",        icon: "bolt.fill",       tag: 4)
+                subTabButton(title: "Instructions", icon: "doc.text.fill",   tag: 5)
+                subTabButton(title: "Rules",        icon: "list.bullet.rectangle", tag: 6)
             }
         }
         .padding(.horizontal, 12)
@@ -293,7 +294,8 @@ struct ProjectDetailView: View {
             ("Agents", "person.fill.viewfinder", 2),
             ("MCP", "server.rack", 3),
             ("Hooks", "bolt.fill", 4),
-            ("CLAUDE.md", "doc.text.fill", 5),
+            ("Instructions", "doc.text.fill", 5),
+            ("Rules", "list.bullet.rectangle", 6),
         ]
     }
 
@@ -342,7 +344,8 @@ struct ProjectDetailView: View {
         case 2: AgentsView(project: project, reloadTick: $reloadTick)
         case 3: MCPView(project: project)
         case 4: HooksView(project: project)
-        default: ClaudeMdView(project: project)
+        case 5: ClaudeMdView(project: project)
+        default: CursorRulesView(project: project)
         }
     }
 

@@ -8,11 +8,14 @@ struct SkillsView: View {
     let reloadTick: Int
 
     @EnvironmentObject var skillStore: SkillStore
+    @EnvironmentObject var projectStore: ProjectStore
 
     @State private var editingSkill: InstalledSkill? = nil
     @State private var localTick: Int = 0
 
+
     var body: some View {
+        let _ = localTick
         let installed = skillStore.installedSkills(for: project.path)
         let globals   = skillStore.globalSkills
 
@@ -118,6 +121,39 @@ struct SkillsView: View {
                 }
             }
             Spacer()
+            Button(action: {
+                skillStore.copyAcrossProviders(
+                    Skill(
+                        name: skill.name,
+                        description: skill.description,
+                        triggers: [],
+                        source: .claudeGlobal,
+                        path: skill.path
+                    ),
+                    in: projectPath
+                )
+                localTick &+= 1
+            }) {
+                Image(systemName: "square.on.square")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Copy this skill into Claude, Codex, and Cursor folders")
+            Menu {
+                ForEach(projectStore.projects.filter { $0.path != projectPath }) { target in
+                    Button(target.displayName) {
+                        skillStore.copyInstalled(skill, to: target.path)
+                    }
+                }
+            } label: {
+                Image(systemName: "folder.badge.plus")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+            .menuStyle(.borderlessButton)
+            .frame(width: 22)
+            .help("Copy this skill to another project")
             Button(action: { editingSkill = skill }) {
                 Image(systemName: "pencil")
                     .font(.system(size: 11))
@@ -236,6 +272,7 @@ struct SkillsView: View {
         case .codexAdmin:   return .indigo
         case .codexManaged: return .teal
         case .cursorGlobal: return .blue
+        case .providerGlobal: return .mint
         }
     }
 
@@ -261,7 +298,9 @@ struct SkillsView: View {
         case .codexGlobal, .codexAdmin, .codexManaged:
             return "Install Codex"
         case .cursorGlobal:
-            return "Inspect only"
+            return "Install Cursor"
+        case .providerGlobal:
+            return "Install skill"
         }
     }
 }

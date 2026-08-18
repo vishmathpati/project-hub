@@ -13,7 +13,7 @@ final class MCPStore: ObservableObject {
 
     // Only detected tools, in display order. Hidden tools excluded from UI.
     var detectedTools: [ToolSummary] {
-        tools.filter { $0.detected && !HIDDEN_TOOL_IDS.contains($0.toolID) }
+        tools.filter { PRIMARY_TOOL_IDS.contains($0.toolID) }
     }
 
     // Unique server names across all detected tools
@@ -96,8 +96,9 @@ final class MCPStore: ObservableObject {
         return name.lowercased().contains(q)
     }
 
-    func refresh() {
+    func refresh(force: Bool = true) {
         guard !isLoading else { return }
+        if !force && !tools.isEmpty { return }
         isLoading = true
         Task.detached(priority: .userInitiated) {
             let result = ConfigReader.shared.readAllTools()

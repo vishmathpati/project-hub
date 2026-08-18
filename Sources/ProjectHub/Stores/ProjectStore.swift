@@ -88,7 +88,10 @@ final class ProjectStore: ObservableObject {
 
     init() {
         load()
-        scan()
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            self?.scan()
+        }
     }
 
     // MARK: - Public API
@@ -165,6 +168,7 @@ final class ProjectStore: ObservableObject {
     func addDiscovered(_ disc: DiscoveredProject) -> Project {
         let p = add(path: disc.path, displayName: disc.displayName)
         discovered.removeAll { $0.id == disc.id }
+        hiddenWorktrees.removeAll { $0.id == disc.id }
         return p
     }
 
@@ -630,6 +634,10 @@ final class ProjectStore: ObservableObject {
 
         if exists(".roo/mcp.json") {
             append("roo")
+        }
+
+        if exists(".grok/config.toml") || exists(".grok") {
+            append("grok")
         }
 
         return ids

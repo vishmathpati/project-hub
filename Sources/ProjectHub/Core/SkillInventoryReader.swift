@@ -2,167 +2,270 @@ import Foundation
 
 enum SkillInventoryReader {
     static func installedSkills(for projectPath: String) -> [InstalledSkill] {
-        let inventory = CompatibilityScanner.skillInventory(projectRoot: projectPath)
-        let surfacesByID = inventory.matrix.reduce(into: [String: CompatibilityMatrixEntry]()) { partial, surface in
-            if partial[surface.id] == nil {
-                partial[surface.id] = surface
+        var collected: [RawSkill] = []
+        var seenPaths = Set<String>()
+
+        for entry in skillDirectories(for: projectPath) {
+            for skill in SkillReader.scanSkillDir(entry.path, source: .claudeGlobal) {
+                guard seenPaths.insert(skill.path).inserted else { continue }
+                collected.append(
+                    RawSkill(
+                        skill: skill,
+                        sourceLabel: entry.sourceLabel,
+                        toolLabels: entry.toolLabels,
+                        claude: entry.kind == .claude,
+                        codex: entry.kind == .codex,
+                        canMutate: skill.path.hasPrefix(projectPath + "/") || skill.path == projectPath,
+                        readOnlyReason: entry.readOnlyReason,
+                        nameOverride: nil
+                    )
+                )
             }
         }
-        let canonicalProjectRoot = inventory.projectRoot.map(Project.canonicalize) ?? Project.canonicalize(projectPath)
-        let grouped = Dictionary(grouping: inventory.skills) { skill in
-            canonicalFilePath(skill.path)
+
+        for plugin in codexPluginSkills() {
+            guard seenPaths.insert(plugin.skill.path).inserted else { continue }
+            collected.append(plugin)
         }
-        let duplicateKeys = duplicateSkillKeys(in: inventory.skills)
-        let versionConflictKeys = versionConflictSkillKeys(in: inventory.skills)
 
-        return grouped.compactMap { canonicalPath, observations in
-            guard let first = observations.sorted(by: skillSort).first else { return nil }
-            let surfaces = observations.compactMap { surfacesByID[$0.surfaceID] }
-            let surface = surfaces.sorted(by: surfaceSort).first
-            let toolLabels = uniqueStrings(
-                observations.flatMap { $0.availableIn.map(\.label) }
-            )
-            let sourceLabels = uniqueStrings(surfaces.map(\.label))
-            let canWriteSurface = surfaces.contains {
-                $0.canWriteSafely && $0.writeMethod == .file && $0.path != nil
-            }
-            let isInsideProject = canonicalPath == canonicalProjectRoot
-                || canonicalPath.hasPrefix(canonicalProjectRoot + "/")
-            let canMutate = canWriteSurface && isInsideProject
-            let state = state(for: observations)
-            let diagnostics = diagnostics(
-                for: observations,
-                duplicateKeys: duplicateKeys,
-                versionConflictKeys: versionConflictKeys
-            )
-            let skillMDPath = (first.path as NSString).appendingPathComponent("SKILL.md")
-            let readOnlyReason: String?
-            if canMutate {
-                readOnlyReason = nil
-            } else if !isInsideProject {
-                readOnlyReason = "This skill is outside the selected project root."
-            } else if surfaces.contains(where: { $0.writeMethod == .appUI || $0.canWriteSafely == false }) {
-                readOnlyReason = "This skill is owned by a plugin, managed policy, or app UI."
-            } else {
-                readOnlyReason = "Project Hub does not have a safe write path for this skill source."
-            }
+        let disabled = disabledSkillPaths(from: projectPath)
+        let versions = collected.map { version(at: $0.skill.path) }
+        let names = Dictionary(grouping: collected.indices, by: { collected[$0].displayName.lowercased() })
 
+        return collected.enumerated().map { index, raw in
+            var diagnostics: [String] = []
+            if (names[raw.displayName.lowercased()]?.count ?? 0) > 1 {
+                diagnostics.append("Duplicate name")
+            }
+            let groupVersions = Set((names[raw.displayName.lowercased()] ?? []).compactMap { versions[$0] })
+            if groupVersions.count > 1 {
+                diagnostics.append("Version conflict")
+            }
+            let path = raw.skill.path
+            let state: InstalledSkill.State = disabled.contains(path) || disabled.contains((path as NSString).appendingPathComponent("SKILL.md"))
+                ? .disabled
+                : .active
             return InstalledSkill(
-                originID: canonicalPath,
-                name: first.name,
-                description: first.description,
-                claudePath: observations.contains { $0.toolID == .claudeCode } ? first.path : nil,
-                codexPath: observations.contains { $0.toolID == .codexCLI || $0.toolID == .codexDesktop } ? first.path : nil,
-                path: first.path,
-                skillMDPath: skillMDPath,
-                sourceLabel: sourceLabels.first ?? surface?.label ?? "Skill source",
-                scopeLabel: scopeLabel(surface?.scope ?? first.scope),
-                toolLabels: toolLabels,
+                originID: path,
+                name: raw.displayName,
+                description: raw.skill.description,
+                claudePath: raw.claude ? path : nil,
+                codexPath: raw.codex ? path : nil,
+                path: path,
+                skillMDPath: (path as NSString).appendingPathComponent("SKILL.md"),
+                sourceLabel: raw.sourceLabel,
+                scopeLabel: path.hasPrefix(projectPath + "/") ? "Project" : "Parent",
+                toolLabels: raw.toolLabels,
                 state: state,
-                version: first.version,
+                version: versions[index],
                 diagnostics: diagnostics,
-                canEdit: canMutate,
-                canRemove: canMutate,
-                readOnlyReason: readOnlyReason
+                canEdit: raw.canMutate,
+                canRemove: raw.canMutate,
+                readOnlyReason: raw.canMutate ? nil : raw.readOnlyReason
             )
         }
-        .sorted { lhs, rhs in
-            if lhs.name.localizedCaseInsensitiveCompare(rhs.name) != .orderedSame {
-                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-            }
-            return lhs.path.localizedCaseInsensitiveCompare(rhs.path) == .orderedAscending
+        .sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
     }
 
-    private static func state(for observations: [CompatibilitySkillObservation]) -> InstalledSkill.State {
-        if observations.contains(where: { !$0.parseOK }) {
-            return .invalid
-        }
-        if observations.contains(where: { $0.enabledOverride == false || $0.claudeOverrideState == "off" }) {
-            return .disabled
-        }
-        if observations.contains(where: {
-            $0.claudeOverrideState == "name-only"
-                || $0.claudeOverrideState == "user-invocable-only"
-                || $0.allowImplicitInvocation == false
-                || $0.claudeDisableModelInvocation == true
-        }) {
-            return .limited
-        }
-        return .active
+    private struct DirSpec {
+        enum Kind { case claude, codex, other }
+        let path: String
+        let sourceLabel: String
+        let toolLabels: [String]
+        let kind: Kind
+        let readOnlyReason: String?
     }
 
-    private static func skillSort(_ lhs: CompatibilitySkillObservation, _ rhs: CompatibilitySkillObservation) -> Bool {
-        if lhs.toolID.rawValue != rhs.toolID.rawValue { return lhs.toolID.rawValue < rhs.toolID.rawValue }
-        return lhs.surfaceID < rhs.surfaceID
+    private struct RawSkill {
+        let skill: Skill
+        let sourceLabel: String
+        let toolLabels: [String]
+        let claude: Bool
+        let codex: Bool
+        let canMutate: Bool
+        let readOnlyReason: String?
+        let nameOverride: String?
+
+        var displayName: String { nameOverride ?? skill.name }
     }
 
-    private static func surfaceSort(_ lhs: CompatibilityMatrixEntry, _ rhs: CompatibilityMatrixEntry) -> Bool {
-        if lhs.precedence != rhs.precedence { return lhs.precedence < rhs.precedence }
-        return lhs.label.localizedCaseInsensitiveCompare(rhs.label) == .orderedAscending
-    }
-
-    private static func uniqueStrings(_ values: [String]) -> [String] {
+    private static func skillDirectories(for projectPath: String) -> [DirSpec] {
+        var dirs: [DirSpec] = []
         var seen = Set<String>()
-        var output: [String] = []
-        for value in values where seen.insert(value).inserted {
-            output.append(value)
+        var current = URL(fileURLWithPath: projectPath)
+        let specs = ProviderCatalog.specs()
+
+        for _ in 0..<6 {
+            for spec in specs {
+                for relative in spec.projectSkillDirs {
+                    let path = current.appendingPathComponent(relative).path
+                    guard seen.insert(path).inserted else { continue }
+                    dirs.append(dirSpec(path: path, specID: spec.id, specName: spec.name, extraLabel: nil))
+                }
+            }
+            appendAdditionalClaudeDirectories(from: current, into: &dirs, seen: &seen)
+            if FileManager.default.fileExists(atPath: current.appendingPathComponent(".git").path) {
+                break
+            }
+            let parent = current.deletingLastPathComponent()
+            if parent.path == current.path { break }
+            current = parent
         }
-        return output
-    }
 
-    private static func duplicateSkillKeys(in observations: [CompatibilitySkillObservation]) -> Set<String> {
-        let groups = Dictionary(grouping: observations, by: skillConflictKey)
-        return Set(groups.compactMap { key, group in
-            let paths = Set(group.map { canonicalFilePath($0.path) })
-            return paths.count > 1 ? key : nil
-        })
-    }
-
-    private static func versionConflictSkillKeys(in observations: [CompatibilitySkillObservation]) -> Set<String> {
-        let groups = Dictionary(grouping: observations.filter { $0.version != nil }, by: skillConflictKey)
-        return Set(groups.compactMap { key, group in
-            let versions = Set(group.compactMap(\.version))
-            let paths = Set(group.map { canonicalFilePath($0.path) })
-            return versions.count > 1 && paths.count > 1 ? key : nil
-        })
-    }
-
-    private static func diagnostics(
-        for observations: [CompatibilitySkillObservation],
-        duplicateKeys: Set<String>,
-        versionConflictKeys: Set<String>
-    ) -> [String] {
-        var output: [String] = []
-        let keys = Set(observations.map(skillConflictKey))
-        if !keys.isDisjoint(with: duplicateKeys) {
-            output.append("Duplicate name")
+        for nested in KnownSkillRoots.existingNestedClaudeSkillDirectories(
+            from: URL(fileURLWithPath: projectPath),
+            excluding: Set(dirs.map(\.path)),
+            maxDepth: 4,
+            maxDirectoriesVisited: 80
+        ) {
+            guard seen.insert(nested.path).inserted else { continue }
+            dirs.append(dirSpec(path: nested.path, specID: "claude-code", specName: "Claude Code", extraLabel: nil))
         }
-        if !keys.isDisjoint(with: versionConflictKeys) {
-            output.append("Version conflict")
+        return dirs
+    }
+
+    private static func appendAdditionalClaudeDirectories(from root: URL, into dirs: inout [DirSpec], seen: inout Set<String>) {
+        let settings = root.appendingPathComponent(".claude/settings.json")
+        guard let raw = try? String(contentsOfFile: settings.path, encoding: .utf8),
+              let data = ConfigWriter.stripJsonComments(raw).data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
         }
-        return output
-    }
-
-    private static func skillConflictKey(_ skill: CompatibilitySkillObservation) -> String {
-        "\(skill.toolID.rawValue):\(skill.name)"
-    }
-
-    private static func scopeLabel(_ scope: CompatibilityScope) -> String {
-        switch scope {
-        case .global: return "Global"
-        case .project: return "Project"
-        case .localProjectUser: return "Private"
-        case .desktopApp: return "Desktop"
-        case .account: return "Account"
-        case .runtime: return "Runtime"
+        var extras: [String] = stringArray(json["additionalDirectories"])
+        if let permissions = json["permissions"] as? [String: Any] {
+            extras += stringArray(permissions["additionalDirectories"])
+        }
+        for extra in extras {
+            let expanded: URL
+            if extra.hasPrefix("/") || extra.hasPrefix("~") {
+                expanded = URL(fileURLWithPath: (extra as NSString).expandingTildeInPath)
+            } else {
+                expanded = root.appendingPathComponent(extra)
+            }
+            let path = expanded.appendingPathComponent(".claude/skills").path
+            guard seen.insert(path).inserted else { continue }
+            dirs.append(
+                DirSpec(
+                    path: path,
+                    sourceLabel: "Claude Code additional-directory skills",
+                    toolLabels: ["Claude Code"],
+                    kind: .claude,
+                    readOnlyReason: "This skill is outside the selected project root."
+                )
+            )
         }
     }
 
-    private static func canonicalFilePath(_ path: String) -> String {
-        URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
-            .standardizedFileURL
-            .resolvingSymlinksInPath()
-            .path
+    private static func dirSpec(path: String, specID: String, specName: String, extraLabel: String?) -> DirSpec {
+        let kind: DirSpec.Kind
+        let labels: [String]
+        switch specID {
+        case "claude-code":
+            kind = .claude
+            labels = ["Claude Code"]
+        case "codex":
+            kind = .codex
+            labels = ["Codex CLI", "Codex Desktop"]
+        default:
+            kind = .other
+            labels = [specName]
+        }
+        return DirSpec(
+            path: path,
+            sourceLabel: extraLabel ?? specName,
+            toolLabels: labels,
+            kind: kind,
+            readOnlyReason: "This skill is outside the selected project root."
+        )
+    }
+
+    private static func disabledSkillPaths(from projectPath: String) -> Set<String> {
+        var disabled = Set<String>()
+        var current = URL(fileURLWithPath: projectPath)
+        for _ in 0..<6 {
+            let toml = current.appendingPathComponent(".codex/config.toml")
+            if let raw = try? String(contentsOfFile: toml.path, encoding: .utf8) {
+                disabled.formUnion(disabledPaths(inTOML: raw))
+            }
+            if FileManager.default.fileExists(atPath: current.appendingPathComponent(".git").path) {
+                break
+            }
+            let parent = current.deletingLastPathComponent()
+            if parent.path == current.path { break }
+            current = parent
+        }
+        return disabled
+    }
+
+    private static func disabledPaths(inTOML raw: String) -> Set<String> {
+        var disabled = Set<String>()
+        var currentPath: String?
+        for line in raw.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("path") {
+                if let start = trimmed.firstIndex(of: "\""),
+                   let end = trimmed[trimmed.index(after: start)...].firstIndex(of: "\"") {
+                    currentPath = String(trimmed[trimmed.index(after: start)..<end])
+                }
+            }
+            if trimmed.contains("enabled") && (trimmed.contains("false") || trimmed.contains("0")) {
+                if let currentPath { disabled.insert(currentPath) }
+            }
+        }
+        return disabled
+    }
+
+    private static func codexPluginSkills() -> [RawSkill] {
+        let cache = (ProjectHubPaths.codexHome() as NSString).appendingPathComponent("plugins/cache")
+        guard let markets = try? FileManager.default.contentsOfDirectory(atPath: cache) else { return [] }
+        var rows: [RawSkill] = []
+        for market in markets where !market.hasPrefix(".") {
+            let marketDir = (cache as NSString).appendingPathComponent(market)
+            guard let plugins = try? FileManager.default.contentsOfDirectory(atPath: marketDir) else { continue }
+            for plugin in plugins where !plugin.hasPrefix(".") {
+                let pluginDir = (marketDir as NSString).appendingPathComponent(plugin)
+                guard let versions = try? FileManager.default.contentsOfDirectory(atPath: pluginDir) else { continue }
+                for versionName in versions.sorted().reversed() {
+                    let root = (pluginDir as NSString).appendingPathComponent(versionName)
+                    let skillDir = (root as NSString).appendingPathComponent("skills")
+                    for skill in SkillReader.scanSkillDir(skillDir, source: .codexManaged) {
+                        rows.append(
+                            RawSkill(
+                                skill: skill,
+                                sourceLabel: "Codex plugin",
+                                toolLabels: ["Codex CLI", "Codex Desktop"],
+                                claude: false,
+                                codex: true,
+                                canMutate: false,
+                                readOnlyReason: "Installed by a Codex plugin.",
+                                nameOverride: "\(plugin):\(skill.name)"
+                            )
+                        )
+                    }
+                    break
+                }
+            }
+        }
+        return rows
+    }
+
+    private static func version(at skillDirectory: String) -> String? {
+        let path = (skillDirectory as NSString).appendingPathComponent("SKILL.md")
+        guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+        for line in content.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("version:") else { continue }
+            let value = trimmed.dropFirst("version:".count).trimmingCharacters(in: .whitespaces)
+            return value.isEmpty ? nil : value
+        }
+        return nil
+    }
+
+    private static func stringArray(_ value: Any?) -> [String] {
+        if let strings = value as? [String] { return strings }
+        if let any = value as? [Any] { return any.compactMap { $0 as? String } }
+        return []
     }
 }

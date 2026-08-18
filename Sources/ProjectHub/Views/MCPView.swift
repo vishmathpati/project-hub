@@ -17,24 +17,20 @@ struct MCPView: View {
     private var projectScopedToolIDs: [String] {
         ALL_TOOL_META
             .map(\.id)
-            .filter { ToolSpecs.projectScopedTools.contains($0) }
+            .filter { PRIMARY_TOOL_IDS.contains($0) && ToolSpecs.projectScopedTools.contains($0) }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             topBar
             Divider()
-            let allEmpty = allServers.isEmpty
-            if allEmpty {
+            if projectScopedToolIDs.isEmpty {
                 emptyState
             } else {
                 ScrollView {
                     VStack(spacing: 10) {
                         ForEach(projectScopedToolIDs, id: \.self) { toolID in
-                            let servers = projectServers(for: toolID)
-                            if !servers.isEmpty {
-                                toolSection(toolID: toolID, servers: servers)
-                            }
+                            toolSection(toolID: toolID, servers: projectServers(for: toolID))
                         }
                     }
                     .padding(.horizontal, 12)
@@ -153,12 +149,8 @@ struct MCPView: View {
             }
 
         let localRows = localClaudeProjectRows(for: toolID)
-        let compatibilityRows = compatibilityProjectRows(
-            for: toolID,
-            excluding: projectRows + localRows
-        )
 
-        return (projectRows + localRows + compatibilityRows)
+        return (projectRows + localRows)
             .sorted {
                 if $0.name != $1.name { return $0.name < $1.name }
                 return $0.originID < $1.originID
@@ -193,58 +185,17 @@ struct MCPView: View {
         }
     }
 
-    private func compatibilityProjectRows(
-        for toolID: String,
-        excluding existingRows: [ProjectMCPServerRow]
-    ) -> [ProjectMCPServerRow] {
-        var seen = Set(existingRows.map(projectRowContentKey))
-        var output: [ProjectMCPServerRow] = []
-        for row in CompatibilityScanner.mcpInventory(projectRoot: project.path) {
-            guard row.appToolID == toolID,
-                  row.scope == .project || row.scope == .localProjectUser else {
-                continue
-            }
-            let server = row.server
-            let candidate = ProjectMCPServerRow(
-                originID: "\(row.surfaceID)::\(server.id)",
-                toolID: toolID,
-                source: toolID == "claude-code" && row.scope == .localProjectUser ? .claudeCodeLocal : mcpSource(for: toolID),
-                name: server.name,
-                detail: server.detail,
-                sourceLabel: row.surfaceLabel,
-                sourcePathLabel: relativePathLabel(server.sourcePath ?? row.path ?? "compatibility MCP source"),
-                isReadOnly: true,
-                readOnlyReason: server.readOnlyReason,
-                disabled: server.isDisabled,
-                disabledByConfig: server.isDisabled,
-                disabledByClaudeApproval: false,
-                claudeApprovalDisableSources: [],
-                canResolveClaudeApprovalFromProjectMCP: false
-            )
-            guard seen.insert(projectRowContentKey(candidate)).inserted else { continue }
-            output.append(candidate)
-        }
-        return output
-    }
-
-    private func projectRowContentKey(_ row: ProjectMCPServerRow) -> String {
-        [
-            row.toolID,
-            row.source.rawValue,
-            row.name,
-            row.detail,
-            row.disabled ? "disabled" : "enabled"
-        ].joined(separator: "\u{1e}")
-    }
-
-    private func relativePathLabel(_ path: String) -> String {
-        path.replacingOccurrences(of: project.path + "/", with: "")
-    }
-
     private func mcpSource(for toolID: String) -> MCPConfigSource {
         switch toolID {
         case "claude-code": return .claudeCode
         case "codex": return .codex
+        case "cursor": return .cursor
+        case "vscode": return .vscode
+        case "opencode": return .opencode
+        case "antigravity": return .antigravity
+        case "pi": return .pi
+        case "command-code": return .commandCode
+        case "grok": return .grok
         default: return .claudeCode
         }
     }
@@ -333,8 +284,17 @@ struct MCPView: View {
             Divider().opacity(0.5)
 
             VStack(spacing: 1) {
-                ForEach(servers) { server in
-                    serverRow(server: server, toolID: toolID, color: c)
+                if servers.isEmpty {
+                    Text("No project servers yet")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    ForEach(servers) { server in
+                        serverRow(server: server, toolID: toolID, color: c)
+                    }
                 }
             }
         }

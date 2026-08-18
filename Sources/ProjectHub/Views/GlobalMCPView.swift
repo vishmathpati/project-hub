@@ -88,7 +88,7 @@ struct GlobalMCPView: View {
         } message: {
             Text(policyError ?? "Unknown error")
         }
-        .onAppear { mcpStore.refresh() }
+        .onAppear { mcpStore.refresh(force: false) }
     }
 
     // MARK: - Helper bindings for sheet items

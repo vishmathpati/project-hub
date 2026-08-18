@@ -276,6 +276,7 @@ struct ProjectsView: View {
             VStack(spacing: 8) {
                 sourceSummaryRow(title: "Claude Code", count: discoveryCount(for: .claudeCode), icon: "terminal.fill", color: .orange)
                 sourceSummaryRow(title: "Codex", count: discoveryCount(for: .codexCLI), icon: "sparkles", color: .purple)
+                sourceSummaryRow(title: "Grok CLI", count: grokProjectCount, icon: "asterisk.circle.fill", color: .primary)
                 sourceSummaryRow(title: "Filesystem", count: discoveryCount(for: .filesystem), icon: "externaldrive", color: .secondary)
             }
         }
@@ -302,7 +303,7 @@ struct ProjectsView: View {
                 .buttonStyle(.plain)
                 .font(.system(size: 11, weight: .semibold))
             }
-            Text("\(projects.hiddenWorktrees.count) related worktree\(projects.hiddenWorktrees.count == 1 ? "" : "s") kept out of the primary list.")
+            Text("\(projects.hiddenWorktrees.count) related worktree\(projects.hiddenWorktrees.count == 1 ? "" : "s"). Add one to manage its own skills and configs.")
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -398,6 +399,12 @@ struct ProjectsView: View {
         projects.discovered.filter { $0.orderedSources.contains(source) }.count
     }
 
+    private var grokProjectCount: Int {
+        let tracked = projects.projects.filter { projects.detectedToolIDs(for: $0).contains("grok") }.count
+        let discovered = projects.discovered.filter { $0.detectedTools.contains("grok") }.count
+        return tracked + discovered
+    }
+
     // MARK: - Discovered section header
 
     private var discoveredSectionHeader: some View {
@@ -427,7 +434,7 @@ struct ProjectsView: View {
             Image(systemName: "arrow.triangle.branch")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundColor(.secondary)
-            Text("\(projects.hiddenWorktrees.count) worktree\(projects.hiddenWorktrees.count == 1 ? "" : "s") hidden")
+            Text("\(projects.hiddenWorktrees.count) related worktree\(projects.hiddenWorktrees.count == 1 ? "" : "s")")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(.secondary)
             Spacer()
@@ -527,6 +534,13 @@ struct ProjectsView: View {
                 .padding(.top, 2)
             }
             Spacer()
+            Button(action: { projects.addDiscovered(disc) }) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundColor(.accentColor)
+            }
+            .buttonStyle(.plain)
+            .help("Add this worktree as its own project")
             Button(action: { revealPathInFinder(disc.path) }) {
                 Image(systemName: "arrow.up.forward.square")
                     .font(.system(size: 13, weight: .semibold))

@@ -89,7 +89,7 @@ struct CompatibilityView: View {
         }
         .onAppear {
             ensureSelectedProject()
-            reloadCodexProfileNames()
+            loadCachedReportOffMain(replace: false)
         }
         .onChange(of: selectedProjectPath) { _, _ in
             if fixedProject == nil { invalidateReport() }
@@ -109,8 +109,6 @@ struct CompatibilityView: View {
     private var topBar: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Compatibility")
-                    .font(.system(size: 13, weight: .semibold))
                 Text(scanRoot.map(shortPath) ?? "Global tool state")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.secondary)
@@ -7001,13 +6999,14 @@ struct CompatibilityView: View {
         scanRequestID = requestID
         scanning = true
 
-        Task.detached(priority: .userInitiated) {
+        Task.detached(priority: .utility) {
             let profileNames = CompatibilityScanner.codexConfiguredProfileNames()
             let normalizedProfileName = profileNames.contains(requestedProfileName) ? requestedProfileName : ""
             let scanResult = CompatibilityScanner.scan(
                 projectRoot: requestedRoot,
                 codexProfileSelection: CodexProfileSelection.cliRuntimeOverride(normalizedProfileName)
             )
+            ConfigScanCache.save(scanResult)
 
             await MainActor.run {
                 guard scanRequestID == requestID else {
@@ -7031,15 +7030,35 @@ struct CompatibilityView: View {
         if scanning {
             scanRequestID = UUID()
         }
-        report = nil
         liveReports = [:]
         postFixActions = []
         selectedIssue = nil
         copiedReport = false
+        loadCachedReportOffMain(replace: true)
+    }
+
+    private func loadCachedReportOffMain(replace: Bool) {
+        let root = scanRoot
+        let profile = CodexProfileSelection.cliRuntimeOverride(codexRuntimeProfileName)?.name
+        Task.detached(priority: .utility) {
+            let names = CompatibilityScanner.codexConfiguredProfileNames()
+            let cached = ConfigScanCache.load(projectRoot: root, profileName: profile)
+            await MainActor.run {
+                codexProfileNames = names
+                if replace || report == nil {
+                    report = cached
+                }
+            }
+        }
     }
 
     private func reloadCodexProfileNames() {
-        codexProfileNames = CompatibilityScanner.codexConfiguredProfileNames()
+        Task.detached(priority: .utility) {
+            let names = CompatibilityScanner.codexConfiguredProfileNames()
+            await MainActor.run {
+                codexProfileNames = names
+            }
+        }
     }
 
     private func normalizeCodexRuntimeProfileSelection() {

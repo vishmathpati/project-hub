@@ -6,6 +6,7 @@ import AppKit
 struct ClaudeMdView: View {
     let project: Project
 
+    @State private var selected = InstructionDocument.projectCatalog[0]
     @State private var content: String = ""
     @State private var savedContent: String = ""
     @State private var hasFile: Bool = false
@@ -29,7 +30,10 @@ struct ClaudeMdView: View {
             Divider()
             bottomBar
         }
-        .onAppear { loadFile() }
+        .onAppear {
+            selected = InstructionDocument.preferred(in: project.path)
+            loadFile()
+        }
     }
 
     // MARK: - Top bar
@@ -41,9 +45,17 @@ struct ClaudeMdView: View {
                 Image(systemName: hasFile ? "doc.text.fill" : "doc.badge.plus")
                     .font(.system(size: 11))
                     .foregroundColor(hasFile ? .primary : .secondary)
-                Text(hasFile ? "CLAUDE.md" : "No CLAUDE.md")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(hasFile ? .primary : .secondary)
+                Picker("File", selection: $selected) {
+                    ForEach(InstructionDocument.projectCatalog) { document in
+                        let mark = InstructionFileReader.exists(document, in: project.path) ? "" : " · new"
+                        Text(document.title + mark).tag(document)
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 220)
+                .onChange(of: selected) { _, _ in
+                    loadFile()
+                }
             }
 
             Spacer()
@@ -104,9 +116,9 @@ struct ClaudeMdView: View {
             Image(systemName: "doc.badge.plus")
                 .font(.system(size: 32))
                 .foregroundColor(.secondary)
-            Text("No CLAUDE.md found")
+            Text("No \(selected.title) yet")
                 .font(.system(size: 14, weight: .semibold))
-            Text("CLAUDE.md gives Claude Code project-specific instructions.\nChoose a template to get started.")
+            Text("Project instructions for Claude, Codex, Cursor, and the other tools.\nChoose a template to create \(selected.title).")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -224,8 +236,8 @@ struct ClaudeMdView: View {
     // MARK: - Helpers
 
     private func loadFile() {
-        hasFile = ClaudeMdReader.exists(at: project.path)
-        let text = ClaudeMdReader.read(from: project.path) ?? ""
+        hasFile = InstructionFileReader.exists(selected, in: project.path)
+        let text = InstructionFileReader.read(selected, from: project.path) ?? ""
         content = text
         savedContent = text
         isDirty = false
@@ -234,7 +246,7 @@ struct ClaudeMdView: View {
 
     private func saveFile() {
         do {
-            try ClaudeMdReader.write(content, to: project.path)
+            try InstructionFileReader.write(content, selected, to: project.path)
             savedContent = content
             hasFile = true
             isDirty = false

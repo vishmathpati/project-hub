@@ -28,67 +28,20 @@ final class ConfigReader {
         return "\(home)/Library/Application Support/Claude"
     }
 
-    // Read every tool and return summaries (called off the main thread)
+    // Read every primary tool from its own config file. Plugin-owned MCP
+    // evidence stays on Compat / Plugins — this path must stay page-local.
     func readAllTools() -> [ToolSummary] {
-        let compatibilityRows = CompatibilityScanner.mcpInventory(projectRoot: nil)
-        let compatibilityByTool = Dictionary(grouping: compatibilityRows, by: \.appToolID)
-        return ALL_TOOL_META.filter { PRIMARY_TOOL_IDS.contains($0.id) }.map { meta in
+        ALL_TOOL_META.filter { PRIMARY_TOOL_IDS.contains($0.id) }.map { meta in
             let (detected, servers) = readTool(id: meta.id)
-            let compatibilityServers = compatibilityByTool[meta.id]?.map(\.server) ?? []
-            let mergedServers = mergeReadBackServers(
-                baseline: servers,
-                compatibility: compatibilityServers
-            )
             return ToolSummary(
                 toolID:   meta.id,
                 label:    meta.label,
                 short:    meta.short,
-                detected: detected || !compatibilityServers.isEmpty,
+                detected: detected,
                 configPath: ToolSpecs.spec(for: meta.id)?.path,
-                servers:  mergedServers
+                servers:  servers
             )
         }
-    }
-
-    private func mergeReadBackServers(baseline: [ServerEntry], compatibility: [ServerEntry]) -> [ServerEntry] {
-        var seen = Set(baseline.map(serverContentKey))
-        var merged = baseline
-        for server in compatibility {
-            guard seen.insert(serverContentKey(server)).inserted else { continue }
-            merged.append(server)
-        }
-        return merged.sorted {
-            if $0.name.localizedCaseInsensitiveCompare($1.name) != .orderedSame {
-                return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-            }
-            return ($0.sourceLabel ?? "").localizedCaseInsensitiveCompare($1.sourceLabel ?? "") == .orderedAscending
-        }
-    }
-
-    private func serverContentKey(_ server: ServerEntry) -> String {
-        [
-            server.name,
-            server.transport,
-            server.command ?? "",
-            server.args.joined(separator: "\u{1f}"),
-            server.cwd ?? "",
-            server.url ?? "",
-            sortedKeyValues(server.env),
-            sortedKeyValues(server.headers),
-            server.headersHelper ?? "",
-            sortedKeyValues(server.oauth),
-            server.bearerTokenEnvVar ?? "",
-            server.envVars.joined(separator: "\u{1f}"),
-            server.envFile ?? "",
-            server.isDisabled ? "disabled" : "enabled"
-        ].joined(separator: "\u{1e}")
-    }
-
-    private func sortedKeyValues(_ values: [String: String]) -> String {
-        values
-            .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
-            .map { "\($0.key)=\($0.value)" }
-            .joined(separator: "\u{1f}")
     }
 
     // MARK: - Per-tool dispatch
@@ -163,6 +116,26 @@ final class ConfigReader {
             return (fm.fileExists(atPath: path) ||
                     fm.fileExists(atPath: "\(home)/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev"),
                     readJsonServers(path: path, key: "mcpServers"))
+
+        case "antigravity":
+            let path = "\(home)/.gemini/config/mcp_config.json"
+            return (onPath("agy") || fm.fileExists(atPath: "\(home)/.gemini/antigravity-cli") || fm.fileExists(atPath: path),
+                    readJsonServers(path: path, key: "mcpServers"))
+
+        case "pi":
+            let path = "\(home)/.pi/agent/mcp.json"
+            return (onPath("pi") || fm.fileExists(atPath: "\(home)/.pi/agent"),
+                    readJsonServers(path: path, key: "mcpServers"))
+
+        case "command-code":
+            let path = "\(home)/.commandcode/mcp.json"
+            return (onPath("command-code") || onPath("cmdc") || fm.fileExists(atPath: "\(home)/.commandcode"),
+                    readJsonServers(path: path, key: "mcpServers"))
+
+        case "grok":
+            let path = "\(home)/.grok/config.toml"
+            return (onPath("grok") || fm.fileExists(atPath: "\(home)/.grok"),
+                    readCodexServers(path: path))
 
         default:
             return (false, [])

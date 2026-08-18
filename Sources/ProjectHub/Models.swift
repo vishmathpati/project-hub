@@ -8,6 +8,7 @@ enum SkillSource: String, Codable {
     case codexAdmin
     case codexManaged
     case cursorGlobal
+    case providerGlobal
 
     var label: String {
         switch self {
@@ -16,6 +17,7 @@ enum SkillSource: String, Codable {
         case .codexAdmin:   return "Codex admin"
         case .codexManaged: return "Codex managed"
         case .cursorGlobal: return "Cursor"
+        case .providerGlobal: return "Provider"
         }
     }
 }
@@ -95,6 +97,11 @@ enum MCPConfigSource: String {
     case cursor
     case vscode
     case roo
+    case opencode
+    case antigravity
+    case pi
+    case commandCode = "command-code"
+    case grok
 
     var label: String {
         switch self {
@@ -104,6 +111,11 @@ enum MCPConfigSource: String {
         case .cursor:     return "Cursor"
         case .vscode:     return "VS Code"
         case .roo:        return "Roo"
+        case .opencode:   return "OpenCode"
+        case .antigravity: return "Antigravity"
+        case .pi:         return "Pi"
+        case .commandCode: return "Command Code"
+        case .grok:       return "Grok CLI"
         }
     }
 
@@ -115,6 +127,11 @@ enum MCPConfigSource: String {
         case .cursor:     return ".cursor/mcp.json"
         case .vscode:     return ".vscode/mcp.json"
         case .roo:        return ".roo/mcp.json"
+        case .opencode:   return "opencode.json"
+        case .antigravity: return ".agents/mcp_config.json"
+        case .pi:         return ".pi/mcp.json"
+        case .commandCode: return ".mcp.json"
+        case .grok:       return ".grok/config.toml"
         }
     }
 }
@@ -347,14 +364,30 @@ let ALL_TOOL_META: [(id: String, label: String, short: String)] = [
     ("zed",            "Zed",            "Ze"),
     ("continue",       "Continue",       "Co"),
     ("gemini",         "Gemini",         "Ge"),
+    ("antigravity",    "Antigravity",    "Ag"),
     ("roo",            "Roo",            "Ro"),
     ("opencode",       "opencode",       "Oc"),
     ("cline",          "Cline",          "Cl"),
+    ("pi",             "Pi",             "Pi"),
+    ("command-code",   "Command Code",   "Cm"),
+    ("grok",           "Grok CLI",       "Gk"),
 ]
 
-/// Current primary compatibility target set. Other historical readers remain
-/// available in code, but active UX/discovery is focused on Claude and Codex.
-let PRIMARY_TOOL_IDS: Set<String> = ["claude-desktop", "claude-code", "codex"]
+/// Tools shown on the main MCP page. Secondary tools stay readable in code
+/// but stay off this list unless the same reader already covers them.
+let PRIMARY_TOOL_IDS: Set<String> = [
+    "claude-desktop",
+    "claude-code",
+    "codex",
+    "cursor",
+    "vscode",
+    "opencode",
+    "zed",
+    "antigravity",
+    "pi",
+    "command-code",
+    "grok",
+]
 
 /// Tool IDs hidden from UI but still read/written normally.
 let HIDDEN_TOOL_IDS: Set<String> = Set(ALL_TOOL_META.map(\.id)).subtracting(PRIMARY_TOOL_IDS)
