@@ -27,7 +27,7 @@ struct BeaconView: View {
             // Solid dark circle — material is skipped because it can render as
             // transparent in a borderless panel, killing hit-testing.
             Circle()
-                .fill(Color(red: 0.10, green: 0.10, blue: 0.13))
+                .fill(HubTheme.panelBg)
                 .shadow(color: .black.opacity(0.6), radius: 6, x: 0, y: 3)
 
             // Usage ring — always drawn, fades in as usage rises
@@ -89,12 +89,13 @@ struct BeaconView: View {
         )
     }
 
+    /// Same green → warn → bad ramp as the rest of the app (§2.3, §11).
+    /// No fourth status colour.
     private func colorFor(_ f: Double) -> Color {
         switch f {
-        case ..<0.5:  return .green
-        case ..<0.75: return .yellow
-        case ..<0.9:  return .orange
-        default:      return .red
+        case ..<0.70: return HubTheme.ok
+        case ..<0.90: return HubTheme.warn
+        default:      return HubTheme.bad
         }
     }
 }

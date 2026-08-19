@@ -75,7 +75,7 @@ struct MCPEditServerSheet: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity)
-        .background(ContentView.headerGrad)
+        .background(HubTheme.accent)
     }
 
     // MARK: Form
@@ -108,12 +108,12 @@ struct MCPEditServerSheet: View {
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(.primary)
                             .scrollContentBackground(.hidden)
-                            .background(Color(NSColor.controlBackgroundColor))
+                            .background(HubTheme.raised)
                             .frame(height: 90)
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 6)
-                                    .stroke(Color(NSColor.separatorColor), lineWidth: 0.5)
+                                    .stroke(HubTheme.line, lineWidth: 0.5)
                             )
                     }
                 } else {
@@ -140,7 +140,7 @@ struct MCPEditServerSheet: View {
                             .font(.system(size: 11, weight: .medium))
                         }
                         .buttonStyle(.plain)
-                        .foregroundColor(.accentColor)
+                        .foregroundColor(HubTheme.accent)
                     }
 
                     if envPairs.isEmpty {
@@ -203,10 +203,10 @@ struct MCPEditServerSheet: View {
                     Text("Save")
                         .font(.system(size: 12, weight: .semibold))
                 }
-                .foregroundColor(.white)
+                .foregroundColor(HubTheme.onAccent)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 7)
-                .background(ContentView.headerGrad)
+                .background(HubTheme.accent)
                 .clipShape(RoundedRectangle(cornerRadius: 7))
                 .opacity(saving ? 0.6 : 1)
             }

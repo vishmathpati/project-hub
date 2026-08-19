@@ -76,8 +76,77 @@ struct ToolPalette {
         ),
     ]
 
+    // MARK: - Provider tile identity (DESIGN.md §2.4)
+    //
+    // Brand colour is confined to the provider tile. Rows, badges and buttons
+    // around it stay neutral — that is what lets ten providers sit on one screen.
+
+    struct Brand {
+        let mark: String        // two-character monogram, from ALL_TOOL_META.short
+        let label: String
+        let fgDark: String      // tile foreground on dark
+        let bgDark: String      // tile background on dark
+        let fgLight: String     // darkened to hold 4.5:1 on the light tile
+        let bgLight: String
+    }
+
+    static let brands: [String: Brand] = [
+        "claude-code":    Brand(mark: "CC", label: "Claude Code",   fgDark: "#D06A6A", bgDark: "#2A1616", fgLight: "#8E3232", bgLight: "#F7E9E9"),
+        "claude-desktop": Brand(mark: "Cl", label: "Claude",        fgDark: "#D06A6A", bgDark: "#2A1616", fgLight: "#8E3232", bgLight: "#F7E9E9"),
+        "codex":          Brand(mark: "Cx", label: "Codex",         fgDark: "#4FD187", bgDark: "#12251A", fgLight: "#1D7746", bgLight: "#E6F6EC"),
+        "cursor":         Brand(mark: "Cu", label: "Cursor",        fgDark: "#A985F8", bgDark: "#1E1830", fgLight: "#5B37B0", bgLight: "#EFEAFB"),
+        "vscode":         Brand(mark: "VS", label: "VS Code",       fgDark: "#4A9BEA", bgDark: "#10202F", fgLight: "#1C5C9C", bgLight: "#E6F0FA"),
+        "zed":            Brand(mark: "Ze", label: "Zed",           fgDark: "#A96BF0", bgDark: "#1E1630", fgLight: "#5C2CA6", bgLight: "#F0E8FC"),
+        "opencode":       Brand(mark: "Oc", label: "opencode",      fgDark: "#EFA84D", bgDark: "#2A1F10", fgLight: "#8A5A0C", bgLight: "#FBF0DF"),
+        "antigravity":    Brand(mark: "Ag", label: "Antigravity",   fgDark: "#7CA0F8", bgDark: "#161E30", fgLight: "#33509E", bgLight: "#E9EFFC"),
+        "pi":             Brand(mark: "Pi", label: "Pi",            fgDark: "#4FA8CC", bgDark: "#10222A", fgLight: "#1B6280", bgLight: "#E4F2F7"),
+        "command-code":   Brand(mark: "Cm", label: "Command Code",  fgDark: "#EE8055", bgDark: "#2A1A12", fgLight: "#93411C", bgLight: "#FBEBE4"),
+        "grok":           Brand(mark: "Gk", label: "Grok CLI",      fgDark: "#B8C2D6", bgDark: "#1D2029", fgLight: "#454E60", bgLight: "#ECEEF3"),
+        "windsurf":       Brand(mark: "Wi", label: "Windsurf",      fgDark: "#3FBFA9", bgDark: "#0F2523", fgLight: "#186B5D", bgLight: "#E4F4F1"),
+        "continue":       Brand(mark: "Co", label: "Continue",      fgDark: "#4FD187", bgDark: "#12251A", fgLight: "#1D7746", bgLight: "#E6F6EC"),
+        "gemini":         Brand(mark: "Ge", label: "Gemini",        fgDark: "#7CA0F8", bgDark: "#161E30", fgLight: "#33509E", bgLight: "#E9EFFC"),
+        "roo":            Brand(mark: "Ro", label: "Roo",           fgDark: "#EFA84D", bgDark: "#2A1F10", fgLight: "#8A5A0C", bgLight: "#FBF0DF"),
+        "cline":          Brand(mark: "Cn", label: "Cline",         fgDark: "#4FA8CC", bgDark: "#10222A", fgLight: "#1B6280", bgLight: "#E4F2F7"),
+    ]
+
+    /// Two-character monogram shown when the provider's app icon is unavailable.
+    static func mark(for toolID: String) -> String {
+        if let brand = brands[toolID] { return brand.mark }
+        let letters = toolID.split(whereSeparator: { !$0.isLetter })
+        if let first = letters.first {
+            let head = first.prefix(1).uppercased()
+            if letters.count > 1, let second = letters.dropFirst().first {
+                return head + second.prefix(1).lowercased()
+            }
+            return head + first.dropFirst().prefix(1).lowercased()
+        }
+        return "??"
+    }
+
+    /// Human-readable provider name, used as the tile's accessibility label.
+    static func label(for toolID: String) -> String {
+        brands[toolID]?.label ?? toolID
+    }
+
+    static func tileForeground(for toolID: String) -> Color {
+        guard let brand = brands[toolID] else { return HubTheme.textMid }
+        return dynamic(dark: brand.fgDark, light: brand.fgLight)
+    }
+
+    static func tileBackground(for toolID: String) -> Color {
+        guard let brand = brands[toolID] else { return HubTheme.raised }
+        return dynamic(dark: brand.bgDark, light: brand.bgLight)
+    }
+
+    private static func dynamic(dark: String, light: String) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return HubTheme.nsColor(hex: isDark ? dark : light)
+        })
+    }
+
     static func color(for toolID: String) -> Color {
-        map[toolID]?.color ?? Color.accentColor
+        map[toolID]?.color ?? HubTheme.accent
     }
 
     static func icon(for toolID: String) -> String {
@@ -103,6 +172,7 @@ struct ToolPalette {
             "opencode":       ["/Applications/OpenCode.app"],
             "gemini":         ["/Applications/Gemini.app",
                                "/Applications/Google Gemini.app"],
+            "antigravity":    ["/Applications/Antigravity.app"],
         ]
         guard let paths = candidates[toolID] else { return nil }
         let fm = FileManager.default

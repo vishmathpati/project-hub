@@ -59,10 +59,22 @@ struct PluginsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            topBar
-            Divider()
-            content
+            HubPageHeader(
+                title: "Plugins",
+                subtitle: summaryText,
+                actions: { headerActions }
+            )
+            ScrollView {
+                VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
+                    HubPageNote(
+                        text: "A plugin is a bundle that installs several things at once — skills, sub-agents, MCP servers and slash commands. Expand one to see exactly what it will put on disk before you install it."
+                    )
+                    content
+                }
+                .padding(HubTheme.contentPadding)
+            }
         }
+        .background(HubTheme.bg)
         .onAppear {
             if selectedProjectID == nil {
                 selectedProjectID = projectStore.projects.first?.id
@@ -86,65 +98,46 @@ struct PluginsView: View {
         }
     }
 
-    private var topBar: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                Picker("Plugin scope", selection: $scanTarget) {
-                    ForEach(ScanTarget.allCases) { target in
-                        Text(target.title).tag(target)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 150)
-                .disabled(scanning)
-
-                Spacer(minLength: 8)
-
-                Button(action: scan) {
-                    HStack(spacing: 4) {
-                        if scanning {
-                            ProgressView()
-                                .scaleEffect(0.5)
-                                .frame(width: 12, height: 12)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        Text(scanning ? "Scanning" : "Scan")
-                    }
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(scanning ? .secondary : .white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(scanning ? Color.secondary.opacity(0.12) : Color.accentColor)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                }
-                .buttonStyle(.plain)
-                .disabled(scanning || (scanTarget == .project && selectedProject == nil))
+    @ViewBuilder
+    private var headerActions: some View {
+        Menu {
+            ForEach(ScanTarget.allCases) { target in
+                Button(target.title) { scanTarget = target }
             }
-
-            HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(summaryText)
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                    Text(scanRoot.map(shortPath) ?? "Global Claude/Codex plugin state")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-
-                Spacer(minLength: 8)
-
-                if scanTarget == .project && !projectStore.projects.isEmpty {
-                    projectPicker
-                }
-            }
+        } label: {
+            Text("scope: \(scanTarget.title.lowercased()) ▾")
+                .font(HubFont.mono(10))
+                .foregroundStyle(HubTheme.textMid)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(scanning)
+
+        if scanTarget == .project, !projectStore.projects.isEmpty {
+            Menu {
+                ForEach(projectStore.projects) { project in
+                    Button(project.displayName) { selectedProjectID = project.id }
+                }
+            } label: {
+                Text("for: \(selectedProject?.displayName ?? "—") ▾")
+                    .font(HubFont.mono(10))
+                    .foregroundStyle(HubTheme.textMid)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .disabled(scanning)
+        }
+
+        Text(scanRoot.map(shortPath) ?? "global plugin state")
+            .font(HubFont.machine)
+            .foregroundStyle(HubTheme.textFaint)
+            .lineLimit(1)
+            .truncationMode(.middle)
+
+        HubButton(title: scanning ? "Scanning" : "Rescan", kind: .primary, action: scan)
+            .disabled(scanning || (scanTarget == .project && selectedProject == nil))
     }
 
     private var projectPicker: some View {
@@ -164,7 +157,7 @@ struct PluginsView: View {
     private var summaryText: String {
         if scanning { return "Scanning plugin evidence" }
         guard report != nil else { return "Scan to inspect plugins" }
-        return "\(pluginGroups.count) plugin\(pluginGroups.count == 1 ? "" : "s") detected"
+        return "\(pluginGroups.count) bundle\(pluginGroups.count == 1 ? "" : "s") found"
     }
 
     @ViewBuilder
@@ -180,79 +173,102 @@ struct PluginsView: View {
         }
     }
 
+    /// Bundles grouped by the provider that installs them (§3d).
+    private var groupedBundles: [(providerID: String, groups: [PluginInventoryGroup])] {
+        var buckets: [String: [PluginInventoryGroup]] = [:]
+        var order: [String] = []
+        for group in pluginGroups {
+            let id = group.providerIDs.first ?? "claude-code"
+            if buckets[id] == nil { order.append(id) }
+            buckets[id, default: []].append(group)
+        }
+        return order.map { ($0, buckets[$0] ?? []) }
+    }
+
     private var pluginList: some View {
-        ScrollView {
-            VStack(spacing: 6) {
-                ForEach(pluginGroups) { group in
-                    pluginRow(group)
+        VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
+            ForEach(groupedBundles, id: \.providerID) { bucket in
+                VStack(alignment: .leading, spacing: 8) {
+                    HubSectionHeading(
+                        "\(ToolPalette.label(for: bucket.providerID)) bundles",
+                        count: bucket.groups.count
+                    )
+                    VStack(spacing: 0) {
+                        ForEach(Array(bucket.groups.enumerated()), id: \.element.id) { index, group in
+                            if index > 0 { HubRowSeparator() }
+                            pluginRow(group)
+                        }
+                    }
+                    .hubCard()
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
         }
     }
 
     private func pluginRow(_ group: PluginInventoryGroup) -> some View {
         let expanded = expandedPluginID == group.id
-        let color = statusColor(group.status)
+        let status: HubStatus = {
+            switch group.status {
+            case .enabled:  return .ok
+            case .detected: return .ok
+            case .disabled: return .neutral
+            case .missing:  return .bad
+            }
+        }()
 
         return VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.easeOut(duration: 0.16)) {
+                withAnimation(HubTheme.disclosureAnimation) {
                     expandedPluginID = expanded ? nil : group.id
                 }
             } label: {
-                HStack(spacing: 10) {
+                HStack(alignment: .center, spacing: 10) {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.secondary)
-                        .frame(width: 14)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(HubTheme.textFaint)
+                        .frame(width: 12)
 
-                    Image(systemName: group.status == .disabled ? "puzzlepiece.extension" : "puzzlepiece.extension.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(color)
-                        .frame(width: 18)
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(group.name)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.primary)
-                            .lineLimit(1)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 5) {
-                                ForEach(group.toolLabels, id: \.self) { label in
-                                    badge(label, color: toolColor(label))
-                                }
-                                badge(group.status.label, color: color)
-                                ForEach(group.components.prefix(5), id: \.self) { component in
-                                    badge(component, color: .secondary)
-                                }
-                                if group.requiresRestartAfterWrite {
-                                    badge("Restart", color: .blue)
-                                }
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 8) {
+                            Text(group.name)
+                                .font(HubFont.rowPrimary)
+                                .foregroundStyle(HubTheme.text)
+                                .lineLimit(1)
+                            StatusLabel(status: status, text: group.status.label.lowercased(), font: HubFont.mono(9))
+                            if group.requiresRestartAfterWrite {
+                                Text("needs restart")
+                                    .font(HubFont.mono(9))
+                                    .foregroundStyle(HubTheme.warn)
                             }
                         }
+                        // What this bundle actually puts on disk, before install.
+                        Text(group.componentSummary)
+                            .font(HubFont.body)
+                            .foregroundStyle(HubTheme.textDim)
+                            .lineLimit(1)
                     }
 
-                    Spacer(minLength: 8)
+                    Spacer(minLength: 12)
 
-                    metric(value: "\(group.observations.count)", label: "surface\(group.observations.count == 1 ? "" : "s")", icon: "externaldrive")
+                    ProviderTileRow(toolIDs: group.providerIDs)
+
+                    Text("\(group.observations.count) srf")
+                        .font(HubFont.machine)
+                        .foregroundStyle(HubTheme.textDim)
+                        .frame(width: 52, alignment: .trailing)
                 }
-                .padding(10)
+                .padding(.horizontal, HubTheme.contentPadding)
+                .frame(minHeight: HubTheme.listRowHeight)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
             if expanded {
                 pluginDetail(group)
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 10)
+                    .padding(.horizontal, HubTheme.contentPadding)
+                    .padding(.bottom, 12)
             }
         }
-        .background(Color(NSColor.controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8)
-            .stroke(color.opacity(0.18), lineWidth: 0.8))
     }
 
     private func pluginDetail(_ group: PluginInventoryGroup) -> some View {
@@ -327,7 +343,7 @@ struct PluginsView: View {
             Spacer(minLength: 8)
         }
         .padding(7)
-        .background(Color(NSColor.windowBackgroundColor).opacity(0.55))
+        .background(HubTheme.bg.opacity(0.55))
         .clipShape(RoundedRectangle(cornerRadius: 7))
     }
 
@@ -480,7 +496,7 @@ final class PluginInventoryStore: ObservableObject {
     }
 }
 
-private struct PluginInventoryGroup: Identifiable {
+struct PluginInventoryGroup: Identifiable {
     enum Status {
         case enabled
         case disabled
@@ -522,6 +538,31 @@ private struct PluginInventoryGroup: Identifiable {
 
     var requiresRestartAfterWrite: Bool {
         observations.contains { $0.requiresRestartAfterWrite }
+    }
+
+    /// Provider ids that install this bundle — the tiles on the row (§3d).
+    var providerIDs: [String] {
+        var ids: [String] = []
+        for observation in observations {
+            let id = PluginInventoryGroup.providerID(for: observation.toolID)
+            if !ids.contains(id) { ids.append(id) }
+        }
+        return ids
+    }
+
+    static func providerID(for toolID: CompatibilityToolID) -> String {
+        switch toolID {
+        case .claudeCode:    return "claude-code"
+        case .claudeDesktop: return "claude-desktop"
+        case .codexCLI, .codexDesktop: return "codex"
+        }
+    }
+
+    /// What this bundle puts on disk, read before you install it.
+    var componentSummary: String {
+        let parts = components
+        if parts.isEmpty { return "no components declared" }
+        return parts.prefix(6).joined(separator: " · ")
     }
 
     static func groups(from observations: [CompatibilityPluginObservation]) -> [PluginInventoryGroup] {

@@ -64,10 +64,10 @@ struct AgentsView: View {
                     Text("New Agent")
                         .font(.system(size: 12, weight: .semibold))
                 }
-                .foregroundColor(.white)
+                .foregroundColor(HubTheme.onAccent)
                 .padding(.horizontal, 11)
                 .padding(.vertical, 6)
-                .background(ContentView.headerGrad)
+                .background(HubTheme.accent)
                 .clipShape(RoundedRectangle(cornerRadius: 7))
             }
             .buttonStyle(.plain)
@@ -146,10 +146,10 @@ struct AgentsView: View {
                 .help("Delete agent")
             }
             .padding(10)
-            .background(Color(NSColor.controlBackgroundColor))
+            .background(HubTheme.raised)
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10)
-                .stroke(Color(NSColor.separatorColor).opacity(0.4), lineWidth: 0.5))
+                .stroke(HubTheme.line.opacity(0.4), lineWidth: 0.5))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -173,10 +173,10 @@ struct AgentsView: View {
                     Text("New Agent")
                 }
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(HubTheme.onAccent)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
-                .background(ContentView.headerGrad)
+                .background(HubTheme.accent)
                 .clipShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -374,7 +374,7 @@ struct AgentDetailSheet: View {
                         .textSelection(.enabled)
                 }
                 .frame(maxHeight: 200)
-                .background(Color(NSColor.textBackgroundColor))
+                .background(HubTheme.field)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             }
 

@@ -56,11 +56,11 @@ struct NextStepsCard: View {
             }
         }
         .padding(12)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(HubTheme.raised)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(Color(NSColor.separatorColor).opacity(0.55), lineWidth: 0.5)
+                .stroke(HubTheme.line.opacity(0.55), lineWidth: 0.5)
         )
     }
 
@@ -71,7 +71,7 @@ struct NextStepsCard: View {
             HStack(spacing: 6) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(HubTheme.accent)
                 Text(serverName)
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
@@ -157,19 +157,19 @@ struct NextStepsCard: View {
                     .lineLimit(1)
                     .fixedSize()
             }
-            .foregroundColor(active ? .white : .primary)
+            .foregroundColor(active ? HubTheme.onAccent : .primary)
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
             .background(
                 Group {
-                    if active { ContentView.headerGrad }
-                    else { Color(NSColor.textBackgroundColor) }
+                    if active { HubTheme.accent }
+                    else { HubTheme.field }
                 }
             )
             .clipShape(RoundedRectangle(cornerRadius: 7))
             .overlay(
                 RoundedRectangle(cornerRadius: 7)
-                    .stroke(active ? Color.clear : Color(NSColor.separatorColor).opacity(0.6), lineWidth: 0.5)
+                    .stroke(active ? Color.clear : HubTheme.line.opacity(0.6), lineWidth: 0.5)
             )
         }
         .buttonStyle(.plain)
@@ -232,10 +232,10 @@ struct NextStepsCard: View {
                         Text("Open in default editor")
                             .font(.system(size: 11, weight: .semibold))
                     }
-                    .foregroundColor(.white)
+                    .foregroundColor(HubTheme.onAccent)
                     .padding(.horizontal, 11)
                     .padding(.vertical, 6)
-                    .background(ContentView.headerGrad)
+                    .background(HubTheme.accent)
                     .clipShape(RoundedRectangle(cornerRadius: 7))
                 }
                 .buttonStyle(.plain)
@@ -277,7 +277,7 @@ struct NextStepsCard: View {
         HStack(alignment: .top, spacing: 7) {
             Text("\(n).")
                 .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundColor(.accentColor)
+                .foregroundColor(HubTheme.accent)
                 .frame(width: 14, alignment: .trailing)
             Text(text)
                 .font(.system(size: 11))
@@ -346,7 +346,7 @@ struct NextStepsCard: View {
                         Button(action: openSource) {
                             Text("View source on GitHub")
                                 .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.accentColor)
+                                .foregroundColor(HubTheme.accent)
                                 .underline()
                         }
                         .buttonStyle(.plain)
@@ -369,10 +369,10 @@ struct NextStepsCard: View {
                             Text("Save to all apps")
                                 .font(.system(size: 11, weight: .semibold))
                         }
-                        .foregroundColor(.white)
+                        .foregroundColor(HubTheme.onAccent)
                         .padding(.horizontal, 11)
                         .padding(.vertical, 6)
-                        .background(ContentView.headerGrad)
+                        .background(HubTheme.accent)
                         .clipShape(RoundedRectangle(cornerRadius: 7))
                     }
                     .buttonStyle(.plain)
@@ -415,11 +415,11 @@ struct NextStepsCard: View {
             .font(.system(size: 11, design: .monospaced))
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
-            .background(Color(NSColor.textBackgroundColor))
+            .background(HubTheme.field)
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .stroke(Color(NSColor.separatorColor).opacity(0.55), lineWidth: 0.5)
+                    .stroke(HubTheme.line.opacity(0.55), lineWidth: 0.5)
             )
         }
     }

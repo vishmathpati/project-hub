@@ -71,11 +71,11 @@ struct ClaudeMdView: View {
                 .foregroundColor(.secondary)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
-                .background(Color(NSColor.controlBackgroundColor))
+                .background(HubTheme.raised)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color(NSColor.separatorColor).opacity(0.5), lineWidth: 0.5)
+                        .stroke(HubTheme.line.opacity(0.5), lineWidth: 0.5)
                 )
             }
             .buttonStyle(.plain)
@@ -94,11 +94,11 @@ struct ClaudeMdView: View {
                 .foregroundColor(isDirty ? .white : .secondary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(isDirty ? AnyShapeStyle(ContentView.headerGrad) : AnyShapeStyle(Color(NSColor.controlBackgroundColor)))
+                .background(isDirty ? AnyShapeStyle(HubTheme.accent) : AnyShapeStyle(HubTheme.raised))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color(NSColor.separatorColor).opacity(0.5), lineWidth: isDirty ? 0 : 0.5)
+                        .stroke(HubTheme.line.opacity(0.5), lineWidth: isDirty ? 0 : 0.5)
                 )
             }
             .buttonStyle(.plain)
@@ -134,11 +134,11 @@ struct ClaudeMdView: View {
                                 .font(.system(size: 11, weight: .semibold))
                         }
                         .frame(width: 72, height: 64)
-                        .background(Color(NSColor.controlBackgroundColor))
+                        .background(HubTheme.raised)
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                         .overlay(
                             RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color(NSColor.separatorColor).opacity(0.5), lineWidth: 0.5)
+                                .stroke(HubTheme.line.opacity(0.5), lineWidth: 0.5)
                         )
                     }
                     .buttonStyle(.plain)
@@ -155,7 +155,7 @@ struct ClaudeMdView: View {
         TextEditor(text: $content)
             .font(.system(size: 12, design: .monospaced))
             .scrollContentBackground(.hidden)
-            .background(Color(NSColor.textBackgroundColor))
+            .background(HubTheme.field)
             .onChange(of: content) { newValue in
                 isDirty = newValue != savedContent
             }

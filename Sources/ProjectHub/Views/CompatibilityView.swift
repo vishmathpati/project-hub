@@ -58,14 +58,18 @@ struct CompatibilityView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            topBar
-            Divider()
+            HubPageHeader(
+                title: "Checks",
+                subtitle: scanCaption,
+                actions: { headerActions }
+            )
             if let report {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
                         summaryGrid(report)
-                        workflowStrip
                         workflowNextStepCard(report)
+                        findings(report)
+                        workflowStrip
                         targetFilterStrip(report)
                         coverageOverview(report)
                         liveVerification(report)
@@ -76,17 +80,17 @@ struct CompatibilityView: View {
                         skillsOverview(report)
                         previewableFixesOverview(report)
                         manualActionsOverview(report)
-                        findings(report)
                         if showMatrix {
                             matrix(report)
                         }
                     }
-                    .padding(12)
+                    .padding(HubTheme.contentPadding)
                 }
             } else {
                 emptyState
             }
         }
+        .background(HubTheme.bg)
         .onAppear {
             ensureSelectedProject()
             loadCachedReportOffMain(replace: false)
@@ -106,113 +110,54 @@ struct CompatibilityView: View {
         }
     }
 
-    private var topBar: some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(scanRoot.map(shortPath) ?? "Global tool state")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            Spacer()
-            projectPicker
-            codexProfilePicker
-            Button(action: copyCompatibilityReport) {
-                Image(systemName: copiedReport ? "checkmark.circle.fill" : "doc.on.clipboard")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(copiedReport ? .green : .secondary)
-            }
-            .buttonStyle(.plain)
-            .disabled(report == nil)
-            .help("Copy compatibility report")
-
-            Button {
-                showMatrix.toggle()
-            } label: {
-                Image(systemName: showMatrix ? "tablecells.badge.ellipsis" : "tablecells")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help(showMatrix ? "Hide matrix" : "Show matrix")
-
-            Button(action: verifyMCPServers) {
-                HStack(spacing: 4) {
-                    if verifyingMCP {
-                        ProgressView()
-                            .scaleEffect(0.5)
-                            .frame(width: 12, height: 12)
-                    } else {
-                        Image(systemName: "checkmark.seal")
-                    }
-                    Text(verifyingMCP ? "Verifying" : "Verify")
-                }
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(verifyingMCP ? .secondary : .accentColor)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(Color.accentColor.opacity(0.10))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-            }
-            .buttonStyle(.plain)
-            .disabled(verifyingMCP || report.map { verifiableServers($0).isEmpty } ?? true)
-            .help("Verify checks MCP server handshakes. Settings, skills, auth policy, and instruction fixes are confirmed by Scan and the owning app/session reload.")
-
-            Button(action: refresh) {
-                HStack(spacing: 4) {
-                    if scanning {
-                        ProgressView()
-                            .scaleEffect(0.5)
-                            .frame(width: 12, height: 12)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    Text(scanning ? "Scanning" : "Scan")
-                }
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.white)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(ContentView.headerGrad)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-            }
-            .buttonStyle(.plain)
-            .disabled(scanning)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+    private var scanCaption: String {
+        let target = scanRoot.map(shortPath) ?? "global tool state"
+        guard let report else { return "Scanned nothing yet · \(target)" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return "Scanned \(target) · \(formatter.localizedString(for: report.generatedAt, relativeTo: Date()))"
     }
 
     @ViewBuilder
-    private var scanTargetPicker: some View {
-        if fixedProject == nil {
-            Picker("Scan target", selection: $scanTarget) {
-                Text("Global").tag(CompatibilityScanTarget.global)
-                Text("Project").tag(CompatibilityScanTarget.project)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 150)
-            .disabled(projectStore.projects.isEmpty)
-            .help("Choose whether Scan inspects only global tool state or includes the selected project's local configuration.")
-        }
+    private var headerActions: some View {
+        projectPicker
+        codexProfilePicker
+
+        HubIconButton(
+            systemImage: copiedReport ? "checkmark.circle.fill" : "doc.on.clipboard",
+            help: "Copy report",
+            isActive: copiedReport,
+            action: copyCompatibilityReport
+        )
+        .disabled(report == nil)
+
+        HubIconButton(
+            systemImage: showMatrix ? "tablecells.badge.ellipsis" : "tablecells",
+            help: showMatrix ? "Hide matrix" : "Show matrix"
+        ) { showMatrix.toggle() }
+
+        HubButton(title: verifyingMCP ? "Verifying" : "Verify", kind: .secondary, action: verifyMCPServers)
+            .disabled(verifyingMCP || report.map { verifiableServers($0).isEmpty } ?? true)
+
+        HubButton(title: scanning ? "Scanning" : "Run scan", kind: .primary, action: refresh)
+            .disabled(scanning)
     }
 
     @ViewBuilder
     private var projectPicker: some View {
         if fixedProject == nil && scanTarget == .project && !projectStore.projects.isEmpty {
-            Picker("Project", selection: Binding(
-                get: { selectedProjectPath ?? projectStore.projects.first?.path ?? "" },
-                set: { selectedProjectPath = $0 }
-            )) {
+            Menu {
                 ForEach(projectStore.projects) { project in
-                    Text(project.displayName)
-                        .tag(project.path)
+                    Button(project.displayName) { selectedProjectPath = project.path }
                 }
+            } label: {
+                Text("scope: \(selectedProject?.displayName ?? "this project") ▾")
+                    .font(HubFont.mono(10))
+                    .foregroundStyle(HubTheme.textMid)
             }
-            .labelsHidden()
-            .frame(maxWidth: 170)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
             .help("Choose the project to scan")
         }
     }
@@ -221,45 +166,38 @@ struct CompatibilityView: View {
     private var codexProfilePicker: some View {
         let profiles = codexProfileNames
         if !profiles.isEmpty {
-            Picker("Codex CLI profile", selection: $codexRuntimeProfileName) {
-                Text("Codex default").tag("")
+            Menu {
+                Button("Codex default") { codexRuntimeProfileName = "" }
                 ForEach(profiles, id: \.self) { profile in
-                    Text(profile).tag(profile)
+                    Button(profile) { codexRuntimeProfileName = profile }
                 }
+            } label: {
+                Text("runtime: \(codexRuntimeProfileName.isEmpty ? "all" : codexRuntimeProfileName) ▾")
+                    .font(HubFont.mono(10))
+                    .foregroundStyle(HubTheme.textMid)
             }
-            .labelsHidden()
-            .frame(maxWidth: 150)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
             .help("Optional: scan Codex CLI as if it was launched with codex --profile <name>. Codex Desktop and default/static evidence stay unchanged.")
         }
     }
 
+    /// The four numbers this page exists to answer: what passed, what is worth a
+    /// look, what is failing, and how much of it can be fixed without leaving.
     private func summaryGrid(_ report: CompatibilityScanResult) -> some View {
-        let serverCounts = healthCounts(filteredServers(report).map { effectiveHealth(for: $0) })
-        let issueCounts = healthCounts(filteredIssues(report).map(\.state))
+        let issues = filteredIssues(report)
+        let failing = issues.filter { $0.severity >= .error }.count
+        let worthALook = issues.filter { $0.severity == .warning }.count
+        let servers = filteredServers(report).map { effectiveHealth(for: $0) }
+        let passing = servers.filter { $0 == .working }.count + issues.filter { $0.severity == .info }.count
+        let fixable = previewableFixes(report).count
 
-        return VStack(alignment: .leading, spacing: 8) {
-            summarySectionTitle("MCP Server Health")
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
-                summaryTile(.broken, count: serverCounts[.broken, default: 0], icon: "xmark.octagon.fill", color: .red)
-                summaryTile(.needsAuth, count: serverCounts[.needsAuth, default: 0], icon: "key.fill", color: .orange)
-                summaryTile(.authExpired, count: serverCounts[.authExpired, default: 0], icon: "key.slash.fill", color: .orange)
-                summaryTile(.needsRestart, count: serverCounts[.needsRestart, default: 0], icon: "arrow.clockwise.circle.fill", color: .blue)
-                summaryTile(.conflict, count: serverCounts[.conflict, default: 0], icon: "exclamationmark.triangle.fill", color: .yellow)
-                summaryTile(.disabled, count: serverCounts[.disabled, default: 0], icon: "pause.circle.fill", color: .secondary)
-                summaryTile(.unknown, count: serverCounts[.unknown, default: 0], icon: "questionmark.circle.fill", color: .purple)
-                summaryTile(.working, count: serverCounts[.working, default: 0], icon: "checkmark.circle.fill", color: .green)
-            }
-
-            summarySectionTitle("Findings by State")
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
-                summaryTile(.broken, count: issueCounts[.broken, default: 0], icon: "xmark.octagon.fill", color: .red)
-                summaryTile(.needsAuth, count: issueCounts[.needsAuth, default: 0], icon: "key.fill", color: .orange)
-                summaryTile(.authExpired, count: issueCounts[.authExpired, default: 0], icon: "key.slash.fill", color: .orange)
-                summaryTile(.needsRestart, count: issueCounts[.needsRestart, default: 0], icon: "arrow.clockwise.circle.fill", color: .blue)
-                summaryTile(.conflict, count: issueCounts[.conflict, default: 0], icon: "exclamationmark.triangle.fill", color: .yellow)
-                summaryTile(.disabled, count: issueCounts[.disabled, default: 0], icon: "pause.circle.fill", color: .secondary)
-                summaryTile(.unknown, count: issueCounts[.unknown, default: 0], icon: "questionmark.circle.fill", color: .purple)
-            }
+        return HStack(spacing: 10) {
+            MetricTile(value: "\(passing)",    label: "passing",          tone: .ok)
+            MetricTile(value: "\(worthALook)", label: "worth a look",     tone: worthALook > 0 ? .warn : .plain)
+            MetricTile(value: "\(failing)",    label: "failing",          tone: failing > 0 ? .bad : .plain)
+            MetricTile(value: "\(fixable)",    label: "fixable from here", tone: fixable > 0 ? .accent : .plain)
         }
     }
 
@@ -292,7 +230,7 @@ struct CompatibilityView: View {
                 .lineLimit(1)
         }
         .padding(9)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(HubTheme.raised)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.18), lineWidth: 1))
     }
@@ -305,7 +243,7 @@ struct CompatibilityView: View {
             workflowStep("Verify", icon: "checkmark.seal")
         }
         .padding(8)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.55))
+        .background(HubTheme.raised.opacity(0.55))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
@@ -403,7 +341,7 @@ struct CompatibilityView: View {
             .disabled(action == nil || verifyingMCP)
         }
         .padding(10)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(HubTheme.raised)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(tint.opacity(0.16), lineWidth: 1))
     }
@@ -460,7 +398,7 @@ struct CompatibilityView: View {
                 .lineLimit(2)
         }
         .padding(8)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.55))
+        .background(HubTheme.raised.opacity(0.55))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
@@ -513,9 +451,9 @@ struct CompatibilityView: View {
             coverageMetric("Findings", count: issues.count, tint: issues.isEmpty ? .secondary : .orange)
         }
         .padding(8)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(HubTheme.raised)
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(NSColor.separatorColor).opacity(0.35), lineWidth: 0.5))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(HubTheme.line.opacity(0.35), lineWidth: 0.5))
     }
 
     private func coverageMetric(_ label: String, count: Int, tint: Color = .accentColor) -> some View {
@@ -613,7 +551,7 @@ struct CompatibilityView: View {
                     Spacer()
                 }
                 .padding(10)
-                .background(Color(NSColor.controlBackgroundColor).opacity(0.65))
+                .background(HubTheme.raised.opacity(0.65))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             } else if visibleLiveReports.isEmpty {
                 HStack(spacing: 8) {
@@ -625,7 +563,7 @@ struct CompatibilityView: View {
                     Spacer()
                 }
                 .padding(10)
-                .background(Color(NSColor.controlBackgroundColor).opacity(0.65))
+                .background(HubTheme.raised.opacity(0.65))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 VStack(spacing: 6) {
@@ -698,7 +636,7 @@ struct CompatibilityView: View {
                 .clipShape(Capsule())
         }
         .padding(10)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(HubTheme.raised)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(healthColor(health.status).opacity(0.14), lineWidth: 1))
     }
@@ -718,7 +656,7 @@ struct CompatibilityView: View {
                     Spacer()
                 }
                 .padding(10)
-                .background(Color(NSColor.controlBackgroundColor).opacity(0.65))
+                .background(HubTheme.raised.opacity(0.65))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 VStack(spacing: 6) {
@@ -799,9 +737,9 @@ struct CompatibilityView: View {
             }
         }
         .padding(10)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(HubTheme.raised)
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(NSColor.separatorColor).opacity(0.35), lineWidth: 0.5))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(HubTheme.line.opacity(0.35), lineWidth: 0.5))
     }
 
     private func settingsIcon(_ setting: CompatibilitySettingsObservation) -> String {
@@ -835,7 +773,7 @@ struct CompatibilityView: View {
                     Spacer()
                 }
                 .padding(10)
-                .background(Color(NSColor.controlBackgroundColor).opacity(0.65))
+                .background(HubTheme.raised.opacity(0.65))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 VStack(spacing: 6) {
@@ -868,10 +806,10 @@ struct CompatibilityView: View {
                         .lineLimit(1)
                     Text(plugin.toolID.label)
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundColor(.accentColor)
+                        .foregroundColor(HubTheme.accent)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
-                        .background(Color.accentColor.opacity(0.10))
+                        .background(HubTheme.accent.opacity(0.10))
                         .clipShape(Capsule())
                     Text(plugin.installMethod.label)
                         .font(.system(size: 9, weight: .bold))
@@ -937,7 +875,7 @@ struct CompatibilityView: View {
             }
         }
         .padding(10)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(HubTheme.raised)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.14), lineWidth: 1))
     }
@@ -973,7 +911,7 @@ struct CompatibilityView: View {
                     Spacer()
                 }
                 .padding(10)
-                .background(Color(NSColor.controlBackgroundColor).opacity(0.65))
+                .background(HubTheme.raised.opacity(0.65))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 VStack(spacing: 6) {
@@ -1040,7 +978,7 @@ struct CompatibilityView: View {
                 }
             }
             .padding(10)
-            .background(Color(NSColor.controlBackgroundColor))
+            .background(HubTheme.raised)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(stateColor(state).opacity(0.14), lineWidth: 1))
         }
@@ -1101,7 +1039,7 @@ struct CompatibilityView: View {
                     Spacer()
                 }
                 .padding(10)
-                .background(Color(NSColor.controlBackgroundColor).opacity(0.65))
+                .background(HubTheme.raised.opacity(0.65))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 VStack(spacing: 6) {
@@ -1181,7 +1119,7 @@ struct CompatibilityView: View {
             Spacer()
         }
         .padding(10)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(HubTheme.raised)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.16), lineWidth: 1))
     }
@@ -1364,10 +1302,10 @@ struct CompatibilityView: View {
                     ForEach(skill.availableIn, id: \.rawValue) { tool in
                         Text(tool.label)
                             .font(.system(size: 8, weight: .semibold))
-                            .foregroundColor(.accentColor)
+                            .foregroundColor(HubTheme.accent)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 2)
-                            .background(Color.accentColor.opacity(0.10))
+                            .background(HubTheme.accent.opacity(0.10))
                             .clipShape(Capsule())
                     }
                 }
@@ -1375,7 +1313,7 @@ struct CompatibilityView: View {
             Spacer()
         }
         .padding(10)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(HubTheme.raised)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.16), lineWidth: 1))
     }
@@ -1464,7 +1402,7 @@ struct CompatibilityView: View {
                 }
             }
             .padding(10)
-            .background(Color(NSColor.controlBackgroundColor))
+            .background(HubTheme.raised)
             .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(stateColor(action.state).opacity(0.14), lineWidth: 1))
         }
@@ -1487,7 +1425,7 @@ struct CompatibilityView: View {
                     Spacer()
                 }
                 .padding(10)
-                .background(Color(NSColor.controlBackgroundColor).opacity(0.55))
+                .background(HubTheme.raised.opacity(0.55))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 VStack(spacing: 6) {
@@ -1513,7 +1451,7 @@ struct CompatibilityView: View {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: fix.plan.icon)
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(HubTheme.accent)
                     .frame(width: 18, height: 18)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 5) {
@@ -1544,9 +1482,9 @@ struct CompatibilityView: View {
                     .foregroundColor(.secondary.opacity(0.6))
             }
             .padding(10)
-            .background(Color(NSColor.controlBackgroundColor))
+            .background(HubTheme.raised)
             .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.accentColor.opacity(0.16), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(HubTheme.accent.opacity(0.16), lineWidth: 1))
         }
         .buttonStyle(.plain)
     }
@@ -1555,86 +1493,93 @@ struct CompatibilityView: View {
         let issues = filteredIssues(report)
         let previewableIDs = Set(previewableFixes(report).map(\.id))
         return VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("Findings", count: issues.count)
+            HubSectionHeading("Findings", count: issues.count)
             if issues.isEmpty {
                 HStack(spacing: 8) {
-                    Image(systemName: "checkmark.seal.fill")
-                        .foregroundColor(.green)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("No local compatibility issues found for this target")
-                            .font(.system(size: 12, weight: .semibold))
-                        Text("This covers file parsing, local commands, env placeholders, duplicates, and skill metadata. Run Verify for live MCP handshakes.")
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
+                    StatusLabel(status: .ok, text: "Nothing is failing for this target")
+                    Spacer(minLength: 8)
+                    Text("run Verify for live MCP handshakes")
+                        .font(HubFont.machine)
+                        .foregroundStyle(HubTheme.textFaint)
                 }
-                .padding(10)
-                .background(Color.green.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, HubTheme.contentPadding)
+                .frame(height: HubTheme.tableRowHeight)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .hubCard()
             } else {
-                VStack(spacing: 6) {
-                    ForEach(issues) { issue in
-                        Button {
-                            fixError = nil
-                            selectedIssue = issue
-                        } label: {
-                            issueRow(issue, canPreviewFix: previewableIDs.contains(issue.id))
-                        }
-                        .buttonStyle(.plain)
+                VStack(spacing: 0) {
+                    ForEach(Array(issues.enumerated()), id: \.element.id) { index, issue in
+                        if index > 0 { HubRowSeparator() }
+                        issueRow(issue, canPreviewFix: previewableIDs.contains(issue.id))
                     }
                 }
+                .hubCard()
             }
         }
     }
 
+    /// One finding, ranked, with its fix attached to the line (§3f). A finding
+    /// with no inline fix says so rather than offering a dead affordance.
     private func issueRow(_ issue: CompatibilityIssue, canPreviewFix: Bool) -> some View {
-        let color = severityColor(issue.severity)
-        return HStack(alignment: .top, spacing: 8) {
-            Image(systemName: severityIcon(issue.severity))
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(color)
-                .frame(width: 18, height: 18)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 5) {
-                    Text(issue.title)
-                        .font(.system(size: 12, weight: .semibold))
-                        .lineLimit(1)
-                    Text(issue.code.rawValue)
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundColor(color)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(color.opacity(0.12))
-                        .clipShape(Capsule())
-                }
-                Text(issueSurfaceCaption(for: issue))
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                if let path = evidencePath(for: issue) {
-                    Text(shortPath(path))
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
+        let status: HubStatus = {
+            switch issue.severity {
+            case .critical, .error: return .bad
+            case .warning:          return .warn
+            case .info:             return .neutral
             }
-            Spacer()
-            Text(canPreviewFix ? "Preview fix" : "Manual")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundColor(canPreviewFix ? .accentColor : .secondary)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
-                .background((canPreviewFix ? Color.accentColor : Color.secondary).opacity(0.10))
-                .clipShape(Capsule())
-            Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.secondary.opacity(0.6))
+        }()
+
+        return HStack(alignment: .center, spacing: 10) {
+            StatusDot(status: status)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(issue.title)
+                    .font(HubFont.sans(12.5, .medium))
+                    .foregroundStyle(HubTheme.text)
+                    .lineLimit(1)
+                Text(evidenceLine(for: issue))
+                    .font(HubFont.machine)
+                    .foregroundStyle(HubTheme.textDim)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer(minLength: 12)
+
+            if canPreviewFix {
+                HubButton(title: fixVerb(for: issue), kind: .accentInline) {
+                    fixError = nil
+                    selectedIssue = issue
+                }
+            } else {
+                Text("no action")
+                    .font(HubFont.machine)
+                    .foregroundStyle(HubTheme.textFaint)
+            }
         }
-        .padding(10)
-        .background(Color(NSColor.controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.14), lineWidth: 1))
+        .padding(.horizontal, HubTheme.contentPadding)
+        .frame(minHeight: HubTheme.listRowHeight)
+        .contentShape(Rectangle())
+    }
+
+    /// The mono evidence line: which file, plus what the scan saw there.
+    private func evidenceLine(for issue: CompatibilityIssue) -> String {
+        var parts: [String] = []
+        if let path = evidencePath(for: issue) { parts.append(shortPath(path)) }
+        let caption = issueSurfaceCaption(for: issue)
+        if !caption.isEmpty { parts.append(caption) }
+        if parts.isEmpty { parts.append(issue.code.rawValue) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// The verb names the action, not the machinery behind it.
+    private func fixVerb(for issue: CompatibilityIssue) -> String {
+        switch issue.code {
+        case .serverAuthMissing, .serverAuthExpired: return "sign in"
+        case .serverDuplicateName, .serverConflictDifferentConfig: return "reconcile"
+        case .configMissing: return "create"
+        default: return "fix"
+        }
     }
 
     private func matrix(_ report: CompatibilityScanResult) -> some View {
@@ -1654,10 +1599,10 @@ struct CompatibilityView: View {
             HStack {
                 Text(surface.toolID.label)
                     .font(.system(size: 9, weight: .bold))
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(HubTheme.accent)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
-                    .background(Color.accentColor.opacity(0.10))
+                    .background(HubTheme.accent.opacity(0.10))
                     .clipShape(Capsule())
                 Text(surface.label)
                     .font(.system(size: 12, weight: .semibold))
@@ -1705,9 +1650,9 @@ struct CompatibilityView: View {
                 .lineLimit(2)
         }
         .padding(10)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(HubTheme.raised)
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(NSColor.separatorColor).opacity(0.35), lineWidth: 0.5))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(HubTheme.line.opacity(0.35), lineWidth: 0.5))
     }
 
     private func capability(_ label: String, _ enabled: Bool) -> some View {
@@ -1716,7 +1661,7 @@ struct CompatibilityView: View {
             .foregroundColor(enabled ? .accentColor : .secondary.opacity(0.6))
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
-            .background((enabled ? Color.accentColor : Color.secondary).opacity(enabled ? 0.12 : 0.08))
+            .background((enabled ? HubTheme.accent : Color.secondary).opacity(enabled ? 0.12 : 0.08))
         .clipShape(Capsule())
     }
 
@@ -1777,9 +1722,9 @@ struct CompatibilityView: View {
                 }
             }
             .padding(9)
-            .background(Color(NSColor.controlBackgroundColor))
+            .background(HubTheme.raised)
             .clipShape(RoundedRectangle(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color(NSColor.separatorColor).opacity(0.35), lineWidth: 0.5))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(HubTheme.line.opacity(0.35), lineWidth: 0.5))
         }
     }
 
@@ -1962,19 +1907,7 @@ struct CompatibilityView: View {
     }
 
     private func sectionHeader(_ title: String, count: Int) -> some View {
-        HStack(spacing: 6) {
-            Text(title.uppercased())
-                .font(.system(size: 9, weight: .bold))
-                .foregroundColor(.secondary.opacity(0.75))
-            Text("\(count)")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 1)
-                .background(Color.secondary.opacity(0.12))
-                .clipShape(Capsule())
-            Spacer()
-        }
+        HubSectionHeading(title, count: count)
     }
 
     private var emptyState: some View {
@@ -1999,10 +1932,10 @@ struct CompatibilityView: View {
                     Text(scanning ? "Scanning" : "Scan")
                 }
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(HubTheme.onAccent)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 7)
-                .background(ContentView.headerGrad)
+                .background(HubTheme.accent)
                 .clipShape(RoundedRectangle(cornerRadius: 7))
             }
             .buttonStyle(.plain)
@@ -2021,10 +1954,10 @@ struct CompatibilityView: View {
                     .font(.system(size: 15, weight: .bold))
                 Spacer()
             }
-            .foregroundColor(.white)
+            .foregroundColor(HubTheme.onAccent)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(ContentView.headerGrad)
+            .background(HubTheme.accent)
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
@@ -2066,7 +1999,7 @@ struct CompatibilityView: View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 7) {
                 Image(systemName: "wrench.adjustable.fill")
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(HubTheme.accent)
                 Text("Previewed file fix")
                     .font(.system(size: 11, weight: .bold))
                 Spacer()
@@ -2122,10 +2055,10 @@ struct CompatibilityView: View {
                         Text(plan.actionLabel)
                     }
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(HubTheme.onAccent)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(ContentView.headerGrad)
+                    .background(HubTheme.accent)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
@@ -2133,9 +2066,9 @@ struct CompatibilityView: View {
             }
         }
         .padding(10)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(HubTheme.raised)
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.accentColor.opacity(0.18), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(HubTheme.accent.opacity(0.18), lineWidth: 1))
     }
 
     private func changeNote(_ title: String, _ text: String, icon: String) -> some View {
@@ -2155,7 +2088,7 @@ struct CompatibilityView: View {
             }
         }
         .padding(8)
-        .background(Color(NSColor.textBackgroundColor).opacity(0.55))
+        .background(HubTheme.field.opacity(0.55))
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
@@ -2235,7 +2168,7 @@ struct CompatibilityView: View {
             }
         }
         .padding(10)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.65))
+        .background(HubTheme.raised.opacity(0.65))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(stateColor(issue.state).opacity(0.16), lineWidth: 1))
     }
@@ -2490,9 +2423,9 @@ struct CompatibilityView: View {
                 .padding(8)
             }
             .frame(maxHeight: 180)
-            .background(Color(NSColor.textBackgroundColor))
+            .background(HubTheme.field)
             .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(NSColor.separatorColor).opacity(0.55), lineWidth: 0.5))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(HubTheme.line.opacity(0.55), lineWidth: 0.5))
         }
     }
 
@@ -7501,9 +7434,9 @@ struct CompatibilityView: View {
 
     private func severityColor(_ severity: CompatibilityIssueSeverity) -> Color {
         switch severity {
-        case .info: return .blue
-        case .warning: return .orange
-        case .error, .critical: return .red
+        case .info: return HubTheme.textFaint
+        case .warning: return HubTheme.warn
+        case .error, .critical: return HubTheme.bad
         }
     }
 
@@ -7517,13 +7450,10 @@ struct CompatibilityView: View {
 
     private func stateColor(_ state: CompatibilityHealthState) -> Color {
         switch state {
-        case .working: return .green
-        case .broken: return .red
-        case .needsAuth, .authExpired: return .orange
-        case .needsRestart: return .blue
-        case .disabled: return .secondary
-        case .conflict: return .yellow
-        case .unknown: return .purple
+        case .working: return HubTheme.ok
+        case .broken: return HubTheme.bad
+        case .needsAuth, .authExpired, .needsRestart, .conflict: return HubTheme.warn
+        case .disabled, .unknown: return HubTheme.textFaint
         }
     }
 

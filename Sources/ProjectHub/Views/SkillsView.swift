@@ -174,10 +174,10 @@ struct SkillsView: View {
             .help(skill.canRemove ? "Remove this skill origin" : (skill.readOnlyReason ?? "This skill is read-only"))
         }
         .padding(8)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(HubTheme.raised)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8)
-            .stroke(Color(NSColor.separatorColor).opacity(0.35), lineWidth: 0.5))
+            .stroke(HubTheme.line.opacity(0.35), lineWidth: 0.5))
     }
 
     // MARK: - Global library row
@@ -206,7 +206,7 @@ struct SkillsView: View {
                     .foregroundColor((alreadyInstalled || !canInstall) ? .secondary : .white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background((alreadyInstalled || !canInstall) ? Color.secondary.opacity(0.15) : Color.accentColor)
+                    .background((alreadyInstalled || !canInstall) ? Color.secondary.opacity(0.15) : HubTheme.accent)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
@@ -214,10 +214,10 @@ struct SkillsView: View {
             .help(canInstall ? installLabel(for: skill) : "No safe primary-tool install target for this skill source")
         }
         .padding(8)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(HubTheme.raised)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8)
-            .stroke(Color(NSColor.separatorColor).opacity(0.35), lineWidth: 0.5))
+            .stroke(HubTheme.line.opacity(0.35), lineWidth: 0.5))
     }
 
     // MARK: - Empty states
@@ -360,15 +360,28 @@ struct GlobalSkillsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            bar
-            Divider()
-            switch selectedTab {
-            case .global:
-                globalContent
-            case .project:
-                projectContent
+            HubPageHeader(
+                title: "Skills",
+                subtitle: summaryText,
+                actions: { headerActions }
+            )
+            ScrollView {
+                VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
+                    HubPageNote(
+                        text: "A skill is one folder of instructions. The same folder can be visible to several providers at once — the tiles on each row are the providers that can currently see it."
+                    )
+                    metrics
+                    switch selectedTab {
+                    case .global:
+                        globalContent
+                    case .project:
+                        projectContent
+                    }
+                }
+                .padding(HubTheme.contentPadding)
             }
         }
+        .background(HubTheme.bg)
         .onAppear {
             if selectedProjectID == nil {
                 selectedProjectID = projectStore.projects.first?.id
@@ -385,82 +398,91 @@ struct GlobalSkillsView: View {
         }
     }
 
-    private var bar: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                Picker("Skill catalog", selection: $selectedTab) {
-                    ForEach(CatalogTab.allCases) { tab in
-                        Text(tab.title).tag(tab)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 230)
-
-                Spacer(minLength: 8)
-
-                Button(action: { skillStore.refresh() }) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-                .disabled(skillStore.isRefreshing)
-                .help("Refresh skills")
+    @ViewBuilder
+    private var headerActions: some View {
+        Menu {
+            ForEach(CatalogTab.allCases) { tab in
+                Button(tab.title) { selectedTab = tab }
             }
+        } label: {
+            Text("provider: \(selectedTab == .global ? "all" : "project") ▾")
+                .font(HubFont.mono(10))
+                .foregroundStyle(HubTheme.textMid)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
 
-            HStack(spacing: 8) {
-                Text(summaryText)
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-
-                if skillStore.isRefreshingInstallCounts {
-                    ProgressView()
-                        .controlSize(.mini)
-                    Text("Counting projects")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
+        if !projectStore.projects.isEmpty {
+            Menu {
+                ForEach(projectStore.projects) { project in
+                    Button(project.displayName) { selectedProjectID = project.id }
                 }
+            } label: {
+                Text("for: \(selectedProject?.displayName ?? "—") ▾")
+                    .font(HubFont.mono(10))
+                    .foregroundStyle(HubTheme.textMid)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+        }
 
-                Spacer(minLength: 8)
+        if skillStore.isRefreshingInstallCounts {
+            Text("counting projects")
+                .font(HubFont.machine)
+                .foregroundStyle(HubTheme.textFaint)
+        }
 
-                if selectedTab == .project && !projectStore.projects.isEmpty {
-                    projectPicker
-                }
+        HubIconButton(
+            systemImage: "arrow.clockwise",
+            help: "Refresh skills",
+            isActive: skillStore.isRefreshing,
+            spinning: skillStore.isRefreshing
+        ) { skillStore.refresh() }
+    }
+
+    /// Global tab counts what the library holds; project tab counts health,
+    /// because that is the only scope where a skill has a state.
+    @ViewBuilder
+    private var metrics: some View {
+        switch selectedTab {
+        case .global:
+            HStack(spacing: 10) {
+                MetricTile(value: "\(globalGroups.count)", label: "unique skills")
+                MetricTile(value: "\(skillStore.globalSkills.count)", label: "origins")
+                MetricTile(value: "\(uniqueProviderCount)", label: "providers")
+            }
+        case .project:
+            let groups = projectSkillGroups
+            let working  = groups.filter { $0.state == .active }.count
+            let broken   = groups.filter { $0.state == .invalid }.count
+            let disabled = groups.filter { $0.state == .disabled }.count
+            HStack(spacing: 10) {
+                MetricTile(value: "\(working)",  label: "working",  tone: .ok)
+                MetricTile(value: "\(broken)",   label: "broken",   tone: broken > 0 ? .bad : .plain)
+                MetricTile(value: "\(disabled)", label: "disabled")
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+    }
+
+    private var uniqueProviderCount: Int {
+        var ids = Set<String>()
+        for group in globalGroups { ids.formUnion(group.providerIDs) }
+        return ids.count
     }
 
     private var summaryText: String {
         switch selectedTab {
         case .global:
             let count = globalGroups.count
-            let origins = skillStore.globalSkills.count
-            return "\(count) unique global skill\(count == 1 ? "" : "s") · \(origins) origin\(origins == 1 ? "" : "s")"
+            return "\(count) unique, across \(uniqueProviderCount) provider\(uniqueProviderCount == 1 ? "" : "s")"
         case .project:
             if let selectedProject {
                 return "\(projectSkillGroups.count) project skill\(projectSkillGroups.count == 1 ? "" : "s") in \(selectedProject.displayName)"
             }
             return "No saved projects"
         }
-    }
-
-    private var projectPicker: some View {
-        Picker("Project", selection: Binding(
-            get: { selectedProjectID ?? projectStore.projects.first?.id },
-            set: { selectedProjectID = $0 }
-        )) {
-            ForEach(projectStore.projects) { project in
-                Text(project.displayName).tag(Optional(project.id))
-            }
-        }
-        .labelsHidden()
-        .frame(maxWidth: 190)
     }
 
     @ViewBuilder
@@ -475,78 +497,91 @@ struct GlobalSkillsView: View {
     }
 
     private var globalList: some View {
-        ScrollView {
-            VStack(spacing: 6) {
-                ForEach(globalGroups) { group in
+        VStack(alignment: .leading, spacing: 8) {
+            HubSectionHeading(title: "In your library", count: globalGroups.count) {
+                Text("provider visibility →")
+                    .font(HubFont.mono(9))
+                    .foregroundStyle(HubTheme.textFaint)
+            }
+            VStack(spacing: 0) {
+                ForEach(Array(globalGroups.enumerated()), id: \.element.id) { index, group in
+                    if index > 0 { HubRowSeparator() }
                     globalSkillRow(group)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .hubCard()
         }
     }
 
     private func globalSkillRow(_ group: SkillStore.GlobalSkillGroup) -> some View {
         let installedCount = skillStore.globalSkillInstallCounts[group.id] ?? 0
         let expanded = expandedGlobalSkillID == group.id
+        let hasSkillMD = group.skills.contains { !$0.description.isEmpty || FileManager.default.fileExists(
+            atPath: ($0.path as NSString).appendingPathComponent("SKILL.md")
+        ) }
 
         return VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.easeOut(duration: 0.16)) {
+                withAnimation(HubTheme.disclosureAnimation) {
                     expandedGlobalSkillID = expanded ? nil : group.id
                 }
-                if !expanded {
-                    loadProjectUsage(for: group)
-                }
+                if !expanded { loadProjectUsage(for: group) }
             } label: {
-                HStack(spacing: 10) {
+                HStack(alignment: .center, spacing: 10) {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.secondary)
-                        .frame(width: 14)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(HubTheme.textFaint)
+                        .frame(width: 12)
 
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(group.name)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.primary)
-                            .lineLimit(1)
-
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 5) {
-                                ForEach(group.toolLabels, id: \.self) { label in
-                                    badge(label, color: toolColor(label))
-                                }
-                                ForEach(group.sourceLabels, id: \.self) { label in
-                                    badge(label, color: sourceLabelColor(label))
-                                }
-                                if group.hasReadOnlyOrigins {
-                                    badge("Read-only", color: .secondary)
-                                }
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 8) {
+                            Text(group.name)
+                                .font(HubFont.rowPrimary)
+                                .foregroundStyle(HubTheme.text)
+                                .lineLimit(1)
+                            Text("global")
+                                .font(HubFont.mono(9))
+                                .foregroundStyle(HubTheme.textFaint)
+                            if !hasSkillMD {
+                                StatusLabel(status: .warn, text: "no SKILL.md", font: HubFont.mono(9))
                             }
+                            if group.hasReadOnlyOrigins {
+                                Text("read-only")
+                                    .font(HubFont.mono(9))
+                                    .foregroundStyle(HubTheme.textFaint)
+                            }
+                        }
+                        if !group.primaryDescription.isEmpty {
+                            Text(group.primaryDescription)
+                                .font(HubFont.body)
+                                .foregroundStyle(HubTheme.textDim)
+                                .lineLimit(1)
                         }
                     }
 
-                    Spacer(minLength: 8)
+                    Spacer(minLength: 12)
 
-                    metric(value: "\(group.originCount)", label: "origin\(group.originCount == 1 ? "" : "s")", icon: "externaldrive")
-                    metric(value: "\(installedCount)", label: "project\(installedCount == 1 ? "" : "s")", icon: "folder.fill")
+                    ProviderTileRow(toolIDs: group.providerIDs)
+
+                    Text("\(installedCount) proj")
+                        .font(HubFont.machine)
+                        .foregroundStyle(HubTheme.textDim)
+                        .frame(width: 52, alignment: .trailing)
                 }
-                .padding(10)
+                .padding(.horizontal, HubTheme.contentPadding)
+                .frame(minHeight: HubTheme.listRowHeight)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
             if expanded {
                 globalSkillDetail(group)
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 10)
+                    .padding(.horizontal, HubTheme.contentPadding)
+                    .padding(.bottom, 12)
             }
         }
-        .background(Color(NSColor.controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8)
-            .stroke(Color(NSColor.separatorColor).opacity(0.4), lineWidth: 0.5))
     }
+
 
     private func globalSkillDetail(_ group: SkillStore.GlobalSkillGroup) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -629,7 +664,7 @@ struct GlobalSkillsView: View {
             Spacer(minLength: 8)
         }
         .padding(7)
-        .background(Color(NSColor.windowBackgroundColor).opacity(0.55))
+        .background(HubTheme.bg.opacity(0.55))
         .clipShape(RoundedRectangle(cornerRadius: 7))
     }
 
@@ -645,73 +680,113 @@ struct GlobalSkillsView: View {
     }
 
     private var projectSkillList: some View {
-        ScrollView {
-            VStack(spacing: 6) {
-                ForEach(projectSkillGroups) { group in
-                    projectSkillRow(group)
+        let enabled  = projectSkillGroups.filter { $0.state != .disabled }
+        let disabled = projectSkillGroups.filter { $0.state == .disabled }
+
+        return VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
+            if !enabled.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HubSectionHeading(title: "In this project", count: enabled.count) {
+                        Text("provider visibility →")
+                            .font(HubFont.mono(9))
+                            .foregroundStyle(HubTheme.textFaint)
+                    }
+                    VStack(spacing: 0) {
+                        ForEach(Array(enabled.enumerated()), id: \.element.id) { index, group in
+                            if index > 0 { HubRowSeparator() }
+                            projectSkillRow(group)
+                        }
+                    }
+                    .hubCard()
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            if !disabled.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HubSectionHeading("Disabled", count: disabled.count)
+                    VStack(spacing: 0) {
+                        ForEach(Array(disabled.enumerated()), id: \.element.id) { index, group in
+                            if index > 0 { HubRowSeparator() }
+                            projectSkillRow(group)
+                        }
+                    }
+                    .hubCard()
+                }
+            }
         }
     }
 
     private func projectSkillRow(_ group: ProjectSkillGroup) -> some View {
         let expanded = expandedProjectSkillID == group.id
+        let status: HubStatus = {
+            switch group.state {
+            case .active:   return .ok
+            case .limited:  return .warn
+            case .invalid:  return .bad
+            case .disabled: return .neutral
+            }
+        }()
+
         return VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.easeOut(duration: 0.16)) {
+                withAnimation(HubTheme.disclosureAnimation) {
                     expandedProjectSkillID = expanded ? nil : group.id
                 }
             } label: {
-                HStack(spacing: 10) {
+                HStack(alignment: .center, spacing: 10) {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.secondary)
-                        .frame(width: 14)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(HubTheme.textFaint)
+                        .frame(width: 12)
 
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(group.name)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.primary)
-                            .lineLimit(1)
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 5) {
-                                ForEach(group.toolLabels, id: \.self) { label in
-                                    badge(label, color: toolColor(label))
-                                }
-                                ForEach(group.scopeLabels, id: \.self) { label in
-                                    badge(label, color: label == "Private" ? .blue : .secondary)
-                                }
-                                ForEach(group.stateLabels, id: \.self) { label in
-                                    badge(label, color: stateColor(label))
-                                }
-                                if group.readOnly {
-                                    badge("Read-only", color: .secondary)
-                                }
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 8) {
+                            Text(group.name)
+                                .font(HubFont.rowPrimary)
+                                .foregroundStyle(HubTheme.text)
+                                .lineLimit(1)
+                            ForEach(group.scopeLabels, id: \.self) { label in
+                                Text(label.lowercased())
+                                    .font(HubFont.mono(9))
+                                    .foregroundStyle(HubTheme.textFaint)
                             }
+                            StatusLabel(status: status, text: group.state.label.lowercased(), font: HubFont.mono(9))
+                            if group.readOnly {
+                                Text("read-only")
+                                    .font(HubFont.mono(9))
+                                    .foregroundStyle(HubTheme.textFaint)
+                            }
+                        }
+                        if let description = group.description, !description.isEmpty {
+                            Text(description)
+                                .font(HubFont.body)
+                                .foregroundStyle(HubTheme.textDim)
+                                .lineLimit(1)
                         }
                     }
 
-                    Spacer(minLength: 8)
-                    metric(value: "\(group.origins.count)", label: "origin\(group.origins.count == 1 ? "" : "s")", icon: "externaldrive")
+                    Spacer(minLength: 12)
+
+                    ProviderTileRow(toolIDs: group.providerIDs)
+
+                    Text("\(group.origins.count) org")
+                        .font(HubFont.machine)
+                        .foregroundStyle(HubTheme.textDim)
+                        .frame(width: 52, alignment: .trailing)
                 }
-                .padding(10)
+                .padding(.horizontal, HubTheme.contentPadding)
+                .frame(minHeight: HubTheme.listRowHeight)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
             if expanded {
                 projectSkillDetail(group)
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 10)
+                    .padding(.horizontal, HubTheme.contentPadding)
+                    .padding(.bottom, 12)
             }
         }
-        .background(Color(NSColor.controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8)
-            .stroke(Color(NSColor.separatorColor).opacity(0.4), lineWidth: 0.5))
     }
+
 
     private func projectSkillDetail(_ group: ProjectSkillGroup) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -768,7 +843,7 @@ struct GlobalSkillsView: View {
             Spacer(minLength: 8)
         }
         .padding(7)
-        .background(Color(NSColor.windowBackgroundColor).opacity(0.55))
+        .background(HubTheme.bg.opacity(0.55))
         .clipShape(RoundedRectangle(cornerRadius: 7))
     }
 
@@ -949,6 +1024,54 @@ private struct ProjectSkillGroup: Identifiable {
 
     var readOnly: Bool {
         origins.contains { !$0.canEdit || !$0.canRemove }
+    }
+
+    /// Worst state across origins — a skill is only "working" when nothing
+    /// backing it is broken.
+    var state: InstalledSkill.State {
+        if origins.contains(where: { $0.state == .invalid }) { return .invalid }
+        if !origins.isEmpty, origins.allSatisfy({ $0.state == .disabled }) { return .disabled }
+        if origins.contains(where: { $0.state == .limited }) { return .limited }
+        return .active
+    }
+
+    /// Providers that can see this skill — the tiles on each row (§3c).
+    var providerIDs: [String] {
+        var ids: [String] = []
+        let specs = ProviderCatalog.specs()
+        for origin in origins {
+            var matched = false
+            for spec in specs {
+                let directories = spec.globalSkillDirs + spec.projectSkillDirs
+                for directory in directories where origin.path.contains(directory) {
+                    if !ids.contains(spec.id) { ids.append(spec.id) }
+                    matched = true
+                }
+            }
+            if !matched {
+                for label in origin.toolLabels {
+                    if let id = ProjectSkillGroup.providerID(forLabel: label), !ids.contains(id) {
+                        ids.append(id)
+                    }
+                }
+            }
+        }
+        return ids
+    }
+
+    static func providerID(forLabel label: String) -> String? {
+        let lowered = label.lowercased()
+        if lowered.contains("claude")      { return "claude-code" }
+        if lowered.contains("codex")       { return "codex" }
+        if lowered.contains("cursor")      { return "cursor" }
+        if lowered.contains("vs code")     { return "vscode" }
+        if lowered.contains("opencode")    { return "opencode" }
+        if lowered.contains("zed")         { return "zed" }
+        if lowered.contains("antigravity") { return "antigravity" }
+        if lowered.contains("grok")        { return "grok" }
+        if lowered.contains("command")     { return "command-code" }
+        if lowered == "pi"                 { return "pi" }
+        return nil
     }
 
     static func groups(from origins: [InstalledSkill]) -> [ProjectSkillGroup] {

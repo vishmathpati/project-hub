@@ -42,18 +42,18 @@ struct DiffPreviewBlock: View {
                     if scope == .project {
                         Text("(project)")
                             .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(.accentColor)
+                            .foregroundColor(HubTheme.accent)
                     }
                 }
                 .foregroundColor(.secondary)
 
                 diffBody(toolID: toolID, scope: scope, projectRoot: root)
                     .padding(8)
-                    .background(Color(NSColor.textBackgroundColor))
+                    .background(HubTheme.field)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .overlay(
                         RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color(NSColor.separatorColor).opacity(0.6), lineWidth: 0.5)
+                            .stroke(HubTheme.line.opacity(0.6), lineWidth: 0.5)
                     )
             }
         } else {

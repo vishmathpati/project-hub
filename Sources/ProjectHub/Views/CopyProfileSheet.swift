@@ -98,7 +98,7 @@ struct CopyProfileSheet: View {
                     .foregroundColor(.secondary)
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(NSColor.controlBackgroundColor))
+                    .background(HubTheme.raised)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             } else {
                 Picker("Source", selection: $selectedSourceID) {
@@ -182,11 +182,11 @@ struct CopyProfileSheet: View {
 
                 mcpToggleRow
             }
-            .background(Color(NSColor.controlBackgroundColor))
+            .background(HubTheme.raised)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color(NSColor.separatorColor).opacity(0.5), lineWidth: 0.5)
+                    .stroke(HubTheme.line.opacity(0.5), lineWidth: 0.5)
             )
         }
     }
@@ -282,7 +282,7 @@ struct CopyProfileSheet: View {
                 }
             }
             .padding(12)
-            .background(Color(NSColor.controlBackgroundColor))
+            .background(HubTheme.raised)
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
     }

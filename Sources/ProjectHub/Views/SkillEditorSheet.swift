@@ -67,7 +67,7 @@ struct SkillEditorSheet: View {
                                     .font(.system(size: 12))
                                     .frame(minHeight: 60, maxHeight: 80)
                                     .overlay(RoundedRectangle(cornerRadius: 5)
-                                        .stroke(Color(NSColor.separatorColor).opacity(0.5), lineWidth: 0.5))
+                                        .stroke(HubTheme.line.opacity(0.5), lineWidth: 0.5))
 
                                 fieldLabel("Triggers (comma-separated)")
                                 TextField("be careful, safety mode", text: $triggersCSV)
@@ -91,7 +91,7 @@ struct SkillEditorSheet: View {
                                 .font(.system(size: 12, design: .monospaced))
                                 .frame(minHeight: 200)
                                 .overlay(RoundedRectangle(cornerRadius: 5)
-                                    .stroke(Color(NSColor.separatorColor).opacity(0.5), lineWidth: 0.5))
+                                    .stroke(HubTheme.line.opacity(0.5), lineWidth: 0.5))
                         }
                     }
                     .padding(16)

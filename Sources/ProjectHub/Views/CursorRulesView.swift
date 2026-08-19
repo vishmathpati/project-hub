@@ -140,10 +140,10 @@ struct CursorRulesView: View {
             .help("Delete rule")
         }
         .padding(10)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(HubTheme.raised)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8)
-            .stroke(Color(NSColor.separatorColor).opacity(0.35), lineWidth: 0.5))
+            .stroke(HubTheme.line.opacity(0.35), lineWidth: 0.5))
         .contentShape(Rectangle())
         .onTapGesture { editingRule = rule }
     }
@@ -241,7 +241,7 @@ struct NewCursorRuleSheet: View {
                             .font(.system(size: 12))
                             .frame(minHeight: 160)
                             .overlay(RoundedRectangle(cornerRadius: 5)
-                                .stroke(Color(NSColor.separatorColor).opacity(0.5), lineWidth: 0.5))
+                                .stroke(HubTheme.line.opacity(0.5), lineWidth: 0.5))
                     }
                 }
                 .padding(16)
@@ -353,7 +353,7 @@ struct CursorRuleEditorSheet: View {
                             .font(.system(size: 12))
                             .frame(minHeight: 160)
                             .overlay(RoundedRectangle(cornerRadius: 5)
-                                .stroke(Color(NSColor.separatorColor).opacity(0.5), lineWidth: 0.5))
+                                .stroke(HubTheme.line.opacity(0.5), lineWidth: 0.5))
                     }
                 }
                 .padding(16)

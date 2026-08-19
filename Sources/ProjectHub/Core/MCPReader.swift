@@ -28,7 +28,7 @@ enum MCPReader {
         results += fromPi(projectPath)
         results += fromCommandCode(projectPath)
         results += fromGrok(projectPath)
-        return dedupeServers(results)
+        return dedupeServers(results, projectPath: projectPath)
     }
 
     // MARK: - Claude Code (.mcp.json)
@@ -137,12 +137,38 @@ enum MCPReader {
             .sorted(by: sortServers)
     }
 
-    private static func dedupeServers(_ servers: [MCPServerInfo]) -> [MCPServerInfo] {
+    /// The file a row actually came from. Providers that share a config file
+    /// (Claude Code and Command Code both read `.mcp.json`) resolve to the same
+    /// identity and collapse into one row.
+    private static func configIdentity(for server: MCPServerInfo, projectPath: String) -> String {
+        if let sourcePath = server.sourcePath, !sourcePath.isEmpty {
+            return canonicalConfigPath(sourcePath)
+        }
+        let relative = server.source.configRelativePath
+        if relative.hasPrefix("~") || relative.hasPrefix("/") {
+            return canonicalConfigPath(relative)
+        }
+        return canonicalConfigPath((projectPath as NSString).appendingPathComponent(relative))
+    }
+
+    private static func canonicalConfigPath(_ path: String) -> String {
+        URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
+    }
+
+    private static func dedupeServers(_ servers: [MCPServerInfo], projectPath: String) -> [MCPServerInfo] {
         var seen = Set<String>()
         var output: [MCPServerInfo] = []
         for server in servers {
+            // Two providers can name the same file — Claude Code and Command
+            // Code both read `.mcp.json`. Key on the config file rather than the
+            // provider so one file never lists the same server twice; editing
+            // either row would write the same bytes anyway.
+            let identity = configIdentity(for: server, projectPath: projectPath)
             let key = [
-                server.source.rawValue,
+                identity,
                 server.name,
                 server.detail,
                 server.isDisabled ? "disabled" : "enabled"

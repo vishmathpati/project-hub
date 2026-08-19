@@ -25,17 +25,45 @@ struct ProvidersView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider()
+            HubPageHeader(
+                title: "Providers",
+                subtitle: "\(installed.count) of \(rows.count) installed on this Mac",
+                actions: { headerActions }
+            )
             ScrollView {
-                LazyVStack(spacing: 10) {
-                    ForEach(rows) { row in
-                        providerCard(row)
+                VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
+                    HubPageNote(
+                        text: "A provider is an app that reads config out of your folders. This page is where you see what each one is currently reading, and push the same setup into another one."
+                    )
+
+                    HStack(spacing: 10) {
+                        MetricTile(value: "\(totalAssets(.skill))", label: "skills")
+                        MetricTile(value: "\(totalAssets(.mcp))",   label: "servers")
+                        MetricTile(value: "\(totalAssets(.plugin))", label: "plugins")
+                    }
+
+                    if !installed.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HubSectionHeading("Installed", count: installed.count)
+                            VStack(spacing: 8) {
+                                ForEach(installed) { row in providerCard(row) }
+                            }
+                        }
+                    }
+
+                    if !notInstalled.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HubSectionHeading("Not installed", count: notInstalled.count)
+                            VStack(spacing: 8) {
+                                ForEach(notInstalled) { row in providerCard(row) }
+                            }
+                        }
                     }
                 }
-                .padding(16)
+                .padding(HubTheme.contentPadding)
             }
         }
+        .background(HubTheme.bg)
         .onAppear {
             if selectedProjectPath.isEmpty {
                 selectedProjectPath = projectStore.projects.max(by: { $0.lastOpenedAt < $1.lastOpenedAt })?.path ?? ""
@@ -57,13 +85,14 @@ struct ProvidersView: View {
         )) {
             VStack(alignment: .leading, spacing: 12) {
                 Text(verbatim: "New skill")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(HubFont.sans(13, .semibold))
+                    .foregroundStyle(HubTheme.textStrong)
                 TextField("skill-name", text: $newSkillName)
                     .textFieldStyle(.roundedBorder)
-                HStack {
+                HStack(spacing: 8) {
                     Spacer()
-                    Button("Cancel") { creatingForProvider = nil }
-                    Button("Create") {
+                    HubButton(title: "Cancel", kind: .secondary) { creatingForProvider = nil }
+                    HubButton(title: "Create", kind: .primary) {
                         if let provider = creatingForProvider,
                            let path = skillStore.createSkill(named: newSkillName, providerID: provider, projectPath: selectedProject?.path) {
                             creatingForProvider = nil
@@ -72,119 +101,141 @@ struct ProvidersView: View {
                             reload()
                         }
                     }
-                    .disabled(newSkillName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             .padding(16)
             .frame(width: 360)
+            .background(HubTheme.bg)
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            Text("\(rows.filter(\.detected).count) of \(rows.count) found")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-            Picker("Project", selection: $selectedProjectPath) {
-                Text("Global only").tag("")
-                ForEach(projectStore.projects) { project in
-                    Text(project.displayName).tag(project.path)
-                }
+    private var installed: [ProviderSnapshot] { rows.filter(\.detected) }
+    private var notInstalled: [ProviderSnapshot] { rows.filter { !$0.detected } }
+
+    private func totalAssets(_ kind: ProviderAsset.Kind) -> Int {
+        var seen = Set<String>()
+        for row in rows {
+            for asset in row.assets where asset.kind == kind {
+                seen.insert(asset.name.lowercased())
             }
-            .labelsHidden()
-            .frame(maxWidth: 220)
-            if let status {
-                Text(status)
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer()
-            if loading {
-                ProgressView()
-                    .controlSize(.small)
-            }
-            Button("Refresh") { reload() }
-                .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .semibold))
-                .disabled(loading)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
+        return seen.count
     }
+
+    private func assetCount(_ row: ProviderSnapshot, _ kind: ProviderAsset.Kind) -> Int {
+        row.assets.filter { $0.kind == kind }.count
+    }
+
+    @ViewBuilder
+    private var headerActions: some View {
+        Menu {
+            Button("Global only") { selectedProjectPath = "" }
+            ForEach(projectStore.projects) { project in
+                Button(project.displayName) { selectedProjectPath = project.path }
+            }
+        } label: {
+            Text("scope: \(selectedProject?.displayName ?? "global") ▾")
+                .font(HubFont.mono(10))
+                .foregroundStyle(HubTheme.textMid)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+
+        if let status {
+            Text(status)
+                .font(HubFont.machine)
+                .foregroundStyle(HubTheme.textDim)
+                .lineLimit(1)
+        }
+
+        HubButton(title: "Rescan", kind: .secondary) { reload() }
+
+        Menu {
+            ForEach(copyTargets, id: \.self) { toolID in
+                Button(ToolPalette.label(for: toolID)) { copySkills(to: toolID) }
+            }
+        } label: {
+            Text("Copy skills to…")
+                .font(HubFont.sans(12, .semibold))
+                .foregroundStyle(HubTheme.onAccent)
+                .padding(.horizontal, 11)
+                .frame(height: HubTheme.buttonHeight)
+                .background(HubTheme.accent)
+                .clipShape(RoundedRectangle(cornerRadius: HubTheme.Radius.control))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    // MARK: - Provider card (§3 — 28pt tile, brand colour confined to the tile)
 
     private func providerCard(_ row: ProviderSnapshot) -> some View {
-        let color = ToolPalette.color(for: row.id)
-        return VStack(alignment: .leading, spacing: 12) {
+        let expanded = expandedID == row.id
+
+        return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {
-                Image(systemName: ToolPalette.icon(for: row.id))
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(color)
-                    .frame(width: 34, height: 34)
-                    .background(color.opacity(0.14))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                VStack(alignment: .leading, spacing: 3) {
+                ProviderTile(toolID: row.id, size: 28)
+
+                VStack(alignment: .leading, spacing: 2) {
                     Text(row.name)
-                        .font(.system(size: 14, weight: .semibold))
-                    Text(row.detected ? "Found on this Mac" : "Not installed")
-                        .font(.system(size: 11))
-                        .foregroundColor(row.detected ? .secondary : .orange)
+                        .font(HubFont.sans(13, .semibold))
+                        .foregroundStyle(HubTheme.textStrong)
+                    Text(shortPath(row.globalHome))
+                        .font(HubFont.machine)
+                        .foregroundStyle(HubTheme.textDim)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
-                Spacer()
-                Button("Open files") { reveal(row.globalHome) }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(!FileManager.default.fileExists(atPath: row.globalHome))
-                if let projectPath = row.projectPaths.first {
-                    Button("Project files") { reveal(projectPath) }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                }
-                Button(expandedID == row.id ? String("Hide") : String("Controls")) {
-                    expandedID = expandedID == row.id ? nil : row.id
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-            }
 
-            HStack(spacing: 6) {
-                ForEach(row.features) { feature in
-                    Text("\(feature.name) \(feature.count)")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(feature.count == 0 ? .secondary : .primary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Color(NSColor.windowBackgroundColor).opacity(0.7))
-                        .clipShape(Capsule())
+                Spacer(minLength: 12)
+
+                Text("\(assetCount(row, .skill)) skills")
+                    .font(HubFont.machine)
+                    .foregroundStyle(HubTheme.textDim)
+                Text("\(assetCount(row, .mcp)) mcp")
+                    .font(HubFont.machine)
+                    .foregroundStyle(HubTheme.textDim)
+
+                if row.detected {
+                    HubButton(title: expanded ? "hide" : "manage", kind: .accentInline) {
+                        expandedID = expanded ? nil : row.id
+                    }
+                } else {
+                    Text("not installed")
+                        .font(HubFont.machine)
+                        .foregroundStyle(HubTheme.textFaint)
                 }
             }
+            .padding(.horizontal, HubTheme.cardPadding)
+            .frame(minHeight: 56)
 
-            if expandedID == row.id {
+            if expanded {
+                Rectangle().fill(HubTheme.hairline).frame(height: 1)
                 controls(for: row)
             }
         }
-        .padding(14)
-        .background(Color(NSColor.controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(NSColor.separatorColor).opacity(0.35), lineWidth: 0.5)
-        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .opacity(row.detected ? 1 : 0.55)
+        .hubCard()
+        .animation(HubTheme.disclosureAnimation, value: expanded)
     }
 
     private func controls(for row: ProviderSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 8) {
-                Button(String("New skill")) {
+                HubButton(title: "New skill", kind: .secondary) {
                     newSkillName = ""
                     creatingForProvider = row.id
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
                 if let file = defaultInstruction(for: row), selectedProject != nil {
-                    Button("New \(file)") { createInstruction(file) }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                    HubButton(title: "New \(file)", kind: .secondary) { createInstruction(file) }
+                }
+                Spacer(minLength: 8)
+                HubButton(title: "reveal", kind: .inlineAction) { reveal(row.globalHome) }
+                if let projectPath = row.projectPaths.first {
+                    HubButton(title: "project files", kind: .inlineAction) { reveal(projectPath) }
                 }
             }
             assetGroup(title: "Skills", assets: row.assets.filter { $0.kind == .skill }, row: row)
@@ -194,74 +245,101 @@ struct ProvidersView: View {
             assetGroup(title: "Hooks", assets: row.assets.filter { $0.kind == .hook }, row: row)
             assetGroup(title: "Plugins", assets: row.assets.filter { $0.kind == .plugin }, row: row)
         }
-        .padding(12)
-        .background(Color(NSColor.windowBackgroundColor).opacity(0.55))
-        .clipShape(RoundedRectangle(cornerRadius: 9))
+        .padding(HubTheme.cardPadding)
     }
 
     private func assetGroup(title: String, assets: [ProviderAsset], row: ProviderSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            HubSectionHeading(title, count: assets.isEmpty ? nil : assets.count)
             if assets.isEmpty {
                 Text("None found")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                    .font(HubFont.secondary)
+                    .foregroundStyle(HubTheme.textFaint)
             } else {
                 ForEach(assets.prefix(12)) { asset in
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(asset.enabled ? Color.green.opacity(0.8) : Color.secondary.opacity(0.45))
-                            .frame(width: 6, height: 6)
-                        Text(asset.name)
-                            .font(.system(size: 12, weight: .medium))
-                            .lineLimit(1)
+                    HStack(spacing: 10) {
+                        StatusLabel(
+                            status: asset.enabled ? .ok : .neutral,
+                            text: asset.name,
+                            font: HubFont.sans(12.5)
+                        )
                         Text(asset.scope)
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Button("Open") { reveal(asset.path) }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(HubFont.machine)
+                            .foregroundStyle(HubTheme.textFaint)
+                        Spacer(minLength: 8)
+                        HubButton(title: "open", kind: .inlineAction) { reveal(asset.path) }
                         if asset.kind == .skill {
-                            Button("Edit") { editingSkillPath = asset.path }
-                                .buttonStyle(.plain)
-                                .font(.system(size: 11, weight: .semibold))
+                            HubButton(title: "edit", kind: .inlineAction) { editingSkillPath = asset.path }
                         }
                         if asset.kind == .mcp {
-                            Button(asset.enabled ? "Disable" : "Enable") {
+                            HubButton(title: asset.enabled ? "disable" : "enable", kind: .inlineAction) {
                                 toggleMCP(asset, providerID: row.id)
                             }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 11, weight: .semibold))
                         }
                         if asset.kind == .skill, selectedProject != nil {
-                            Button("Copy to project") {
+                            HubButton(title: "copy to project", kind: .accentInline) {
                                 copySkill(asset, from: row)
                             }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 11, weight: .semibold))
                         }
                         if asset.kind == .mcp {
-                            Menu("Copy") {
+                            Menu("copy") {
                                 ForEach(copyTargets.filter { $0 != row.id }, id: \.self) { toolID in
-                                    Button(ALL_TOOL_META.first { $0.id == toolID }?.label ?? toolID) {
+                                    Button(ToolPalette.label(for: toolID)) {
                                         copyMCP(asset, from: row.id, to: toolID)
                                     }
                                 }
                             }
-                            .font(.system(size: 11, weight: .semibold))
+                            .menuStyle(.borderlessButton)
+                            .menuIndicator(.hidden)
+                            .fixedSize()
+                            .font(HubFont.mono(10))
                         }
                     }
+                    .frame(minHeight: 24)
                 }
                 if assets.count > 12 {
                     Text("+\(assets.count - 12) more")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
+                        .font(HubFont.machine)
+                        .foregroundStyle(HubTheme.textFaint)
                 }
             }
         }
+    }
+
+    /// Copy every skill in the library into one provider's skill directories for
+    /// the selected project. This is the "push the same setup into another one"
+    /// action in the toolbar (§3b).
+    private func copySkills(to toolID: String) {
+        guard let project = selectedProject else {
+            status = "Pick a project scope first"
+            return
+        }
+        guard let spec = ProviderCatalog.specs().first(where: { $0.id == toolID }) else { return }
+        let fm = FileManager.default
+        var copied = 0
+        for relative in spec.projectSkillDirs {
+            let baseDir = (project.path as NSString).appendingPathComponent(relative)
+            for group in SkillStore.deduplicatedGlobalSkills(skillStore.globalSkills) {
+                guard let skill = group.skills.first else { continue }
+                let destination = (baseDir as NSString).appendingPathComponent(skill.name)
+                guard !fm.fileExists(atPath: destination) else { continue }
+                do {
+                    try fm.createDirectory(atPath: baseDir, withIntermediateDirectories: true)
+                    try fm.copyItem(atPath: skill.path, toPath: destination)
+                    copied += 1
+                } catch {
+                    continue
+                }
+            }
+        }
+        status = copied == 0
+            ? "\(ToolPalette.label(for: toolID)) already has these skills"
+            : "Copied \(copied) skill\(copied == 1 ? "" : "s") to \(ToolPalette.label(for: toolID))"
+        reload()
+    }
+
+    private func shortPath(_ path: String) -> String {
+        path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
     }
 
     private func copySkill(_ asset: ProviderAsset, from row: ProviderSnapshot) {

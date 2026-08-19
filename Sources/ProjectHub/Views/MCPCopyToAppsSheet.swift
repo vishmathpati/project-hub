@@ -94,7 +94,7 @@ struct MCPCopyToAppsSheet: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity)
-        .background(ContentView.headerGrad)
+        .background(HubTheme.accent)
     }
 
     // MARK: - Tab bar
@@ -115,10 +115,10 @@ struct MCPCopyToAppsSheet: View {
                 Image(systemName: icon).font(.system(size: 10, weight: .semibold))
                 Text(label).font(.system(size: 12, weight: .medium))
             }
-            .foregroundColor(active ? .white : .secondary)
+            .foregroundColor(active ? HubTheme.onAccent : .secondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
-            .background(active ? ContentView.headerGrad : LinearGradient(colors: [.clear], startPoint: .top, endPoint: .bottom))
+            .background(active ? HubTheme.accent : Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
@@ -375,10 +375,10 @@ struct MCPCopyToAppsSheet: View {
                     Image(systemName: "square.and.arrow.up.fill").font(.system(size: 11))
                     Text("Copy").font(.system(size: 12, weight: .semibold))
                 }
-                .foregroundColor(.white)
+                .foregroundColor(HubTheme.onAccent)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 7)
-                .background(ContentView.headerGrad)
+                .background(HubTheme.accent)
                 .clipShape(RoundedRectangle(cornerRadius: 7))
                 .opacity(hasSelection ? 1 : 0.4)
             }
@@ -450,15 +450,15 @@ struct MCPCopyToAppsSheet: View {
                     }
                 }
                 .padding(8)
-                .background(Color(NSColor.controlBackgroundColor))
+                .background(HubTheme.raised)
                 .clipShape(RoundedRectangle(cornerRadius: 7))
             }
             HStack {
                 Spacer()
                 Button(action: onClose) {
-                    Text("Done").font(.system(size: 12, weight: .semibold)).foregroundColor(.white)
+                    Text("Done").font(.system(size: 12, weight: .semibold)).foregroundColor(HubTheme.onAccent)
                         .padding(.horizontal, 18).padding(.vertical, 7)
-                        .background(ContentView.headerGrad)
+                        .background(HubTheme.accent)
                         .clipShape(RoundedRectangle(cornerRadius: 7))
                 }
                 .buttonStyle(.plain)

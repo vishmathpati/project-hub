@@ -119,7 +119,7 @@ struct MCPImportSheet: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity)
-        .background(ContentView.headerGrad)
+        .background(HubTheme.accent)
     }
 
     private var stageTitle: String {
@@ -167,11 +167,11 @@ struct MCPImportSheet: View {
                     TextEditor(text: $rawText)
                         .font(.system(size: 11, design: .monospaced))
                         .padding(6)
-                        .background(Color(NSColor.textBackgroundColor))
+                        .background(HubTheme.field)
                         .clipShape(RoundedRectangle(cornerRadius: 7))
                         .overlay(
                             RoundedRectangle(cornerRadius: 7)
-                                .stroke(Color(NSColor.separatorColor).opacity(0.6), lineWidth: 0.5)
+                                .stroke(HubTheme.line.opacity(0.6), lineWidth: 0.5)
                         )
                         .frame(height: 200)
 
@@ -193,7 +193,7 @@ struct MCPImportSheet: View {
                         .font(.system(size: 11, weight: .medium))
                     }
                     .buttonStyle(.plain)
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(HubTheme.accent)
 
                     Button(action: chooseJSONConfig) {
                         HStack(spacing: 4) {
@@ -203,7 +203,7 @@ struct MCPImportSheet: View {
                         .font(.system(size: 11, weight: .medium))
                     }
                     .buttonStyle(.plain)
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(HubTheme.accent)
 
                     Text("Reads source archives for mcp.json, mcp-fetch.json, and README snippets. MCPB/DXT or extension ZIP files open in Claude Desktop for review.")
                         .font(.system(size: 10))
@@ -244,11 +244,11 @@ struct MCPImportSheet: View {
                             .padding(8)
                     }
                     .frame(height: 140)
-                    .background(Color(NSColor.textBackgroundColor))
+                    .background(HubTheme.field)
                     .clipShape(RoundedRectangle(cornerRadius: 7))
                     .overlay(
                         RoundedRectangle(cornerRadius: 7)
-                            .stroke(Color(NSColor.separatorColor).opacity(0.6), lineWidth: 0.5)
+                            .stroke(HubTheme.line.opacity(0.6), lineWidth: 0.5)
                     )
                 }
             }
@@ -281,7 +281,7 @@ struct MCPImportSheet: View {
                         .font(.system(size: 11, weight: .medium))
                     }
                     .buttonStyle(.plain)
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(HubTheme.accent)
                 } else {
                     Button(action: fetchFromURL) {
                         HStack(spacing: 4) {
@@ -291,7 +291,7 @@ struct MCPImportSheet: View {
                         .font(.system(size: 11, weight: .medium))
                     }
                     .buttonStyle(.plain)
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(HubTheme.accent)
                     .disabled(remoteURL.trimmingCharacters(in: .whitespaces).isEmpty || fetchingURL)
                 }
 
@@ -304,10 +304,10 @@ struct MCPImportSheet: View {
                         Image(systemName: "arrow.right")
                             .font(.system(size: 11, weight: .bold))
                     }
-                    .foregroundColor(.white)
+                    .foregroundColor(HubTheme.onAccent)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 7)
-                    .background(ContentView.headerGrad)
+                    .background(HubTheme.accent)
                     .clipShape(RoundedRectangle(cornerRadius: 7))
                     .opacity(rawText.trimmingCharacters(in: .whitespaces).isEmpty ? 0.4 : 1)
                 }
@@ -368,9 +368,9 @@ struct MCPImportSheet: View {
                 .textSelection(.enabled)
                 .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color(NSColor.textBackgroundColor))
+                .background(HubTheme.field)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(NSColor.separatorColor).opacity(0.45), lineWidth: 0.5))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(HubTheme.line.opacity(0.45), lineWidth: 0.5))
 
             HStack(spacing: 8) {
                 Text(installer.runtime)
@@ -389,7 +389,7 @@ struct MCPImportSheet: View {
                     .font(.system(size: 11, weight: .medium))
                 }
                 .buttonStyle(.plain)
-                .foregroundColor(.accentColor)
+                .foregroundColor(HubTheme.accent)
                 Button(action: { mcpStore.refresh() }) {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.clockwise")
@@ -398,7 +398,7 @@ struct MCPImportSheet: View {
                     .font(.system(size: 11, weight: .medium))
                 }
                 .buttonStyle(.plain)
-                .foregroundColor(.accentColor)
+                .foregroundColor(HubTheme.accent)
             }
 
             Text("Run the command yourself, finish any prompts, then refresh Project Hub. Project Hub does not execute prompt-driven installers or write their target files automatically.")
@@ -746,9 +746,9 @@ struct MCPImportSheet: View {
                             HStack(alignment: .top, spacing: 10) {
                                 Image(systemName: choice.archiveURL == nil ? iconName(for: choice.servers.first?.kindLabel ?? "Local") : "archivebox")
                                     .font(.system(size: 13))
-                                    .foregroundColor(.accentColor)
+                                    .foregroundColor(HubTheme.accent)
                                     .frame(width: 28, height: 28)
-                                    .background(Color.accentColor.opacity(0.12))
+                                    .background(HubTheme.accent.opacity(0.12))
                                     .clipShape(RoundedRectangle(cornerRadius: 7))
 
                                 VStack(alignment: .leading, spacing: 3) {
@@ -781,11 +781,11 @@ struct MCPImportSheet: View {
                                     .foregroundColor(.secondary)
                             }
                             .padding(10)
-                            .background(Color(NSColor.controlBackgroundColor))
+                            .background(HubTheme.raised)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color(NSColor.separatorColor).opacity(0.55), lineWidth: 0.5)
+                                    .stroke(HubTheme.line.opacity(0.55), lineWidth: 0.5)
                             )
                         }
                         .buttonStyle(.plain)
@@ -863,7 +863,7 @@ struct MCPImportSheet: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "shippingbox.fill")
-                            .foregroundColor(.accentColor)
+                            .foregroundColor(HubTheme.accent)
                             .font(.system(size: 26))
                             .frame(width: 34)
 
@@ -949,10 +949,10 @@ struct MCPImportSheet: View {
                         Text("Open archive")
                             .font(.system(size: 12, weight: .semibold))
                     }
-                    .foregroundColor(.white)
+                    .foregroundColor(HubTheme.onAccent)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 7)
-                    .background(ContentView.headerGrad)
+                    .background(HubTheme.accent)
                     .clipShape(RoundedRectangle(cornerRadius: 7))
                     .opacity(archivePreview == nil ? 0.4 : 1)
                 }
@@ -1028,7 +1028,7 @@ struct MCPImportSheet: View {
                             .padding(.horizontal, 12)
                             .padding(.vertical, 7)
                             .foregroundColor(!useProjectScope ? .white : .primary)
-                            .background(!useProjectScope ? Color.accentColor : Color(NSColor.controlBackgroundColor))
+                            .background(!useProjectScope ? HubTheme.accent : HubTheme.raised)
                             .clipShape(RoundedRectangle(cornerRadius: 7))
                         }
                         .buttonStyle(.plain)
@@ -1045,7 +1045,7 @@ struct MCPImportSheet: View {
                             .padding(.horizontal, 12)
                             .padding(.vertical, 7)
                             .foregroundColor(useProjectScope ? .white : .primary)
-                            .background(useProjectScope ? Color.accentColor : Color(NSColor.controlBackgroundColor))
+                            .background(useProjectScope ? HubTheme.accent : HubTheme.raised)
                             .clipShape(RoundedRectangle(cornerRadius: 7))
                         }
                         .buttonStyle(.plain)
@@ -1053,7 +1053,7 @@ struct MCPImportSheet: View {
                         Spacer()
                     }
                     .padding(3)
-                    .background(Color(NSColor.windowBackgroundColor).opacity(0.4))
+                    .background(HubTheme.bg.opacity(0.4))
                     .clipShape(RoundedRectangle(cornerRadius: 9))
 
                     if useProjectScope {
@@ -1072,7 +1072,7 @@ struct MCPImportSheet: View {
                                     Button("Change…", action: pickProjectRoot)
                                         .buttonStyle(.plain)
                                         .font(.system(size: 11))
-                                        .foregroundColor(.accentColor)
+                                        .foregroundColor(HubTheme.accent)
                                 }
                             } else {
                                 Text("Choose a project folder before importing.")
@@ -1110,7 +1110,7 @@ struct MCPImportSheet: View {
                         Button(action: toggleSelectAll) {
                             Text(allSelected ? "Deselect all" : "Select all")
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.accentColor)
+                                .foregroundColor(HubTheme.accent)
                         }
                         .buttonStyle(.plain)
                     }
@@ -1140,7 +1140,7 @@ struct MCPImportSheet: View {
                                 Text(showingDiff ? "Hide diff" : "Show diff")
                             }
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.accentColor)
+                            .foregroundColor(HubTheme.accent)
                         }
                         .buttonStyle(.plain)
                     }
@@ -1185,10 +1185,10 @@ struct MCPImportSheet: View {
                         Text("Import")
                             .font(.system(size: 12, weight: .semibold))
                     }
-                    .foregroundColor(.white)
+                    .foregroundColor(HubTheme.onAccent)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 7)
-                    .background(ContentView.headerGrad)
+                    .background(HubTheme.accent)
                     .clipShape(RoundedRectangle(cornerRadius: 7))
                     .opacity(canImport ? 1 : 0.4)
                 }
@@ -1228,7 +1228,7 @@ struct MCPImportSheet: View {
             .foregroundColor(active ? .white : .secondary)
             .padding(.horizontal, 9)
             .padding(.vertical, 5)
-            .background(active ? Color.accentColor : Color(NSColor.controlBackgroundColor))
+            .background(active ? HubTheme.accent : HubTheme.raised)
             .clipShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
@@ -1375,10 +1375,10 @@ struct MCPImportSheet: View {
                     Button(action: { mcpStore.refresh(); onClose() }) {
                         Text("Done")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.white)
+                            .foregroundColor(HubTheme.onAccent)
                             .padding(.horizontal, 20)
                             .padding(.vertical, 7)
-                            .background(ContentView.headerGrad)
+                            .background(HubTheme.accent)
                             .clipShape(RoundedRectangle(cornerRadius: 7))
                     }
                     .buttonStyle(.plain)
@@ -1876,10 +1876,10 @@ private struct ServerPreviewRow: View {
             VStack {
                 Image(systemName: iconName(for: server.kindLabel))
                     .font(.system(size: 13))
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(HubTheme.accent)
             }
             .frame(width: 28, height: 28)
-            .background(Color.accentColor.opacity(0.12))
+            .background(HubTheme.accent.opacity(0.12))
             .clipShape(RoundedRectangle(cornerRadius: 7))
 
             VStack(alignment: .leading, spacing: 2) {
@@ -1910,11 +1910,11 @@ private struct ServerPreviewRow: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(HubTheme.raised)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(NSColor.separatorColor).opacity(0.55), lineWidth: 0.5)
+                .stroke(HubTheme.line.opacity(0.55), lineWidth: 0.5)
         )
     }
 

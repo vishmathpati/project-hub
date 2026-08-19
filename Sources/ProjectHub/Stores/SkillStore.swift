@@ -33,6 +33,37 @@ final class SkillStore: ObservableObject {
             return labels
         }
 
+        /// Provider ids whose skill directories this skill actually sits in —
+        /// the tiles on each row in screen 3c. Resolved from the origin path
+        /// against the catalog, with the declared source as the fallback.
+        var providerIDs: [String] {
+            var ids: [String] = []
+            let specs = ProviderCatalog.specs()
+            for skill in skills {
+                var matched = false
+                for spec in specs {
+                    for directory in spec.globalSkillDirs where skill.path.hasPrefix(directory) {
+                        if !ids.contains(spec.id) { ids.append(spec.id) }
+                        matched = true
+                    }
+                }
+                if !matched {
+                    let fallback = Self.providerID(for: skill.source)
+                    if let fallback, !ids.contains(fallback) { ids.append(fallback) }
+                }
+            }
+            return ids
+        }
+
+        static func providerID(for source: SkillSource) -> String? {
+            switch source {
+            case .claudeGlobal: return "claude-code"
+            case .codexGlobal, .codexAdmin, .codexManaged: return "codex"
+            case .cursorGlobal: return "cursor"
+            case .providerGlobal: return nil
+            }
+        }
+
         var hasReadOnlyOrigins: Bool {
             skills.contains { $0.source == .codexAdmin || $0.source == .codexManaged }
         }

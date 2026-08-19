@@ -109,11 +109,11 @@ struct HooksView: View {
             }
         }
         .padding(9)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(HubTheme.raised)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(NSColor.separatorColor).opacity(0.4), lineWidth: 0.5)
+                .stroke(HubTheme.line.opacity(0.4), lineWidth: 0.5)
         )
     }
 

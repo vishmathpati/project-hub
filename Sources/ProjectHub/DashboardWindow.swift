@@ -31,7 +31,7 @@ final class DashboardWindow {
         let w = NSWindow(contentViewController: hc)
         w.title = "Project Hub"
         w.setFrame(Self.initialFrame(), display: true)
-        w.minSize = NSSize(width: 900, height: 620)
+        w.minSize = NSSize(width: HubTheme.minWindowWidth, height: HubTheme.minWindowHeight)
         w.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
         w.collectionBehavior.insert(.fullScreenPrimary)
         w.isReleasedWhenClosed = false
@@ -43,12 +43,13 @@ final class DashboardWindow {
     var isOpen: Bool { window?.isVisible ?? false }
 
     private static func initialFrame() -> NSRect {
-        let fallback = NSRect(x: 120, y: 120, width: 1180, height: 760)
+        // Design target is 1240 × 820, minimum 1100 × 720 (DESIGN.md §5.1).
+        let fallback = NSRect(x: 120, y: 120, width: HubTheme.idealWindowWidth, height: HubTheme.idealWindowHeight)
         guard let visible = NSScreen.main?.visibleFrame else { return fallback }
-        let maxWidth = max(900, visible.width - 48)
-        let maxHeight = max(620, visible.height - 48)
-        let width = min(min(max(980, visible.width * 0.72), 1280), maxWidth)
-        let height = min(min(max(660, visible.height * 0.78), 840), maxHeight)
+        let maxWidth = max(HubTheme.minWindowWidth, visible.width - 48)
+        let maxHeight = max(HubTheme.minWindowHeight, visible.height - 48)
+        let width = min(min(max(HubTheme.minWindowWidth, visible.width * 0.72), HubTheme.idealWindowWidth), maxWidth)
+        let height = min(min(max(HubTheme.minWindowHeight, visible.height * 0.78), HubTheme.idealWindowHeight), maxHeight)
         let origin = NSPoint(
             x: visible.midX - width / 2,
             y: visible.midY - height / 2

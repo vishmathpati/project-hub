@@ -5,9 +5,20 @@ enum SkillInventoryReader {
         var collected: [RawSkill] = []
         var seenPaths = Set<String>()
 
+        // Directory discovery mixes two path forms: the walk-up uses the path as
+        // given, while the nested walk resolves symlinks (so /var becomes
+        // /private/var on macOS). Compare canonical paths, or the same skill
+        // reads as two origins and the nested one looks read-only.
+        let canonicalProject = canonicalPath(projectPath)
+        // "Outside the selected project root" means outside the repository, not
+        // outside the subdirectory you happen to have selected — a skill in a
+        // sibling package is still yours to copy.
+        let canonicalRoot = canonicalPath(ProjectRootDetector.detect(from: projectPath))
+
         for entry in skillDirectories(for: projectPath) {
             for skill in SkillReader.scanSkillDir(entry.path, source: .claudeGlobal) {
-                guard seenPaths.insert(skill.path).inserted else { continue }
+                let canonicalSkill = canonicalPath(skill.path)
+                guard seenPaths.insert(canonicalSkill).inserted else { continue }
                 collected.append(
                     RawSkill(
                         skill: skill,
@@ -15,7 +26,7 @@ enum SkillInventoryReader {
                         toolLabels: entry.toolLabels,
                         claude: entry.kind == .claude,
                         codex: entry.kind == .codex,
-                        canMutate: skill.path.hasPrefix(projectPath + "/") || skill.path == projectPath,
+                        canMutate: isWithin(canonicalSkill, canonicalRoot),
                         readOnlyReason: entry.readOnlyReason,
                         nameOverride: nil
                     )
@@ -54,7 +65,7 @@ enum SkillInventoryReader {
                 path: path,
                 skillMDPath: (path as NSString).appendingPathComponent("SKILL.md"),
                 sourceLabel: raw.sourceLabel,
-                scopeLabel: path.hasPrefix(projectPath + "/") ? "Project" : "Parent",
+                scopeLabel: isWithin(canonicalPath(path), canonicalProject) ? "Project" : "Parent",
                 toolLabels: raw.toolLabels,
                 state: state,
                 version: versions[index],
@@ -67,6 +78,18 @@ enum SkillInventoryReader {
         .sorted {
             $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
+    }
+
+    /// Resolves symlinks and tilde so two spellings of one directory compare equal.
+    private static func canonicalPath(_ path: String) -> String {
+        URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
+    }
+
+    private static func isWithin(_ path: String, _ root: String) -> Bool {
+        path == root || path.hasPrefix(root + "/")
     }
 
     private struct DirSpec {

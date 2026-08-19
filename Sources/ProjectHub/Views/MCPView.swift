@@ -233,10 +233,10 @@ struct MCPView: View {
                     Text("Import")
                         .font(.system(size: 11, weight: .semibold))
                 }
-                .foregroundColor(.white)
+                .foregroundColor(HubTheme.onAccent)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(ContentView.headerGrad)
+                .background(HubTheme.accent)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
@@ -298,7 +298,7 @@ struct MCPView: View {
                 }
             }
         }
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(HubTheme.raised)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(c.opacity(0.20), lineWidth: 1))
     }
@@ -429,10 +429,10 @@ struct MCPView: View {
                     Text("Import a server")
                 }
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(HubTheme.onAccent)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 7)
-                .background(ContentView.headerGrad)
+                .background(HubTheme.accent)
                 .clipShape(RoundedRectangle(cornerRadius: 7))
             }
             .buttonStyle(.plain)

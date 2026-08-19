@@ -15,8 +15,11 @@ struct GlobalMCPView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            topBar
-            Divider()
+            HubPageHeader(
+                title: "MCP servers",
+                subtitle: "\(mcpStore.serverCount) unique across \(mcpStore.detectedTools.count) provider\(mcpStore.detectedTools.count == 1 ? "" : "s")",
+                actions: { headerActions }
+            )
 
             if mcpStore.isLoading && mcpStore.tools.isEmpty {
                 loadingView
@@ -26,6 +29,7 @@ struct GlobalMCPView: View {
                 mainContent
             }
         }
+        .background(HubTheme.bg)
         .sheet(isPresented: $showingImport) {
             MCPImportSheet(onClose: {
                 showingImport = false
@@ -109,235 +113,181 @@ struct GlobalMCPView: View {
 
     // MARK: - Top bar
 
-    private var topBar: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .foregroundColor(.secondary)
-                .font(.system(size: 11))
-            TextField("Search servers…", text: $mcpStore.searchText)
-                .font(.system(size: 12))
-                .textFieldStyle(.plain)
-            if !mcpStore.searchText.isEmpty {
-                Button { mcpStore.searchText = "" } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.secondary)
-                        .font(.system(size: 11))
-                }
-                .buttonStyle(.plain)
-            }
-            Spacer()
-            Button {
-                mcpStore.refresh()
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(mcpStore.isLoading ? .accentColor : .secondary)
-                    .rotationEffect(.degrees(mcpStore.isLoading ? 360 : 0))
-                    .animation(
-                        mcpStore.isLoading
-                            ? .linear(duration: 0.8).repeatForever(autoreverses: false)
-                            : .default,
-                        value: mcpStore.isLoading
-                    )
-            }
-            .buttonStyle(.plain)
-            .help("Refresh")
+    @ViewBuilder
+    private var headerActions: some View {
+        HubSearchField(text: $mcpStore.searchText, placeholder: "search servers", shortcut: nil)
+            .frame(width: 180)
 
-            Button {
-                mcpStore.verifyHealth()
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "checkmark.seal")
-                        .font(.system(size: 11, weight: .medium))
-                    Text(mcpStore.isVerifyingHealth ? "Verifying" : "Verify")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .foregroundColor(mcpStore.isVerifyingHealth ? .secondary : .accentColor)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(Color.accentColor.opacity(0.10))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-            }
-            .buttonStyle(.plain)
-            .disabled(mcpStore.isVerifyingHealth || mcpStore.detectedTools.allSatisfy { $0.servers.isEmpty })
-            .help("Verify MCP initialize and tools/list where supported")
+        HubIconButton(
+            systemImage: "arrow.clockwise",
+            help: "Refresh",
+            isActive: mcpStore.isLoading,
+            spinning: mcpStore.isLoading
+        ) { mcpStore.refresh() }
 
-            Button {
-                showingImport = true
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "square.and.arrow.down")
-                        .font(.system(size: 11, weight: .medium))
-                    Text("Import")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .foregroundColor(.white)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(ContentView.headerGrad)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-            }
-            .buttonStyle(.plain)
+        HubButton(title: mcpStore.isVerifyingHealth ? "Verifying" : "Verify all", kind: .secondary) {
+            mcpStore.verifyHealth()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .disabled(mcpStore.isVerifyingHealth || mcpStore.detectedTools.allSatisfy { $0.servers.isEmpty })
+
+        HubButton(title: "Import", kind: .primary) { showingImport = true }
     }
 
     // MARK: - Main content
 
     private var mainContent: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                // Summary pill
-                let count = mcpStore.serverCount
-                if count > 0 {
-                    HStack(spacing: 6) {
-                        Text("\(count) unique server\(count == 1 ? "" : "s") across \(mcpStore.detectedTools.count) tool\(mcpStore.detectedTools.count == 1 ? "" : "s")")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                        if mcpStore.isVerifyingHealth {
-                            ProgressView()
-                                .scaleEffect(0.45)
-                                .frame(width: 14, height: 14)
-                            Text("probing MCP endpoints")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.secondary)
-                        }
-                        ForEach(MCPHealthStatus.allCases.filter { (mcpStore.healthSummary[$0] ?? 0) > 0 }, id: \.self) { status in
-                            healthPill(status: status, count: mcpStore.healthSummary[status] ?? 0)
-                        }
-                        Spacer()
-                    }
-                    .padding(.horizontal, 12)
-                }
+            VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
+                HubPageNote(
+                    text: "Servers are grouped by the provider that launches them. Health is checked in place, and a server that needs auth carries its sign-in on the same line."
+                )
+
+                healthStrip
 
                 ForEach(mcpStore.detectedTools) { tool in
                     let visibleServers = tool.servers.filter { mcpStore.matches($0.name) }
-                    if !mcpStore.searchText.isEmpty && visibleServers.isEmpty { } else {
+                    if mcpStore.searchText.isEmpty || !visibleServers.isEmpty {
                         toolSection(tool: tool, servers: visibleServers)
                     }
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(HubTheme.contentPadding)
         }
     }
 
-    // MARK: - Tool section
+    /// One line of health counts, each a dot plus a word (§2.3).
+    private var healthStrip: some View {
+        HStack(spacing: 18) {
+            ForEach(MCPHealthStatus.allCases.filter { (mcpStore.healthSummary[$0] ?? 0) > 0 }, id: \.self) { status in
+                StatusLabel(
+                    status: hubStatus(status),
+                    text: "\(mcpStore.healthSummary[status] ?? 0) \(status.rawValue.lowercased())"
+                )
+            }
+            if mcpStore.isVerifyingHealth {
+                Text("probing endpoints")
+                    .font(HubFont.machine)
+                    .foregroundStyle(HubTheme.textFaint)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func hubStatus(_ status: MCPHealthStatus) -> HubStatus {
+        switch status {
+        case .working:                              return .ok
+        case .broken:                               return .bad
+        case .needsAuth, .authExpired, .needsRestart: return .warn
+        case .disabled, .unknown:                   return .neutral
+        }
+    }
+
+    // MARK: - Provider group
 
     private func toolSection(tool: ToolSummary, servers: [ServerEntry]) -> some View {
-        let c = ToolPalette.color(for: tool.toolID)
-
-        return VStack(alignment: .leading, spacing: 0) {
-            // Section header
-            HStack(spacing: 8) {
-                Group {
-                    if let img = ToolPalette.appImage(for: tool.toolID) {
-                        Image(nsImage: img)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 24, height: 24)
-                            .clipShape(RoundedRectangle(cornerRadius: 5))
-                    } else {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(c.opacity(0.15))
-                                .frame(width: 28, height: 28)
-                            Image(systemName: ToolPalette.icon(for: tool.toolID))
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(c)
-                        }
-                    }
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                ProviderTile(toolID: tool.toolID)
                 Text(tool.label)
-                    .font(.system(size: 12, weight: .semibold))
-                Spacer()
-                Text("\(tool.servers.count)")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(c)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(c.opacity(0.12))
-                    .clipShape(Capsule())
+                    .font(HubFont.sans(13, .semibold))
+                    .foregroundStyle(HubTheme.textStrong)
+                Text(configSummary(for: tool))
+                    .font(HubFont.machine)
+                    .foregroundStyle(HubTheme.textDim)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Rectangle()
+                    .fill(HubTheme.hairline)
+                    .frame(height: 1)
+                    .frame(maxWidth: .infinity)
+                Text("\(tool.servers.count) server\(tool.servers.count == 1 ? "" : "s")")
+                    .font(HubFont.mono(9))
+                    .foregroundStyle(HubTheme.textFaint)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
 
-            if !servers.isEmpty {
-                Divider().opacity(0.5)
-                VStack(spacing: 1) {
-                    ForEach(servers) { server in
-                        serverRow(server: server, tool: tool, color: c)
+            if servers.isEmpty {
+                Text("No servers configured")
+                    .font(HubFont.secondary)
+                    .foregroundStyle(HubTheme.textFaint)
+                    .padding(.horizontal, HubTheme.contentPadding)
+                    .frame(height: HubTheme.tableRowHeight)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .hubCard()
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(servers.enumerated()), id: \.element.id) { index, server in
+                        if index > 0 { HubRowSeparator() }
+                        serverRow(server: server, tool: tool)
                     }
                 }
-            } else if mcpStore.searchText.isEmpty {
-                HStack {
-                    Text("No servers configured")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
+                .hubCard()
             }
         }
-        .background(Color(NSColor.controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(c.opacity(0.20), lineWidth: 1))
+    }
+
+    private func configSummary(for tool: ToolSummary) -> String {
+        var seen: [String] = []
+        for server in tool.servers {
+            guard let label = server.sourceLabel, !seen.contains(label) else { continue }
+            seen.append(label)
+        }
+        return seen.prefix(2).joined(separator: " · ")
     }
 
     // MARK: - Server row
 
-    private func serverRow(server: ServerEntry, tool: ToolSummary, color: Color) -> some View {
+    private func serverRow(server: ServerEntry, tool: ToolSummary) -> some View {
         let health = mcpStore.health(for: server, toolID: tool.toolID)
+        let status = hubStatus(health.status)
         let readOnlyHelp = server.readOnlyReason ?? "This server is read-only in Global MCP."
         let canTogglePolicy = server.canToggleCodexPluginPolicy
         let toggleHelp = canTogglePolicy
             ? "Preview a Codex config policy change for this plugin-bundled MCP server"
             : readOnlyHelp
-        return HStack(spacing: 8) {
-            Circle()
-                .fill(healthColor(health.status).opacity(0.75))
-                .frame(width: 6, height: 6)
+        let needsAuth = health.status == .needsAuth || health.status == .authExpired
 
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 5) {
+        return HStack(alignment: .center, spacing: 10) {
+            StatusDot(status: status)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
                     Text(server.name)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(server.isDisabled ? .secondary : .primary)
-                    if server.isDisabled {
-                        statusBadge(health.status)
-                    } else {
-                        statusBadge(health.status)
+                        .font(HubFont.rowPrimary)
+                        .foregroundStyle(server.isDisabled ? HubTheme.textMid : HubTheme.text)
+                    Text(server.transport)
+                        .font(HubFont.mono(9))
+                        .foregroundStyle(HubTheme.textFaint)
+                    if server.isReadOnly {
+                        Text("read-only")
+                            .font(HubFont.mono(9))
+                            .foregroundStyle(HubTheme.textFaint)
                     }
                 }
-                Text(server.detail)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.secondary)
+                Text(health.status == .working ? server.detail : "\(server.detail) · \(health.summary)")
+                    .font(HubFont.machine)
+                    .foregroundStyle(HubTheme.textDim)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                if let sourceLabel = server.sourceLabel {
-                    HStack(spacing: 4) {
-                        Image(systemName: server.isReadOnly ? "lock.fill" : "folder")
-                            .font(.system(size: 8, weight: .semibold))
-                        Text(sourceLabel)
-                            .font(.system(size: 10))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    .foregroundColor(.secondary)
-                }
-                if health.status != .working {
-                    Text(health.summary)
-                        .font(.system(size: 10))
-                        .foregroundColor(healthColor(health.status))
-                        .lineLimit(1)
+            }
+
+            Spacer(minLength: 12)
+
+            // Colour is never the only signal — the state is spelled out (§2.3).
+            Text(health.status.rawValue.lowercased())
+                .font(HubFont.machine)
+                .foregroundStyle(status == .neutral ? HubTheme.textFaint : status.color)
+
+            if needsAuth {
+                // The fix travels with the line it belongs to (§7.1).
+                HubButton(title: "sign in", kind: .accentInline) {
+                    editingServer = (toolID: tool.toolID, name: server.name)
                 }
             }
 
-            Spacer()
-
-            // Toggle disabled
-            Button {
+            HubIconButton(
+                systemImage: server.isDisabled ? "eye" : "eye.slash",
+                help: server.isReadOnly ? toggleHelp : (server.isDisabled ? "Enable" : "Disable")
+            ) {
                 if server.isReadOnly {
                     if let preview = mcpStore.previewCodexPluginPolicyToggle(
                         toolID: tool.toolID,
@@ -353,58 +303,37 @@ struct GlobalMCPView: View {
                 } else {
                     mcpStore.toggleServerDisabled(toolID: tool.toolID, name: server.name, currently: server.isDisabled)
                 }
-            } label: {
-                Image(systemName: server.isDisabled ? "eye" : "eye.slash")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
             }
-            .buttonStyle(.plain)
             .disabled(server.isReadOnly && !canTogglePolicy)
             .opacity(server.isReadOnly && !canTogglePolicy ? 0.35 : 1)
-            .help(server.isReadOnly ? toggleHelp : (server.isDisabled ? "Enable" : "Disable"))
 
-            // Copy to apps
-            Button {
+            HubIconButton(
+                systemImage: "square.and.arrow.up",
+                help: server.isReadOnly ? readOnlyHelp : "Copy to other providers"
+            ) {
                 copyingServer = (toolID: tool.toolID, toolLabel: tool.label, name: server.name)
-            } label: {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
             }
-            .buttonStyle(.plain)
             .disabled(server.isReadOnly)
             .opacity(server.isReadOnly ? 0.35 : 1)
-            .help(server.isReadOnly ? readOnlyHelp : "Copy to other apps")
 
-            // Edit
-            Button {
+            HubButton(title: "edit", kind: .inlineAction) {
                 editingServer = (toolID: tool.toolID, name: server.name)
-            } label: {
-                Image(systemName: "pencil")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
             }
-            .buttonStyle(.plain)
             .disabled(server.isReadOnly)
             .opacity(server.isReadOnly ? 0.35 : 1)
-            .help(server.isReadOnly ? readOnlyHelp : "Edit")
 
-            // Delete
-            Button {
+            HubIconButton(
+                systemImage: "trash",
+                help: server.isReadOnly ? readOnlyHelp : "Remove"
+            ) {
                 confirmDelete = (toolID: tool.toolID, name: server.name)
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 11))
-                    .foregroundColor(.red.opacity(0.6))
             }
-            .buttonStyle(.plain)
             .disabled(server.isReadOnly)
             .opacity(server.isReadOnly ? 0.35 : 1)
-            .help(server.isReadOnly ? readOnlyHelp : "Remove")
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(Color.clear)
+        .padding(.horizontal, HubTheme.contentPadding)
+        .frame(minHeight: HubTheme.tableRowHeight)
+        .opacity(server.isDisabled ? 0.6 : 1)
     }
 
     private func codexPluginPolicyPreviewSheet(_ preview: CodexPluginMCPPolicyPreview) -> some View {
@@ -412,7 +341,7 @@ struct GlobalMCPView: View {
             HStack(spacing: 8) {
                 Image(systemName: preview.enabled ? "eye" : "eye.slash")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(HubTheme.accent)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(preview.enabled ? "Enable plugin MCP server" : "Disable plugin MCP server")
                         .font(.system(size: 13, weight: .semibold))
@@ -431,7 +360,7 @@ struct GlobalMCPView: View {
                 }
             }
             .padding(8)
-            .background(Color(NSColor.controlBackgroundColor))
+            .background(HubTheme.raised)
             .clipShape(RoundedRectangle(cornerRadius: 8))
 
             Text("Project Hub will write Codex plugin MCP policy in config.toml. It will not edit the installed plugin's bundled MCP file.")
@@ -457,9 +386,9 @@ struct GlobalMCPView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)
             }
-            .background(Color(NSColor.textBackgroundColor))
+            .background(HubTheme.field)
             .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(NSColor.separatorColor), lineWidth: 0.5))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(HubTheme.line, lineWidth: 0.5))
 
             HStack {
                 Button("Cancel") {
@@ -494,40 +423,8 @@ struct GlobalMCPView: View {
         }
     }
 
-    private func statusBadge(_ status: MCPHealthStatus) -> some View {
-        Text(status.rawValue)
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundColor(healthColor(status))
-            .padding(.horizontal, 5)
-            .padding(.vertical, 2)
-            .background(healthColor(status).opacity(0.12))
-            .clipShape(Capsule())
-    }
-
-    private func healthPill(status: MCPHealthStatus, count: Int) -> some View {
-        HStack(spacing: 3) {
-            Circle()
-                .fill(healthColor(status))
-                .frame(width: 5, height: 5)
-            Text("\(count) \(status.rawValue.lowercased())")
-                .font(.system(size: 10, weight: .medium))
-        }
-        .foregroundColor(healthColor(status))
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
-        .background(healthColor(status).opacity(0.10))
-        .clipShape(Capsule())
-    }
-
     private func healthColor(_ status: MCPHealthStatus) -> Color {
-        switch status {
-        case .working: return .green
-        case .broken: return .red
-        case .needsAuth, .authExpired: return .orange
-        case .needsRestart: return .blue
-        case .disabled: return .secondary
-        case .unknown: return .purple
-        }
+        hubStatus(status).color
     }
 
     private struct PolicyDiffLine {

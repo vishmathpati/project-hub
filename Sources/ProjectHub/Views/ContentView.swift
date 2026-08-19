@@ -2,79 +2,80 @@ import SwiftUI
 import AppKit
 
 // MARK: - Root content view
+//
+// Eight flat tabs became three captioned groups (DESIGN.md §6). Same
+// destinations, reordered by intent, with a one-line caption on each group so a
+// user never has to click a tab to learn what it does.
+
+enum HubDestination: String, CaseIterable, Identifiable, Hashable {
+    case projects
+    case skills
+    case plugins
+    case mcp
+    case providers
+    case checks
+    case usage
+    case settings
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .projects:  return "Projects"
+        case .skills:    return "Skills"
+        case .plugins:   return "Plugins"
+        case .mcp:       return "MCP servers"
+        case .providers: return "Providers"
+        case .checks:    return "Checks"
+        case .usage:     return "Usage"
+        case .settings:  return "Settings"
+        }
+    }
+
+    /// The subtitle beside each page title — what this page answers.
+    var pageSubtitle: String {
+        switch self {
+        case .projects:  return "The folders you work in"
+        case .skills:    return "One library, and which providers can see each skill"
+        case .plugins:   return "Bundles, expanded so you know what lands on disk"
+        case .mcp:       return "Grouped by the provider that launches them, health inline"
+        case .providers: return "Which apps read your folders"
+        case .checks:    return "What is wrong, ranked, with the fix attached to each line"
+        case .usage:     return "Read from files on this Mac · quota first, cost second"
+        case .settings:  return "Paths and homes shown with the provider they belong to"
+        }
+    }
+
+    var footerHints: [(key: String, label: String)] {
+        switch self {
+        case .projects:  return [("↑↓", "move"), ("⏎", "open"), ("T", "track"), ("⌘K", "commands")]
+        case .skills:    return [("↑↓", "move"), ("I", "install"), ("E", "edit"), ("⌘⌫", "remove")]
+        case .plugins:   return [("↑↓", "move"), ("→", "expand"), ("I", "install")]
+        case .mcp:       return [("↑↓", "move"), ("V", "verify"), ("E", "edit"), ("C", "copy to another provider")]
+        case .providers: return [("⌘K", "commands"), ("⏎", "manage provider")]
+        case .checks:    return [("↑↓", "move"), ("F", "fix"), ("D", "diff"), ("⌘R", "rescan")]
+        case .usage:     return [("⌘R", "refresh"), ("", "updated every 2 minutes")]
+        case .settings:  return [("⌘,", "settings"), ("⌘Q", "quit")]
+        }
+    }
+}
 
 struct ContentView: View {
     @EnvironmentObject var projectStore: ProjectStore
     @EnvironmentObject var skillStore:   SkillStore
     @EnvironmentObject var mcpStore:     MCPStore
+
     private let showsExpandButton: Bool
-    @State private var tab: AppTab = .projects
+
+    @State private var destination: HubDestination = .projects
+    @State private var railSearch: String = ""
+    @State private var usagePercent: Int? = nil
     @StateObject private var pluginInventoryStore = PluginInventoryStore()
+    @StateObject private var compatStore = CompatibilityStore()
 
     init(showsExpandButton: Bool = true) {
         self.showsExpandButton = showsExpandButton
     }
-
-    private enum AppTab: Int, CaseIterable, Identifiable, Hashable {
-        case projects
-        case providers
-        case skills
-        case plugins
-        case mcp
-        case compat
-        case usage
-        case settings
-
-        var id: Int { rawValue }
-
-        var title: String {
-            switch self {
-            case .projects: return "Projects"
-            case .providers: return "Providers"
-            case .skills: return "Skills"
-            case .plugins: return "Plugins"
-            case .mcp: return "MCP"
-            case .compat: return "Compat"
-            case .usage: return "Usage"
-            case .settings: return "Settings"
-            }
-        }
-
-        var sidebarDetail: String {
-            switch self {
-            case .projects: return "Folders and worktrees"
-            case .providers: return "Apps, files, and controls"
-            case .skills: return "Skill availability"
-            case .plugins: return "Bundles and components"
-            case .mcp: return "Servers and tools"
-            case .compat: return "Scan and verify"
-            case .usage: return "Local tokens, cost, and limits"
-            case .settings: return "Preferences"
-            }
-        }
-
-        var icon: String {
-            switch self {
-            case .projects: return "folder.fill"
-            case .providers: return "square.grid.2x2.fill"
-            case .skills: return "book.closed.fill"
-            case .plugins: return "puzzlepiece.extension.fill"
-            case .mcp: return "server.rack"
-            case .compat: return "checklist.checked"
-            case .usage: return "chart.bar.fill"
-            case .settings: return "gearshape.fill"
-            }
-        }
-    }
-
-    static let headerGrad = LinearGradient(
-        colors: [
-            Color(red: 0.08, green: 0.10, blue: 0.18),
-            Color(red: 0.14, green: 0.18, blue: 0.30),
-        ],
-        startPoint: .topLeading,
-        endPoint:   .bottomTrailing
-    )
 
     var body: some View {
         Group {
@@ -84,121 +85,231 @@ struct ContentView: View {
                 desktopShell
             }
         }
-        .background(Color(NSColor.windowBackgroundColor))
+        .background(HubTheme.bg)
+        .onAppear {
+            compatStore.restore(projectRoot: nil)
+            loadUsage()
+        }
+        .onReceive(Timer.publish(every: 120, on: .main, in: .common).autoconnect()) { _ in
+            loadUsage()
+        }
     }
 
-    // MARK: - Desktop shell
+    // MARK: - Desktop shell (§5.1)
 
     private var desktopShell: some View {
-        NavigationSplitView {
-            List(selection: $tab) {
-                Section {
-                    ForEach(AppTab.allCases) { item in
-                        Label(item.title, systemImage: item.icon)
-                            .tag(item)
-                    }
+        HStack(spacing: 0) {
+            rail
+            Rectangle().fill(HubTheme.line).frame(width: 1)
+            VStack(spacing: 0) {
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                FooterHintBar(hints: destination.footerHints)
+            }
+            .background(HubTheme.bg)
+        }
+        .frame(
+            minWidth: HubTheme.minWindowWidth,
+            idealWidth: HubTheme.idealWindowWidth,
+            minHeight: HubTheme.minWindowHeight,
+            idealHeight: HubTheme.idealWindowHeight
+        )
+    }
+
+    // MARK: - Rail (§6)
+
+    private var rail: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            railBrand
+            HubSearchField(text: $railSearch)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 14)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    railGroup(
+                        "Workspace",
+                        caption: "The folders you work in",
+                        items: [.projects]
+                    )
+                    railGroup(
+                        "Capabilities",
+                        caption: "What your agents can do",
+                        items: [.skills, .plugins, .mcp, .providers]
+                    )
+                    railGroup(
+                        "Health",
+                        caption: "Is anything wrong, and what it costs",
+                        items: [.checks, .usage]
+                    )
+                }
+                .padding(.horizontal, 12)
+            }
+
+            Spacer(minLength: 8)
+
+            Rectangle().fill(HubTheme.line).frame(height: 1)
+            navRow(.settings)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+        }
+        .frame(width: HubTheme.railWidth)
+        .background(HubTheme.panelBg)
+    }
+
+    private var railBrand: some View {
+        HStack(spacing: 9) {
+            ZStack {
+                RoundedRectangle(cornerRadius: HubTheme.Radius.tileLarge)
+                    .fill(HubTheme.accentBg)
+                Text("PH")
+                    .font(HubFont.mono(9, .bold))
+                    .foregroundStyle(HubTheme.accent)
+            }
+            .frame(width: 22, height: 22)
+
+            Text("Project Hub")
+                .font(HubFont.sans(13, .semibold))
+                .foregroundStyle(HubTheme.textStrong)
+
+            Spacer(minLength: 4)
+
+            HubIconButton(
+                systemImage: "arrow.clockwise",
+                help: "Rescan",
+                isActive: projectStore.isScanning,
+                spinning: projectStore.isScanning,
+                action: refreshWorkspace
+            )
+            moreMenu
+        }
+        .padding(.horizontal, 12)
+        .frame(height: HubTheme.toolbarHeight)
+    }
+
+    private func railGroup(_ title: String, caption: String, items: [HubDestination]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).groupHeadingStyle(HubTheme.headingText)
+                // These captions are the point of the redesign — do not dim further.
+                Text(caption)
+                    .font(HubFont.railCaption)
+                    .foregroundStyle(HubTheme.textDim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 8)
+
+            VStack(spacing: 2) {
+                ForEach(items) { item in
+                    navRow(item)
                 }
             }
-            .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 176, ideal: 200, max: 240)
-        } detail: {
-            VStack(spacing: 0) {
-                desktopToolbar
-                Divider()
-                content
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(HubTheme.page)
-            }
         }
-        .frame(minWidth: 900, minHeight: 620)
     }
 
-    private var desktopToolbar: some View {
-        HStack(alignment: .center, spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(tab.title)
-                    .font(.system(size: 20, weight: .semibold))
-                Text(toolbarDetail(for: tab))
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
+    @ViewBuilder
+    private func navRow(_ item: HubDestination) -> some View {
+        let selected = destination == item
+        Button {
+            destination = item
+        } label: {
+            HStack(spacing: 8) {
+                Text(item.title)
+                    .font(selected ? HubFont.navItemSel : HubFont.navItem)
+                    .foregroundStyle(selected ? HubTheme.accent : HubTheme.textMid)
+                Spacer(minLength: 8)
+                trailingCount(for: item)
             }
-
-            Spacer(minLength: 16)
-
-            toolbarPill(value: "\(projectStore.projects.count + projectStore.discovered.count)",
-                        label: "projects",
-                        icon: "folder")
-
-            if mcpStore.serverCount > 0 {
-                toolbarPill(value: "\(mcpStore.serverCount)",
-                            label: "MCP",
-                            icon: "server.rack")
+            .padding(.horizontal, 8)
+            .frame(height: HubTheme.navRowHeight)
+            .background(selected ? HubTheme.accentBg : .clear)
+            .clipShape(RoundedRectangle(cornerRadius: HubTheme.Radius.control))
+            .overlay(alignment: .leading) {
+                if selected {
+                    Rectangle()
+                        .fill(HubTheme.accent)
+                        .frame(width: 2)
+                        .padding(.vertical, 6)
+                }
             }
-
-            Button(action: refreshWorkspace) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(projectStore.isScanning ? .accentColor : .secondary)
-                    .frame(width: 28, height: 28)
-                    .rotationEffect(.degrees(projectStore.isScanning ? 360 : 0))
-                    .animation(
-                        projectStore.isScanning
-                            ? .linear(duration: 0.8).repeatForever(autoreverses: false)
-                            : .default,
-                        value: projectStore.isScanning
-                    )
-            }
-            .buttonStyle(.plain)
-            .help("Refresh")
-
-            moreMenu(foreground: .secondary)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
-        .background(HubTheme.page)
+        .buttonStyle(.plain)
+        .animation(HubTheme.selectionAnimation, value: selected)
     }
 
-    private func toolbarDetail(for item: AppTab) -> String {
+    /// Every nav row carries a trailing count in mono 10. Checks carries a
+    /// bad-tinted capsule badge when non-zero, a plain count when zero.
+    @ViewBuilder
+    private func trailingCount(for item: HubDestination) -> some View {
+        switch item {
+        case .checks:
+            let failing = failingCheckCount
+            if failing > 0 {
+                Text("\(failing)")
+                    .font(HubFont.mono(10, .medium))
+                    .foregroundStyle(HubTheme.bad)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(HubTheme.warnBg)
+                    .clipShape(Capsule())
+            } else if let total = checkTotalCount {
+                countLabel("\(total)")
+            }
+        case .usage:
+            if let usagePercent {
+                countLabel("\(usagePercent)%")
+            }
+        case .settings:
+            EmptyView()
+        default:
+            if let value = count(for: item) {
+                countLabel("\(value)")
+            }
+        }
+    }
+
+    private func countLabel(_ text: String) -> some View {
+        Text(text)
+            .font(HubFont.mono(10))
+            .foregroundStyle(HubTheme.textFaint)
+    }
+
+    private func count(for item: HubDestination) -> Int? {
         switch item {
         case .projects:
-            let total = projectStore.projects.count + projectStore.discovered.count
-            let hidden = projectStore.hiddenWorktrees.count
-            if hidden == 0 {
-                return "\(total) project\(total == 1 ? "" : "s")"
-            }
-            return "\(total) project\(total == 1 ? "" : "s") · \(hidden) worktree\(hidden == 1 ? "" : "s") hidden"
-        case .providers:
-            return "Claude, Codex, Cursor, VS Code, Antigravity, OpenCode, Zed, Pi, Command Code, Grok"
+            return projectStore.projects.count + projectStore.discovered.count
         case .skills:
-            let count = SkillStore.deduplicatedGlobalSkills(skillStore.globalSkills).count
-            return "\(count) unique skill\(count == 1 ? "" : "s")"
+            return SkillStore.deduplicatedGlobalSkills(skillStore.globalSkills).count
         case .plugins:
-            return "Claude and Codex plugin bundles"
+            guard let report = pluginInventoryStore.report(for: "global") else { return nil }
+            return PluginInventoryGroup.groups(from: report.plugins).count
         case .mcp:
-            return "\(mcpStore.serverCount) server\(mcpStore.serverCount == 1 ? "" : "s") across \(mcpStore.detectedTools.count) tool\(mcpStore.detectedTools.count == 1 ? "" : "s")"
-        case .compat:
-            return "Local compatibility, plugin, auth, and settings checks"
-        case .usage:
-            return "Quota first, estimated spend second"
-        case .settings:
-            return "Project Hub preferences and local support paths"
+            return mcpStore.serverCount
+        case .providers:
+            return ProviderCatalog.specs().count
+        default:
+            return nil
         }
     }
 
-    private func toolbarPill(value: String, label: String, icon: String) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.system(size: 10, weight: .medium))
-            Text("\(value) \(label)")
-                .font(.system(size: 11, weight: .medium))
+    private var failingCheckCount: Int {
+        compatStore.result?.issues.filter { $0.severity >= .error }.count ?? 0
+    }
+
+    private var checkTotalCount: Int? {
+        compatStore.result?.issues.count
+    }
+
+    private func loadUsage() {
+        Task.detached(priority: .utility) {
+            let cards = UsageReader.summarize()
+            let peak = cards
+                .flatMap(\.windows)
+                .map { Int($0.usedPercent.rounded()) }
+                .max()
+            await MainActor.run { usagePercent = peak }
         }
-        .foregroundColor(.secondary)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background(Color(NSColor.controlBackgroundColor))
-        .clipShape(Capsule())
-        .overlay(Capsule().stroke(Color(NSColor.separatorColor).opacity(0.35), lineWidth: 0.5))
     }
 
     private func refreshWorkspace() {
@@ -207,143 +318,97 @@ struct ContentView: View {
         mcpStore.refresh()
     }
 
-    // MARK: - Compact shell
+    // MARK: - Compact shell (menu bar panel)
 
     private var compactShell: some View {
         VStack(spacing: 0) {
-            header
-            Divider()
-            tabBar
-            Divider()
+            compactHeader
+            Rectangle().fill(HubTheme.line).frame(height: 1)
             content
+            FooterHintBar(hints: destination.footerHints)
         }
         .frame(minWidth: 480)
+        .background(HubTheme.bg)
     }
 
-    // MARK: - Header
-
-    private var header: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "square.stack.3d.up.fill")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.accentColor)
-                .frame(width: 26, height: 26)
-                .background(Color.accentColor.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-
-            Text("Project Hub")
-                .font(.system(size: 14, weight: .semibold))
-
-            Spacer()
-
-            let total = projectStore.projects.count + projectStore.discovered.count
-            Text("\(total) projects")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-
-            Button(action: {
-                projectStore.scan()
-                skillStore.refresh()
-            }) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.secondary)
+    private var compactHeader: some View {
+        HStack(spacing: 9) {
+            ZStack {
+                RoundedRectangle(cornerRadius: HubTheme.Radius.tileLarge)
+                    .fill(HubTheme.accentBg)
+                Text("PH")
+                    .font(HubFont.mono(9, .bold))
+                    .foregroundStyle(HubTheme.accent)
             }
-            .buttonStyle(.plain)
-            .help("Refresh")
+            .frame(width: 22, height: 22)
+
+            Menu {
+                Section("Workspace") {
+                    compactMenuItem(.projects)
+                }
+                Section("Capabilities") {
+                    compactMenuItem(.skills)
+                    compactMenuItem(.plugins)
+                    compactMenuItem(.mcp)
+                    compactMenuItem(.providers)
+                }
+                Section("Health") {
+                    compactMenuItem(.checks)
+                    compactMenuItem(.usage)
+                }
+                Divider()
+                compactMenuItem(.settings)
+            } label: {
+                Text(destination.title)
+                    .font(HubFont.sans(13, .semibold))
+                    .foregroundStyle(HubTheme.textStrong)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+
+            Spacer(minLength: 8)
+
+            HubIconButton(
+                systemImage: "arrow.clockwise",
+                help: "Rescan",
+                isActive: projectStore.isScanning,
+                spinning: projectStore.isScanning,
+                action: refreshWorkspace
+            )
 
             if showsExpandButton {
-                Button(action: {
+                HubIconButton(systemImage: "arrow.up.left.and.arrow.down.right", help: "Expand to window") {
                     NotificationCenter.default.post(name: .projecthubExpandWindow, object: nil)
-                }) {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.secondary)
                 }
-                .buttonStyle(.plain)
-                .help("Expand to window")
             }
 
-            moreMenu(foreground: .secondary)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity)
-        .background(HubTheme.page)
-    }
-
-    private func statPill(value: String, label: String, icon: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 9, weight: .medium))
-            Text("\(value) \(label)")
-                .font(.system(size: 11, weight: .medium))
-        }
-        .foregroundColor(.white.opacity(0.88))
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background(Color.white.opacity(0.14))
-        .clipShape(Capsule())
-    }
-
-    // MARK: - Tab bar
-
-    private var tabBar: some View {
-        HStack(spacing: 5) {
-            tabButton(title: "Projects",  icon: "folder.fill",               tag: .projects)
-            tabButton(title: "Providers", icon: "square.grid.2x2.fill",     tag: .providers)
-            tabButton(title: "Skills",    icon: "book.closed.fill",         tag: .skills)
-            tabButton(title: "Plugins",  icon: "puzzlepiece.extension.fill", tag: .plugins)
-            tabButton(title: "MCP",      icon: "server.rack",              tag: .mcp)
-            tabButton(title: "Compat",   icon: "checklist.checked",        tag: .compat)
-            tabButton(title: "Usage",    icon: "chart.bar.fill",           tag: .usage)
-            tabButton(title: "Settings", icon: "gearshape.fill",           tag: .settings)
+            moreMenu
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .frame(height: HubTheme.toolbarHeight)
+        .background(HubTheme.panelBg)
     }
 
-    private func tabButton(title: String, icon: String, tag: AppTab) -> some View {
-        let active = tab == tag
-        return Button(action: { tab = tag }) {
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 10, weight: .semibold))
-                Text(title)
-                    .font(.system(size: 10, weight: .semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-            }
-            .foregroundColor(active ? .accentColor : .secondary)
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 7)
-            .background(active ? Color.accentColor.opacity(0.12) : Color(NSColor.controlBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(HubTheme.hairline, lineWidth: 0.5)
-            )
-        }
-        .buttonStyle(.plain)
+    private func compactMenuItem(_ item: HubDestination) -> some View {
+        Button(item.title) { destination = item }
     }
 
-    // MARK: - Tab content
+    // MARK: - Content
 
     @ViewBuilder
     private var content: some View {
-        switch tab {
+        switch destination {
         case .projects:
             ProjectsView(presentation: showsExpandButton ? .compact : .desktop)
-        case .providers:
-            ProvidersView()
         case .skills:
             GlobalSkillsView()
         case .plugins:
             PluginsView(store: pluginInventoryStore)
         case .mcp:
             GlobalMCPView()
-        case .compat:
+        case .providers:
+            ProvidersView()
+        case .checks:
             CompatibilityView()
         case .usage:
             UsageView()
@@ -352,7 +417,7 @@ struct ContentView: View {
         }
     }
 
-    private func moreMenu(foreground: Color) -> some View {
+    private var moreMenu: some View {
         Menu {
             Toggle(isOn: Binding(
                 get: { AppActions.launchAtLoginEnabled },
@@ -373,9 +438,9 @@ struct ContentView: View {
             }
         } label: {
             Image(systemName: "ellipsis.circle")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(foreground)
-                .frame(width: 28, height: 28)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(HubTheme.textMid)
+                .frame(width: HubTheme.buttonHeight, height: HubTheme.buttonHeight)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)

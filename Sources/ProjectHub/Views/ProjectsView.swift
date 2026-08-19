@@ -89,10 +89,10 @@ struct ProjectsView: View {
                     Text("Add folder")
                         .font(.system(size: 12, weight: .semibold))
                 }
-                .foregroundColor(.white)
+                .foregroundColor(HubTheme.onAccent)
                 .padding(.horizontal, 11)
                 .padding(.vertical, 6)
-                .background(ContentView.headerGrad)
+                .background(HubTheme.accent)
                 .clipShape(RoundedRectangle(cornerRadius: 7))
             }
             .buttonStyle(.plain)
@@ -149,96 +149,256 @@ struct ProjectsView: View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
                 desktopListHeader
-                Divider()
                 desktopList
             }
-            .frame(minWidth: 360, idealWidth: 430, maxWidth: 520)
+            .frame(minWidth: 380, idealWidth: 460, maxWidth: .infinity)
 
-            Divider()
+            Rectangle().fill(HubTheme.line).frame(width: 1)
 
             desktopInspector
         }
     }
 
     private var desktopListHeader: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Project folders")
-                    .font(.system(size: 13, weight: .semibold))
-                Text(projectListSummary)
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            Button(action: { projects.scan() }) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(projects.isScanning ? .accentColor : .secondary)
-                    .frame(width: 26, height: 26)
-            }
-            .buttonStyle(.plain)
+        HubPageHeader(title: "Projects", subtitle: projectListSummary) {
+            HubIconButton(
+                systemImage: "arrow.clockwise",
+                help: "Re-scan for projects",
+                isActive: projects.isScanning,
+                spinning: projects.isScanning
+            ) { projects.scan() }
             .disabled(projects.isScanning)
-            .help("Re-scan for projects")
 
-            Button(action: addFolder) {
-                Label("Add", systemImage: "plus")
-                    .font(.system(size: 12, weight: .semibold))
-                    .labelStyle(.titleAndIcon)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color.accentColor.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 7))
-            }
-            .buttonStyle(.plain)
-            .help("Add a project folder")
+            HubButton(title: "Add folder", kind: .primary, action: addFolder)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+    }
+
+    // MARK: - Attention strip (§7.1)
+    //
+    // Anything broken surfaces above the list it belongs to, with the fix
+    // attached to the line. An item with no inline action belongs in Checks.
+
+    private var attentionItems: [AttentionItem] {
+        projects.projects.filter { !$0.exists }.map { project in
+            AttentionItem(
+                id: project.id.uuidString,
+                subject: project.displayName,
+                problem: "folder no longer exists on disk",
+                evidence: shortPath(project.path),
+                dismissTitle: "Remove",
+                dismiss: { projects.remove(id: project.id) },
+                fixTitle: "Locate…",
+                fix: {
+                    if let replacement = projects.pickFolder() {
+                        projects.remove(id: project.id)
+                        _ = projects.add(path: replacement, displayName: project.displayName)
+                    }
+                }
+            )
+        }
     }
 
     private var desktopList: some View {
-        ScrollView {
-            VStack(spacing: 8) {
-                ForEach(projects.projects) { project in
-                    projectRow(for: project)
-                }
-                if !projects.discovered.isEmpty {
-                    discoveredSectionHeader
-                    ForEach(projects.discovered) { disc in
-                        discoveredRow(for: disc)
+        let tracked = projects.projects
+        return ScrollView {
+            VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
+                AttentionStrip(items: attentionItems)
+                    .padding(.horizontal, HubTheme.contentPadding)
+                    .padding(.top, HubTheme.contentPadding)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HubSectionHeading("Tracked", count: tracked.count)
+                        .padding(.horizontal, HubTheme.contentPadding)
+                    VStack(spacing: 0) {
+                        ForEach(Array(tracked.enumerated()), id: \.element.id) { index, project in
+                            if index > 0 { HubRowSeparator() }
+                            projectRow(for: project)
+                        }
                     }
                 }
+
+                if !projects.discovered.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HubSectionHeading(title: "Found on this Mac", count: projects.discovered.count) {
+                            HubButton(title: "track all", kind: .accentInline) {
+                                for disc in projects.discovered { _ = projects.addDiscovered(disc) }
+                            }
+                        }
+                        .padding(.horizontal, HubTheme.contentPadding)
+                        VStack(spacing: 0) {
+                            ForEach(Array(projects.discovered.enumerated()), id: \.element.id) { index, disc in
+                                if index > 0 { HubRowSeparator() }
+                                discoveredRow(for: disc)
+                            }
+                        }
+                    }
+                }
+
                 if !projects.hiddenWorktrees.isEmpty {
-                    worktreesDisclosure
-                    if showWorktrees {
-                        ForEach(projects.hiddenWorktrees) { disc in
-                            worktreeRow(for: disc)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Text("\(projects.hiddenWorktrees.count) related worktree\(projects.hiddenWorktrees.count == 1 ? "" : "s") hidden")
+                                .font(HubFont.machine)
+                                .foregroundStyle(HubTheme.textFaint)
+                            HubButton(title: showWorktrees ? "hide" : "show", kind: .inlineAction) {
+                                withAnimation(HubTheme.disclosureAnimation) { showWorktrees.toggle() }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, HubTheme.contentPadding)
+
+                        if showWorktrees {
+                            VStack(spacing: 0) {
+                                ForEach(Array(projects.hiddenWorktrees.enumerated()), id: \.element.id) { index, disc in
+                                    if index > 0 { HubRowSeparator() }
+                                    worktreeRow(for: disc)
+                                }
+                            }
                         }
                     }
                 }
             }
-            .padding(14)
+            .padding(.bottom, HubTheme.contentPadding)
         }
-        .background(Color(NSColor.windowBackgroundColor))
+        .background(HubTheme.bg)
     }
+
+    // MARK: - Inspector (§5.1 — 328pt on Projects)
 
     private var desktopInspector: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                overviewPanel
-                sourcePanel
+            VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
+                if let project = selection ?? projects.projects.first {
+                    projectInspector(project)
+                } else {
+                    overviewPanel
+                    sourcePanel
+                }
                 if !projects.hiddenWorktrees.isEmpty {
                     worktreePanel
                 }
             }
-            .padding(20)
+            .padding(HubTheme.contentPadding)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.25))
+        .frame(width: HubTheme.inspectorWidth)
+        .background(HubTheme.panelBg)
+    }
+
+    /// Action-led: what you came here to do sits at the top, the inventory of
+    /// what the folder can do sits under it, and the tools reading it last.
+    private func projectInspector(_ project: Project) -> some View {
+        VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Text(project.displayName)
+                        .font(HubFont.sans(13, .semibold))
+                        .foregroundStyle(HubTheme.textStrong)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Menu {
+                        Button("Reveal in Finder") { revealInFinder(project) }
+                        Button("Rename…") { beginRename(project) }
+                        Divider()
+                        Button(role: .destructive) { projects.remove(id: project.id) } label: {
+                            Text("Remove from list")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(HubTheme.textMid)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                }
+                Text(shortPath(project.path))
+                    .font(HubFont.machine)
+                    .foregroundStyle(HubTheme.textDim)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                HubButton(title: "Open project", kind: .primary) { open(project) }
+                    .frame(maxWidth: .infinity)
+                HStack(spacing: 6) {
+                    HubButton(title: "Reveal in Finder", kind: .secondary) { revealInFinder(project) }
+                    Spacer(minLength: 0)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HubSectionHeading("What this project can do")
+                VStack(spacing: 0) {
+                    let facts = ProjectFacts(path: project.path)
+                    inspectorRow("Skills",        value: facts.skills == 0 ? nil : "\(facts.skills) active")
+                    HubRowSeparator()
+                    inspectorRow("MCP servers",   value: facts.mcpServers == 0 ? nil : "\(facts.mcpServers) declared")
+                    HubRowSeparator()
+                    inspectorRow("Sub-agents",    value: facts.agents == 0 ? nil : "\(facts.agents)")
+                    HubRowSeparator()
+                    inspectorRow("Rules & hooks", value: facts.rulesAndHooks)
+                    HubRowSeparator()
+                    inspectorRow("CLAUDE.md",     value: facts.claudeMdSize)
+                }
+                .hubCard()
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HubSectionHeading("Tools reading this folder")
+                let tools = projects.detectedToolIDs(for: project)
+                VStack(spacing: 0) {
+                    if tools.isEmpty {
+                        HStack {
+                            Text("Nothing configured here yet")
+                                .font(HubFont.secondary)
+                                .foregroundStyle(HubTheme.textFaint)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, HubTheme.cardPadding)
+                        .frame(height: HubTheme.tableRowHeight)
+                    } else {
+                        ForEach(Array(tools.enumerated()), id: \.element) { index, toolID in
+                            if index > 0 { HubRowSeparator() }
+                            HStack(spacing: 10) {
+                                ProviderTile(toolID: toolID)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(ToolPalette.label(for: toolID))
+                                        .font(HubFont.rowPrimary)
+                                        .foregroundStyle(HubTheme.text)
+                                    Text(ProjectFacts.configFiles(for: toolID, at: project.path))
+                                        .font(HubFont.machine)
+                                        .foregroundStyle(HubTheme.textDim)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, HubTheme.cardPadding)
+                            .frame(height: HubTheme.listRowHeight)
+                        }
+                    }
+                }
+                .hubCard()
+            }
+        }
+    }
+
+    private func inspectorRow(_ title: String, value: String?) -> some View {
+        HStack(spacing: 10) {
+            Text(title)
+                .font(HubFont.rowPrimary)
+                .foregroundStyle(HubTheme.text)
+            Spacer(minLength: 8)
+            if let value {
+                Text(value)
+                    .font(HubFont.machine)
+                    .foregroundStyle(HubTheme.textDim)
+            } else {
+                AbsentValue()
+            }
+        }
+        .padding(.horizontal, HubTheme.cardPadding)
+        .frame(height: 38)
     }
 
     private var overviewPanel: some View {
@@ -261,11 +421,11 @@ struct ProjectsView: View {
             }
         }
         .padding(14)
-        .background(Color(NSColor.windowBackgroundColor))
+        .background(HubTheme.bg)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(NSColor.separatorColor).opacity(0.35), lineWidth: 0.5)
+                .stroke(HubTheme.line.opacity(0.35), lineWidth: 0.5)
         )
     }
 
@@ -281,11 +441,11 @@ struct ProjectsView: View {
             }
         }
         .padding(14)
-        .background(Color(NSColor.windowBackgroundColor))
+        .background(HubTheme.bg)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(NSColor.separatorColor).opacity(0.35), lineWidth: 0.5)
+                .stroke(HubTheme.line.opacity(0.35), lineWidth: 0.5)
         )
     }
 
@@ -309,11 +469,11 @@ struct ProjectsView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
-        .background(Color(NSColor.windowBackgroundColor))
+        .background(HubTheme.bg)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(NSColor.separatorColor).opacity(0.35), lineWidth: 0.5)
+                .stroke(HubTheme.line.opacity(0.35), lineWidth: 0.5)
         )
     }
 
@@ -321,11 +481,11 @@ struct ProjectsView: View {
         VStack(spacing: 14) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.accentColor.opacity(0.12))
+                    .fill(HubTheme.accent.opacity(0.12))
                     .frame(width: 68, height: 68)
                 Image(systemName: "folder.fill.badge.plus")
                     .font(.system(size: 28, weight: .semibold))
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(HubTheme.accent)
             }
             Text("No projects yet")
                 .font(.system(size: 18, weight: .semibold))
@@ -338,7 +498,7 @@ struct ProjectsView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
-                    .background(Color.accentColor.opacity(0.12))
+                    .background(HubTheme.accent.opacity(0.12))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
@@ -372,11 +532,11 @@ struct ProjectsView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(HubTheme.raised)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(NSColor.separatorColor).opacity(0.25), lineWidth: 0.5)
+                .stroke(HubTheme.line.opacity(0.25), lineWidth: 0.5)
         )
     }
 
@@ -447,54 +607,23 @@ struct ProjectsView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.45))
+        .background(HubTheme.raised.opacity(0.45))
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(NSColor.separatorColor).opacity(0.25), lineWidth: 0.5))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(HubTheme.line.opacity(0.25), lineWidth: 0.5))
         .padding(.top, projects.discovered.isEmpty ? 8 : 4)
     }
 
     // MARK: - Discovered row
 
     private func discoveredRow(for disc: DiscoveredProject) -> some View {
-        HStack(alignment: .center, spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(sourceColor(disc.primarySource).opacity(0.10))
-                    .frame(width: 34, height: 34)
-                Image(systemName: sourceIcon(disc.primarySource))
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(sourceColor(disc.primarySource))
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(disc.displayName)
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                Text(shortPath(disc.path))
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                HStack(spacing: 4) {
-                    ForEach(disc.orderedSources, id: \.self) { src in
-                        sourceBadge(src)
-                    }
-                    if disc.hasGit { gitBadge }
-                }
-                .padding(.top, 2)
-            }
-            Spacer()
-            Button(action: { projects.addDiscovered(disc) }) {
-                Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 18))
-                    .foregroundColor(.accentColor)
-            }
-            .buttonStyle(.plain)
-            .help("Add to my projects")
+        HubListRow(
+            status: .neutral,
+            name: disc.displayName,
+            providers: ProjectStore.detectedTools(at: disc.path, fm: FileManager.default),
+            caption: shortPath(disc.path)
+        ) { _ in
+            HubButton(title: "track", kind: .accentInline) { _ = projects.addDiscovered(disc) }
         }
-        .padding(10)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.6))
-        .clipShape(RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color(NSColor.separatorColor).opacity(0.3), lineWidth: 0.5))
     }
 
     private func worktreeRow(for disc: DiscoveredProject) -> some View {
@@ -537,7 +666,7 @@ struct ProjectsView: View {
             Button(action: { projects.addDiscovered(disc) }) {
                 Image(systemName: "plus.circle.fill")
                     .font(.system(size: 18))
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(HubTheme.accent)
             }
             .buttonStyle(.plain)
             .help("Add this worktree as its own project")
@@ -551,9 +680,9 @@ struct ProjectsView: View {
             .help("Reveal worktree in Finder")
         }
         .padding(10)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.35))
+        .background(HubTheme.raised.opacity(0.35))
         .clipShape(RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color(NSColor.separatorColor).opacity(0.25), lineWidth: 0.5))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(HubTheme.line.opacity(0.25), lineWidth: 0.5))
     }
 
     // MARK: - Added project row
@@ -561,80 +690,64 @@ struct ProjectsView: View {
     private func projectRow(for project: Project) -> some View {
         let missing    = !project.exists
         let isRenaming = renamingID == project.id
+        let selected   = selection?.id == project.id
+        let facts      = missing ? nil : ProjectFacts(path: project.path)
 
-        return Button(action: { open(project) }) {
-            HStack(alignment: .center, spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(missing ? Color.secondary.opacity(0.18) : Color.accentColor.opacity(0.14))
-                        .frame(width: 34, height: 34)
-                    Image(systemName: missing ? "folder.badge.questionmark" : "folder.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(missing ? .secondary : .accentColor)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    if isRenaming {
-                        TextField("Name", text: $draftName, onCommit: { commitRename(project) })
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 12, weight: .semibold))
-                    } else {
-                        Text(project.displayName)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(missing ? .secondary : .primary)
-                            .lineLimit(1)
-                    }
-                    Text(shortPath(project.path))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-
-                    // Tool badges
-                    let tools = projects.detectedToolIDs(for: project)
-                    if !tools.isEmpty {
-                        HStack(spacing: 4) {
-                            ForEach(tools, id: \.self) { tool in
-                                toolBadge(toolID: tool)
-                            }
+        return HubListRow(
+            status: missing ? .neutral : .ok,
+            name: project.displayName,
+            providers: missing ? [] : projects.detectedToolIDs(for: project),
+            caption: missing
+                ? "\(shortPath(project.path)) · missing"
+                : "\(shortPath(project.path)) · \(relativeTime(project.lastOpenedAt))",
+            isSelected: selected,
+            isDimmed: missing
+        ) { active in
+            // Counts and actions share one slot — actions replace counts (§7.2).
+            if active && !missing {
+                HStack(spacing: 6) {
+                    HubButton(title: "open", kind: .inlineAction) { open(project) }
+                    HubButton(title: "finder", kind: .inlineAction) { revealInFinder(project) }
+                    Menu {
+                        Button("Rename…") { beginRename(project) }
+                        Divider()
+                        Button(role: .destructive) { projects.remove(id: project.id) } label: {
+                            Text("Remove from list")
                         }
-                        .padding(.top, 2)
+                    } label: {
+                        Text("···")
+                            .font(HubFont.mono(10))
+                            .foregroundStyle(HubTheme.textMid)
                     }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
                 }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.secondary.opacity(0.6))
-
-                Menu {
-                    Button("Open in Finder") { revealInFinder(project) }
-                    Button("Rename\u{2026}") { beginRename(project) }
-                    Divider()
-                    Button(role: .destructive) {
-                        projects.remove(id: project.id)
-                    } label: { Text("Remove from list") }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 4)
-                        .contentShape(Rectangle())
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
+            } else if let facts {
+                HubRowCounts(counts: [
+                    (facts.skills == 0 ? nil : facts.skills, "skl"),
+                    (facts.mcpServers == 0 ? nil : facts.mcpServers, "mcp"),
+                    (facts.agents == 0 ? nil : facts.agents, "agt"),
+                ])
             }
-            .padding(10)
-            .background(RoundedRectangle(cornerRadius: 9).fill(Color(NSColor.controlBackgroundColor)))
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color(NSColor.separatorColor).opacity(0.4), lineWidth: 0.5))
-            .opacity(missing ? 0.75 : 1)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .disabled(isRenaming)
+        .overlay(alignment: .leading) {
+            if isRenaming {
+                TextField("Name", text: $draftName, onCommit: { commitRename(project) })
+                    .textFieldStyle(.roundedBorder)
+                    .font(HubFont.rowPrimary)
+                    .frame(width: 200)
+                    .padding(.leading, 32)
+            }
+        }
+        .onTapGesture { selection = project }
+        .simultaneousGesture(TapGesture(count: 2).onEnded { open(project) })
+    }
+
+    private func relativeTime(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 
     // MARK: - States
@@ -655,13 +768,13 @@ struct ProjectsView: View {
             ZStack {
                 Circle()
                     .fill(LinearGradient(
-                        colors: [Color.accentColor.opacity(0.14), Color.accentColor.opacity(0.06)],
+                        colors: [HubTheme.accent.opacity(0.14), HubTheme.accent.opacity(0.06)],
                         startPoint: .topLeading, endPoint: .bottomTrailing
                     ))
                     .frame(width: 64, height: 64)
                 Image(systemName: "folder.fill.badge.plus")
                     .font(.system(size: 26))
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(HubTheme.accent)
             }
             Text("No projects yet")
                 .font(.system(size: 14, weight: .semibold))
@@ -676,10 +789,10 @@ struct ProjectsView: View {
                     Text("Add your first project")
                 }
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(HubTheme.onAccent)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
-                .background(ContentView.headerGrad)
+                .background(HubTheme.accent)
                 .clipShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -808,5 +921,102 @@ struct ProjectsView: View {
         let home = NSHomeDirectory()
         if path.hasPrefix(home) { return "~" + path.dropFirst(home.count) }
         return path
+    }
+}
+
+// MARK: - Project facts
+//
+// The counts on a project row and in the inspector. Everything here is a
+// directory listing or a file-size read on the project folder itself — cheap
+// enough to compute per row, and always the truth on disk rather than a cache.
+
+struct ProjectFacts {
+    let skills: Int
+    let mcpServers: Int
+    let agents: Int
+    let rules: Int
+    let hooks: Int
+    let claudeMdBytes: Int?
+
+    init(path: String) {
+        let fm = FileManager.default
+
+        func entries(_ relative: String) -> Int {
+            let dir = (path as NSString).appendingPathComponent(relative)
+            guard let names = try? fm.contentsOfDirectory(atPath: dir) else { return 0 }
+            return names.filter { !$0.hasPrefix(".") }.count
+        }
+
+        func exists(_ relative: String) -> Bool {
+            fm.fileExists(atPath: (path as NSString).appendingPathComponent(relative))
+        }
+
+        skills = entries(".claude/skills") + entries(".agents/skills") + entries(".cursor/skills")
+        agents = entries(".claude/agents") + entries(".agents/agents")
+        hooks  = entries(".claude/hooks")
+        rules  = entries(".cursor/rules")
+
+        var servers = 0
+        for relative in [".mcp.json", ".cursor/mcp.json", ".vscode/mcp.json", ".roo/mcp.json", ".pi/mcp.json"] {
+            let file = (path as NSString).appendingPathComponent(relative)
+            guard let data = fm.contents(atPath: file),
+                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { continue }
+            if let map = root["mcpServers"] as? [String: Any] { servers += map.count }
+            else if let map = root["servers"] as? [String: Any] { servers += map.count }
+        }
+        for relative in [".codex/config.toml", ".grok/config.toml"] where exists(relative) {
+            let file = (path as NSString).appendingPathComponent(relative)
+            if let text = try? String(contentsOfFile: file, encoding: .utf8) {
+                servers += text
+                    .split(separator: "\n")
+                    .filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix("[mcp_servers.") }
+                    .count
+            }
+        }
+        mcpServers = servers
+
+        let claudeMd = (path as NSString).appendingPathComponent("CLAUDE.md")
+        if let attributes = try? fm.attributesOfItem(atPath: claudeMd),
+           let size = attributes[.size] as? Int {
+            claudeMdBytes = size
+        } else {
+            claudeMdBytes = nil
+        }
+    }
+
+    /// "3 · 1" — rules, then hooks. Absent when the folder has neither.
+    var rulesAndHooks: String? {
+        guard rules > 0 || hooks > 0 else { return nil }
+        return "\(rules) · \(hooks)"
+    }
+
+    var claudeMdSize: String? {
+        guard let claudeMdBytes else { return nil }
+        if claudeMdBytes >= 1024 {
+            return String(format: "%.1f KB", Double(claudeMdBytes) / 1024)
+        }
+        return "\(claudeMdBytes) B"
+    }
+
+    /// The config files a given provider actually reads in this folder.
+    static func configFiles(for toolID: String, at path: String) -> String {
+        let fm = FileManager.default
+        let candidates: [String: [String]] = [
+            "claude-code":   [".mcp.json", "CLAUDE.md", ".claude/settings.json"],
+            "codex":         [".codex/config.toml", "AGENTS.md"],
+            "cursor":        [".cursor/mcp.json", ".cursor/rules"],
+            "vscode":        [".vscode/mcp.json"],
+            "roo":           [".roo/mcp.json"],
+            "grok":          [".grok/config.toml"],
+            "opencode":      ["opencode.json", "AGENTS.md"],
+            "antigravity":   [".agents/mcp_config.json"],
+            "pi":            [".pi/mcp.json"],
+            "command-code":  [".mcp.json"],
+        ]
+        let present = (candidates[toolID] ?? []).filter {
+            fm.fileExists(atPath: (path as NSString).appendingPathComponent($0))
+        }
+        return present.isEmpty ? "not configured" : present.joined(separator: " · ")
     }
 }

@@ -117,7 +117,7 @@ struct LiveModeView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(HubTheme.panelBg)
     }
 
     // MARK: - Multi-project picker
