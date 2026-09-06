@@ -2436,7 +2436,7 @@ struct CompatibilityView: View {
         }
     }
 
-    private func fixPlan(for issue: CompatibilityIssue) -> CompatibilityFixPlan? {
+    private func fixPlan(for issue: CompatibilityIssue, matrix: [String: CompatibilityMatrixEntry]? = nil) -> CompatibilityFixPlan? {
         if let plan = claudeApprovalConflictPlan(for: issue) {
             return plan
         }
@@ -2557,7 +2557,7 @@ struct CompatibilityView: View {
 
         guard let report,
               let surfaceID = issue.surfaceID,
-              let surface = report.matrix.first(where: { $0.id == surfaceID }),
+              let surface = matrix?[surfaceID] ?? report.matrix.first(where: { $0.id == surfaceID }),
               let server = matchingServer(for: issue, in: report),
               let target = writerTarget(for: surface, report: report)
         else { return nil }
@@ -6721,11 +6721,19 @@ struct CompatibilityView: View {
         report.matrix.filter { includes(toolID: $0.toolID, scope: $0.scope) }
     }
 
+    private func matrixLookup(_ report: CompatibilityScanResult) -> [String: CompatibilityMatrixEntry] {
+        var lookup: [String: CompatibilityMatrixEntry] = [:]
+        lookup.reserveCapacity(report.matrix.count)
+        for surface in report.matrix { lookup[surface.id] = surface }
+        return lookup
+    }
+
     private func filteredIssues(_ report: CompatibilityScanResult) -> [CompatibilityIssue] {
+        let lookup = matrixLookup(report)
         let filtered = report.issues.filter { issue in
             guard !issueIsSupersededByLiveVerify(issue, report: report) else { return false }
             if let surfaceID = issue.surfaceID,
-               let surface = report.matrix.first(where: { $0.id == surfaceID }) {
+               let surface = lookup[surfaceID] {
                 return includes(toolID: surface.toolID, scope: surface.scope)
             }
             if let toolID = issue.toolID {
@@ -6750,9 +6758,10 @@ struct CompatibilityView: View {
 
         var seen = Set<String>()
         var output: [CompatibilityIssue] = []
+        let lookup = matrixLookup(report)
         for issue in issues {
             guard let surfaceID = issue.surfaceID,
-                  let surface = report.matrix.first(where: { $0.id == surfaceID }),
+                  let surface = lookup[surfaceID],
                   (surface.toolID == .codexCLI || surface.toolID == .codexDesktop),
                   let path = issue.path else {
                 output.append(issue)
@@ -6792,10 +6801,11 @@ struct CompatibilityView: View {
 
     private func manualActions(_ report: CompatibilityScanResult) -> [CompatibilityManualAction] {
         var actions = postFixActions
+        let lookup = matrixLookup(report)
 
         for issue in filteredIssues(report) {
             guard isManualActionIssue(issue) else { continue }
-            guard fixPlan(for: issue) == nil else { continue }
+            guard fixPlan(for: issue, matrix: lookup) == nil else { continue }
             actions.append(CompatibilityManualAction(
                 title: issue.title,
                 detail: issue.detail,
@@ -6828,8 +6838,9 @@ struct CompatibilityView: View {
     }
 
     private func previewableFixes(_ report: CompatibilityScanResult) -> [CompatibilityPreviewableFix] {
-        filteredIssues(report).compactMap { issue in
-            guard let plan = fixPlan(for: issue) else { return nil }
+        let lookup = matrixLookup(report)
+        return filteredIssues(report).compactMap { issue in
+            guard let plan = fixPlan(for: issue, matrix: lookup) else { return nil }
             return CompatibilityPreviewableFix(issue: issue, plan: plan)
         }
     }

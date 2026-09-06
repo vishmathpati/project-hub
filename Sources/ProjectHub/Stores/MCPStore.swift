@@ -55,6 +55,9 @@ final class MCPStore: ObservableObject {
             toolID: toolID,
             configPath: configPath(for: server, tool: tool)
         )
+        if evaluatedHealthReports.count > 500 {
+            evaluatedHealthReports.removeAll(keepingCapacity: true)
+        }
         evaluatedHealthReports[key] = report
         return report
     }

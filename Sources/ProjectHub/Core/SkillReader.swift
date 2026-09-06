@@ -84,9 +84,15 @@ enum SkillReader {
     }
 
     static func parseClaudeMetadata(at skillDirectory: String) -> ClaudeMetadata? {
-        let skillMD = (skillDirectory as NSString).appendingPathComponent("SKILL.md")
-        guard let content = try? String(contentsOfFile: skillMD, encoding: .utf8),
-              let frontmatter = parseFrontmatter(content) else {
+        parseClaudeMetadata(content: nil, fallbackPath: (skillDirectory as NSString).appendingPathComponent("SKILL.md"))
+    }
+
+    static func parseClaudeMetadata(content: String?, fallbackPath: String) -> ClaudeMetadata? {
+        let text: String
+        if let content { text = content }
+        else if let read = try? String(contentsOfFile: fallbackPath, encoding: .utf8) { text = read }
+        else { return nil }
+        guard let frontmatter = parseFrontmatter(text) else {
             return nil
         }
 

@@ -57,6 +57,20 @@ final class SkillInventoryReaderTests: XCTestCase {
     }
 
     @MainActor
+    func testRemoveDeletesCanonicalSkillPath() throws {
+        let root = try makeTempProject()
+        try writeSkill(named: "deploy", under: root.appendingPathComponent(".claude/skills", isDirectory: true))
+
+        try withIsolatedToolHomes(root) {
+            let store = SkillStore()
+            let skill = try XCTUnwrap(store.installedSkills(for: root.path).first { $0.name == "deploy" })
+            store.remove(skill: skill, from: root.path)
+
+            XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(".claude/skills/deploy").path))
+        }
+    }
+
+    @MainActor
     func testRemoveTargetsOnlySelectedOrigin() throws {
         let root = try makeTempProject()
         try writeSkill(named: "deploy", under: root.appendingPathComponent(".claude/skills", isDirectory: true))

@@ -638,13 +638,17 @@ enum CompatibilityScanner {
         }
 
         let claudeMCPPolicy = claudeCodeMCPPolicy(from: matrix)
+        let fileCache = ScanFileCache()
+        var surfaceByID: [String: CompatibilityMatrixEntry] = [:]
+        for surface in matrix { surfaceByID[surface.id] = surface }
         for index in servers.indices {
             let serverIssues = inspectServer(
                 servers[index],
-                surface: matrix.first { $0.id == servers[index].surfaceID },
+                surface: surfaceByID[servers[index].surfaceID],
                 matrix: matrix,
                 claudeMCPPolicy: claudeMCPPolicy,
-                codexProfileSelection: codexProfileSelection
+                codexProfileSelection: codexProfileSelection,
+                cache: fileCache
             )
             servers[index].issueCodes.append(contentsOf: serverIssues.map(\.code))
             servers[index].health = healthState(for: servers[index], issueCodes: servers[index].issueCodes)
@@ -656,7 +660,7 @@ enum CompatibilityScanner {
         issues.append(contentsOf: detectCodexInstructionShadowing(in: matrix))
         issues.append(contentsOf: detectAdjacentProjectMCPConfigs(projectRoot: normalizedRoot))
 
-        let skillRead = readSkills(from: matrix, servers: servers)
+        let skillRead = readSkills(from: matrix, servers: servers, cache: fileCache)
         issues.append(contentsOf: skillRead.issues)
         let skillSupport = skillSupportObservations(from: matrix)
         let pluginRead = readPlugins(
@@ -5380,7 +5384,7 @@ enum CompatibilityScanner {
         }
         let canonicalRoot = canonicalFilePath(projectRoot)
         if let canonicalMatch = projects.first(where: { key, _ in
-            canonicalFilePath(key) == canonicalRoot
+            key == canonicalRoot || canonicalFilePath(key) == canonicalRoot
         })?.value as? [String: Any] {
             return canonicalMatch
         }
@@ -5510,7 +5514,8 @@ enum CompatibilityScanner {
         surface: CompatibilityMatrixEntry?,
         matrix: [CompatibilityMatrixEntry],
         claudeMCPPolicy: ClaudeMCPPolicy,
-        codexProfileSelection: CodexProfileSelection?
+        codexProfileSelection: CodexProfileSelection?,
+        cache: ScanFileCache? = nil
     ) -> [CompatibilityIssue] {
         guard let surface else { return [] }
         var issues: [CompatibilityIssue] = []
@@ -5574,7 +5579,7 @@ enum CompatibilityScanner {
             ))
         }
 
-        guard let config = readServerConfig(server, surface: surface, matrix: matrix) else {
+        guard let config = readServerConfig(server, surface: surface, matrix: matrix, cache: cache) else {
             if !server.disabled {
                 issues.append(issue(.serverHealthUnknown, .warning, surface, "Health unknown", "Project Hub could not re-read \"\(server.name)\" for deeper checks.", nil))
             }
@@ -5626,7 +5631,7 @@ enum CompatibilityScanner {
         if let command = launch.command, !command.isEmpty {
             let missingCommandVars = missingRequiredEnvExpansionNames(in: command)
             let commandInputVariables = inputVariableReferences(in: command)
-            if missingCommandVars.isEmpty, commandInputVariables.isEmpty, !commandExists(expandEnvRefs(command), cwd: resolvedCwd) {
+            if missingCommandVars.isEmpty, commandInputVariables.isEmpty, !cachedCommandExists(expandEnvRefs(command), cwd: resolvedCwd, cache: cache) {
                 if surface.id == "claude-desktop-dxt" {
                     issues.append(issue(.serverRuntimeManaged, .info, surface, "Extension runtime is app-managed", "\"\(server.name)\" launches through \"\(command)\", which may be provided by Claude Desktop's extension runtime rather than Project Hub's shell PATH.", "Verify this extension from Claude Desktop Settings > Extensions."))
                 } else {
@@ -6197,17 +6202,31 @@ enum CompatibilityScanner {
         host?.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
     }
 
+    private final class ScanFileCache {
+        var jsonRoots: [String: [String: Any]] = [:]
+        var tomlServers: [String: [String: [String: Any]]] = [:]
+        var commandExists: [String: Bool] = [:]
+    }
+
+    private static func jsonRoot(at path: String, cache: ScanFileCache?) -> [String: Any]? {
+        if let cache, let cached = cache.jsonRoots[path] { return cached }
+        guard let raw = try? String(contentsOfFile: path, encoding: .utf8),
+              let data = ConfigWriter.stripJsonComments(raw).data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        cache?.jsonRoots[path] = root
+        return root
+    }
+
     private static func readServerConfig(
         _ server: CompatibilityServerObservation,
         surface: CompatibilityMatrixEntry,
-        matrix: [CompatibilityMatrixEntry]? = nil
+        matrix: [CompatibilityMatrixEntry]? = nil,
+        cache: ScanFileCache? = nil
     ) -> [String: Any]? {
         guard let path = surface.path else { return nil }
         switch surface.format {
         case .json, .jsonc:
-            guard let raw = try? String(contentsOfFile: path, encoding: .utf8),
-                  let data = ConfigWriter.stripJsonComments(raw).data(using: .utf8),
-                  var root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+            guard var root = jsonRoot(at: path, cache: cache) else { return nil }
             if isCodexPluginMCPSurface(surface),
                let serverMap = codexPluginMCPServerMap(root),
                let config = serverMap[server.name] {
@@ -6243,7 +6262,7 @@ enum CompatibilityScanner {
                ) {
                 return merged
             }
-            return parseMCPServersTOML((try? String(contentsOfFile: path, encoding: .utf8)) ?? "").servers[server.name]
+            return tomlServerConfig(at: path, serverName: server.name, cache: cache)
         case .directory:
             guard surface.id == "claude-desktop-dxt" else { return nil }
             let extensionDir: String
@@ -6265,6 +6284,14 @@ enum CompatibilityScanner {
         default:
             return nil
         }
+    }
+
+    private static func tomlServerConfig(at path: String, serverName: String, cache: ScanFileCache?) -> [String: Any]? {
+        if let cache, let cached = cache.tomlServers[path] { return cached[serverName] }
+        guard let raw = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+        let servers = parseMCPServersTOML(raw).servers
+        cache?.tomlServers[path] = servers
+        return servers[serverName]
     }
 
     private static func effectiveCodexProjectMCPConfig(
@@ -6318,8 +6345,17 @@ enum CompatibilityScanner {
         for server: CompatibilityServerObservation,
         matrix: [CompatibilityMatrixEntry]
     ) -> ServerEntry? {
-        guard let surface = matrix.first(where: { $0.id == server.surfaceID }),
-              let config = readServerConfig(server, surface: surface, matrix: matrix) else { return nil }
+        guard let surface = matrix.first(where: { $0.id == server.surfaceID }) else { return nil }
+        return healthEntry(for: server, surface: surface, matrix: matrix, cache: nil)
+    }
+
+    private static func healthEntry(
+        for server: CompatibilityServerObservation,
+        surface: CompatibilityMatrixEntry,
+        matrix: [CompatibilityMatrixEntry]? = nil,
+        cache: ScanFileCache? = nil
+    ) -> ServerEntry? {
+        guard let config = readServerConfig(server, surface: surface, matrix: matrix, cache: cache) else { return nil }
         if surface.id == "claude-desktop-dxt" { return nil }
         return serverEntry(from: config, server: server, surface: surface, readOnly: false)
     }
@@ -8792,11 +8828,25 @@ enum CompatibilityScanner {
     ) -> (name: String, value: Set<String>)? {
         for (section, keys) in document.sectionKeys {
             if let project = codexProjectPath(fromSection: section),
-               Project.canonicalize(project) == projectRoot {
+               codexProjectPathMatches(project, projectRoot: projectRoot) {
                 return (section, keys)
             }
         }
         return nil
+    }
+
+    private static func codexProjectPathMatches(_ project: String, projectRoot: String) -> Bool {
+        if project == projectRoot { return true }
+        let expanded = URL(fileURLWithPath: (project as NSString).expandingTildeInPath)
+            .standardizedFileURL
+            .path
+        if expanded == projectRoot { return true }
+        guard expanded != project else { return false }
+        let resolved = URL(fileURLWithPath: expanded)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
+        return resolved == projectRoot
     }
 
     private static func codexProjectPath(fromSection section: String) -> String? {
@@ -11593,7 +11643,7 @@ enum CompatibilityScanner {
         var skillPermissionRules: [String: [String]]
     }
 
-    private static func readSkills(from matrix: [CompatibilityMatrixEntry], servers: [CompatibilityServerObservation]) -> SkillRead {
+    private static func readSkills(from matrix: [CompatibilityMatrixEntry], servers: [CompatibilityServerObservation], cache: ScanFileCache? = nil) -> SkillRead {
         var observations: [CompatibilitySkillObservation] = []
         var issues: [CompatibilityIssue] = []
         let skillSurfaces = matrix.filter { $0.kind == .skills }
@@ -11602,9 +11652,12 @@ enum CompatibilityScanner {
         let overrideBySkillMD = overrides.reduce(into: [String: SkillOverride]()) { partial, override in
             partial["\(override.toolID.rawValue):\(canonicalFilePath(override.path))"] = override
         }
+        var surfaceByID: [String: CompatibilityMatrixEntry] = [:]
+        for surface in matrix { surfaceByID[surface.id] = surface }
         let availableMCPServersByTool = servers.reduce(into: [CompatibilityToolID: [ServerEntry]]()) { partial, server in
             guard serverCanSatisfySkillDependency(server),
-                  let entry = healthEntry(for: server, matrix: matrix),
+                  let surface = surfaceByID[server.surfaceID],
+                  let entry = healthEntry(for: server, surface: surface, matrix: matrix, cache: cache),
                   !entry.isDisabled else { return }
             partial[server.toolID, default: []].append(entry)
         }
@@ -11649,13 +11702,15 @@ enum CompatibilityScanner {
                 } else {
                     name = bareName
                 }
-                let version = skillVersion(at: skillMD)
-                let override = overrideBySkillMD["\(surface.toolID.rawValue):\(canonicalFilePath(skillMD))"]
+                let skillContent = parsed == nil ? (try? String(contentsOfFile: skillMD, encoding: .utf8)) : nil
+                let version = skillVersion(at: skillMD, content: skillContent)
+                let openAIMetadataPath = (dir as NSString).appendingPathComponent("agents/openai.yaml")
+                let metadata = FileManager.default.fileExists(atPath: openAIMetadataPath) ? SkillReader.parseOpenAIMetadata(at: dir) : nil
+                let claudeMetadata = SkillReader.parseClaudeMetadata(content: skillContent, fallbackPath: skillMD)
                 let claudeOverride = surface.toolID == .claudeCode
                     ? claudePolicies.overridesByName[name] ?? claudePolicies.overridesByName[bareName]
                     : nil
-                let metadata = SkillReader.parseOpenAIMetadata(at: dir)
-                let claudeMetadata = SkillReader.parseClaudeMetadata(at: dir)
+                let override = overrideBySkillMD["\(surface.toolID.rawValue):\(canonicalFilePath(skillMD))"]
                 let mcpDependencySpecs = metadata?.toolDependencies
                     .filter { $0.type.lowercased() == "mcp" }
                     ?? []
@@ -12044,9 +12099,12 @@ enum CompatibilityScanner {
         }
     }
 
-    private static func skillVersion(at skillMD: String) -> String? {
-        guard let content = try? String(contentsOfFile: skillMD, encoding: .utf8),
-              let frontmatter = SkillReader.parseFrontmatter(content) else {
+    private static func skillVersion(at skillMD: String, content: String? = nil) -> String? {
+        let text: String
+        if let content { text = content }
+        else if let read = try? String(contentsOfFile: skillMD, encoding: .utf8) { text = read }
+        else { return nil }
+        guard let frontmatter = SkillReader.parseFrontmatter(text) else {
             return nil
         }
         for key in ["version", "skill_version", "skillVersion"] {
@@ -12189,6 +12247,25 @@ enum CompatibilityScanner {
             fixHint: fixHint,
             metadata: metadata
         )
+    }
+
+    private static var commandLookupCache: [String: Bool] = [:]
+    private static let commandLookupCacheQueue = DispatchQueue(label: "projecthub.command-lookup-cache")
+
+    private static func cachedCommandExists(_ command: String, cwd: String? = nil, cache: ScanFileCache? = nil) -> Bool {
+        if let cache, let cached = cache.commandExists[command] { return cached }
+        let found = commandExists(command, cwd: cwd)
+        if let cache {
+            if cache.commandExists.count > 256 { cache.commandExists.removeAll(keepingCapacity: true) }
+            cache.commandExists[command] = found
+            return found
+        }
+        return commandLookupCacheQueue.sync {
+            if let cached = commandLookupCache[command] { return cached }
+            if commandLookupCache.count > 256 { commandLookupCache.removeAll(keepingCapacity: true) }
+            commandLookupCache[command] = found
+            return found
+        }
     }
 
     private static func commandExists(_ command: String, cwd: String? = nil) -> Bool {

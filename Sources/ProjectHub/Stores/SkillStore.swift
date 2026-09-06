@@ -339,12 +339,16 @@ final class SkillStore: ObservableObject {
     }
 
     /// Remove only the selected installed skill origin.
+    /// Directory-traversal guard: the origin must resolve inside the project
+    /// root, and the final removal path must resolve to the origin itself so a
+    /// symlinked skill directory can never escape the project on delete.
     func remove(skill: InstalledSkill, from projectPath: String) {
         guard skill.canRemove else { return }
         let canonicalProject = Project.canonicalize(ProjectRootDetector.detect(from: projectPath))
         let canonicalSkill = canonicalFilePath(skill.path)
         guard canonicalSkill == canonicalProject || canonicalSkill.hasPrefix(canonicalProject + "/") else { return }
-        try? FileManager.default.removeItem(atPath: skill.path)
+        guard canonicalFilePath((skill.path as NSString).appendingPathComponent("SKILL.md")).hasPrefix(canonicalSkill + "/") else { return }
+        try? FileManager.default.removeItem(atPath: canonicalSkill)
         invalidateInstalledSkills(for: projectPath)
     }
 
