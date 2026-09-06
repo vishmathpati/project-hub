@@ -28,6 +28,13 @@ mkdir -p "$APP/Contents/Resources"
 
 cp "$BIN" "$APP/Contents/MacOS/ProjectHub"
 
+BUNDLE_DIR="$(dirname "$BIN")"
+shopt -s nullglob
+for bundle in "$BUNDLE_DIR"/*.bundle; do
+    cp -R "$bundle" "$APP/Contents/Resources/"
+done
+shopt -u nullglob
+
 cat > "$APP/Contents/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"

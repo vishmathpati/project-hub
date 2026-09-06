@@ -1698,4 +1698,26 @@ final class CompatibilityPluginMCPTests: XCTestCase {
         }
         return root
     }
+
+    func testPluginScanSkipsMCPServerInspection() throws {
+        let root = try makeTempProject()
+        try """
+        {
+          "mcpServers": {
+            "local-notes": {
+              "command": "npx",
+              "args": ["-y", "mcp-server"]
+            }
+          }
+        }
+        """.write(to: root.appendingPathComponent(".mcp.json"), atomically: true, encoding: .utf8)
+
+        let full = CompatibilityScanner.scan(projectRoot: root.path, kind: .full)
+        let plugins = CompatibilityScanner.scan(projectRoot: root.path, kind: .plugins)
+
+        XCTAssertFalse(full.servers.isEmpty, "full scan should read project MCP")
+        XCTAssertTrue(plugins.servers.isEmpty, "plugin scan must not inspect MCP servers")
+        XCTAssertEqual(plugins.skills.count, 0)
+        XCTAssertEqual(plugins.settings.count, 0)
+    }
 }

@@ -1,23 +1,16 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Entry point
-
 @main
-struct ProjectHubApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-
-    var body: some Scene {
-        // AppKit owns the main window/status item; Settings keeps SwiftUI's app
-        // lifecycle happy without creating an extra default window.
-        Settings { EmptyView() }
-    }
-}
-
-// MARK: - App delegate (manages desktop window + status item + popover)
-
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        app.run()
+    }
+
     private var statusItem:   NSStatusItem!
     private var popover:      NSPopover!
     private let projectStore  = ProjectStore()
@@ -75,8 +68,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Dock icon click → open the full desktop app.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        openDashboardWindow()
-        return true
+        openDashboardWindow(refresh: false)
+        return false
     }
 
     // MARK: - Dock icon
@@ -142,11 +135,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if event.type == .rightMouseUp {
             showContextMenu()
         } else {
-            openDashboardWindow()
+            openDashboardWindow(refresh: false)
         }
     }
 
-    private func openDashboardWindow(refresh: Bool = true) {
+    private func openDashboardWindow(refresh: Bool = false) {
         if popover.isShown {
             popover.performClose(nil)
         }
@@ -184,9 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let button = statusItem.button else { return }
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApp.activate(ignoringOtherApps: true)
-            // Refresh on each open
-            projectStore.scan()
-            skillStore.refresh()
+            // Keep last-known lists. Background stores already refresh on their own.
         }
     }
 
@@ -233,7 +224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openDashboardFromMenu() {
-        openDashboardWindow()
+        openDashboardWindow(refresh: false)
     }
 
     @objc private func openCompactPanelFromMenu() {

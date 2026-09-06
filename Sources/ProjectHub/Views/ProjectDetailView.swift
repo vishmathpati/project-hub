@@ -39,9 +39,16 @@ struct ProjectDetailView: View {
                 targetProject: project,
                 allProjects: projectStore.projects
             ) {
-                reloadTick &+= 1
+                reloadProjectCaches()
             }
         }
+    }
+
+    private func reloadProjectCaches() {
+        projectStore.invalidateInspectionCache(path: project.path)
+        skillStore.invalidateInstalledSkills(for: project.path)
+        agentStore.invalidate(projectPath: project.path)
+        reloadTick &+= 1
     }
 
     private var compactBody: some View {
@@ -132,7 +139,7 @@ struct ProjectDetailView: View {
             .buttonStyle(.plain)
             .help("Open in Finder")
 
-            Button { reloadTick &+= 1 } label: {
+            Button { reloadProjectCaches() } label: {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.secondary)
@@ -159,7 +166,9 @@ struct ProjectDetailView: View {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: project.path)])
             }
 
-            HubIconButton(systemImage: "arrow.clockwise", help: "Rescan") { reloadTick &+= 1 }
+            HubIconButton(systemImage: "arrow.clockwise", help: "Rescan") {
+                reloadProjectCaches()
+            }
 
             HubButton(title: "Open project", kind: .primary) {
                 AppActions.openInTerminal(project.path)
@@ -318,7 +327,7 @@ struct ProjectDetailView: View {
             HubTableColumn("Agents", width: 56, alignment: .trailing),
             HubTableColumn("State", width: 96),
         ]
-        let facts = ProjectFacts(path: project.path)
+        let facts = projectStore.facts(for: project) ?? ProjectFacts(path: project.path)
 
         return VStack(alignment: .leading, spacing: 8) {
             HubSectionHeading("What each provider sees in this folder", count: tools.count)
@@ -336,7 +345,7 @@ struct ProjectDetailView: View {
                         }
                         .frame(width: 150, alignment: .leading)
 
-                        Text(ProjectFacts.configFiles(for: toolID, at: project.path))
+                        Text(projectStore.configFileSummary(for: toolID, at: project.path))
                             .font(HubFont.machine)
                             .foregroundStyle(HubTheme.textDim)
                             .lineLimit(1)

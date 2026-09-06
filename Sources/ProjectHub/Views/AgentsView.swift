@@ -47,6 +47,14 @@ struct AgentsView: View {
         } message: {
             Text("This deletes the .md file from .claude/agents/. This action cannot be undone.")
         }
+        .alert("Couldn't update agent", isPresented: Binding(
+            get: { agentStore.lastError != nil },
+            set: { if !$0 { agentStore.lastError = nil } }
+        )) {
+            Button("OK", role: .cancel) { agentStore.lastError = nil }
+        } message: {
+            Text(agentStore.lastError ?? "")
+        }
     }
 
     // MARK: - Agent bar

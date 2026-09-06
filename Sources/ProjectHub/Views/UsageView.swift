@@ -43,10 +43,6 @@ struct UsageView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
-                    HubPageNote(
-                        text: "These numbers come from each provider's own local logs, so they reflect what you have already spent rather than a live meter. Nothing here is sent anywhere."
-                    )
-
                     if !quotaCards.isEmpty {
                         section("Close to a limit", count: quotaCards.count) {
                             LazyVGrid(columns: twoColumns, spacing: 10) {
@@ -249,7 +245,8 @@ struct UsageView: View {
 
     private func load() {
         guard !loading else { return }
-        loading = true
+        let showSpinner = cards.isEmpty
+        if showSpinner { loading = true }
         Task.detached(priority: .utility) {
             let result = UsageReader.summarize()
             await MainActor.run {

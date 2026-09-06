@@ -49,10 +49,10 @@ final class ProjectWatcher: ObservableObject {
 
     nonisolated static let claudeBundleID = "com.anthropic.claudefordesktop"
 
-    private static let projectsDir: String = {
+    nonisolated private static let projectsDir: String = {
         (NSHomeDirectory() as NSString).appendingPathComponent(".claude/projects")
     }()
-    private static let claudeJsonPath: String = {
+    nonisolated private static let claudeJsonPath: String = {
         (NSHomeDirectory() as NSString).appendingPathComponent(".claude.json")
     }()
 
@@ -105,11 +105,13 @@ final class ProjectWatcher: ObservableObject {
 
     private func startPolling() {
         guard pollTimer == nil else { return }
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.pollActiveProject()
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        pollTimer = timer
         pollActiveProject()
     }
 
@@ -127,92 +129,123 @@ final class ProjectWatcher: ObservableObject {
 
     private func pollActiveProject() {
         pollCount += 1
-
-        // Refresh the Desktop cwd cache every 5 polls (~10 s)
         if pollCount % 5 == 0 {
             refreshDesktopCwdCache()
         }
 
+        let known = knownPaths
+        let desktop = desktopCwdCache
+        let lastMtime = lastKnownPathsMtime
+        Task.detached(priority: .utility) { [weak self] in
+            let refreshedKnown = Self.knownPathsIfStale(current: known, lastMtime: lastMtime)
+            let mapping = refreshedKnown.mapping
+            let found = Self.detectActiveProject(knownPaths: mapping, desktopCwdCache: desktop)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                if refreshedKnown.didReload {
+                    self.knownPaths = mapping
+                    self.lastKnownPathsMtime = refreshedKnown.mtime
+                }
+                if found != self.activeProject {
+                    self.activeProject = found
+                }
+            }
+        }
+    }
+
+    private struct KnownPathsReload {
+        let mapping: [String: String]
+        let mtime: Date
+        let didReload: Bool
+    }
+
+    nonisolated private static func knownPathsIfStale(
+        current: [String: String],
+        lastMtime: Date
+    ) -> KnownPathsReload {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: claudeJsonPath),
+              let mtime = attrs[.modificationDate] as? Date,
+              mtime > lastMtime
+        else {
+            return KnownPathsReload(mapping: current, mtime: lastMtime, didReload: false)
+        }
+        return KnownPathsReload(mapping: loadKnownPathMapping(), mtime: mtime, didReload: true)
+    }
+
+    nonisolated private static func loadKnownPathMapping() -> [String: String] {
+        guard let data = FileManager.default.contents(atPath: claudeJsonPath),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let projects = json["projects"] as? [String: Any]
+        else { return [:] }
+
+        var mapping: [String: String] = [:]
+        for absolutePath in projects.keys {
+            mapping[encodePath(absolutePath)] = absolutePath
+        }
+        return mapping
+    }
+
+    nonisolated private static func detectActiveProject(
+        knownPaths: [String: String],
+        desktopCwdCache: [String: String]
+    ) -> WatchedProject? {
         let fm = FileManager.default
-        let projectsRoot = ProjectWatcher.projectsDir
+        let projectsRoot = projectsDir
 
         guard let projectDirs = try? fm.contentsOfDirectory(atPath: projectsRoot) else {
-            // ~/.claude/projects doesn't exist (CLI never run)
-            // Fall back entirely to Desktop process detection
-            activeProject = bestDesktopProject()
-            return
+            return bestDesktopProject(desktopCwdCache: desktopCwdCache)
         }
-
-        reloadKnownPathsIfNeeded()
 
         var bestMtime: Date = .distantPast
         var bestDirName: String? = nil
 
         for dirName in projectDirs {
-            // Skip worktree entries
             if dirName.contains("-claude-worktrees-") { continue }
 
             let dirPath = (projectsRoot as NSString).appendingPathComponent(dirName)
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: dirPath, isDirectory: &isDir), isDir.boolValue else { continue }
 
-            // Find the most-recently modified .jsonl file in this project dir
             guard let files = try? fm.contentsOfDirectory(atPath: dirPath) else { continue }
             for file in files {
                 guard file.hasSuffix(".jsonl") else { continue }
                 let filePath = (dirPath as NSString).appendingPathComponent(file)
-                guard let attrs  = try? fm.attributesOfItem(atPath: filePath),
-                      let mtime  = attrs[.modificationDate] as? Date else { continue }
+                guard let attrs = try? fm.attributesOfItem(atPath: filePath),
+                      let mtime = attrs[.modificationDate] as? Date else { continue }
                 if mtime > bestMtime {
-                    bestMtime    = mtime
-                    bestDirName  = dirName
+                    bestMtime = mtime
+                    bestDirName = dirName
                 }
             }
         }
 
         guard let dirName = bestDirName else {
-            // No JSONL files at all — fall back to Desktop open tabs
-            activeProject = bestDesktopProject()
-            return
+            return bestDesktopProject(desktopCwdCache: desktopCwdCache)
         }
 
-        let absolutePath = resolveProjectPath(dirName: dirName)
-        let name         = (absolutePath as NSString).lastPathComponent
-        let project      = WatchedProject(path: absolutePath, name: name)
-        if project != activeProject { activeProject = project }
+        let absolutePath = resolveProjectPath(
+            dirName: dirName,
+            knownPaths: knownPaths,
+            desktopCwdCache: desktopCwdCache
+        )
+        return WatchedProject(path: absolutePath, name: (absolutePath as NSString).lastPathComponent)
     }
 
-    // MARK: - Path resolution
-
-    /// Resolves an encoded directory name back to an absolute project path.
-    /// Priority:
-    ///  1. ~/.claude.json cache (authoritative, loaded at start + on change)
-    ///  2. Desktop process cwd cache (fixes ambiguous paths like "Arel OS" ↔ "-Arel-OS")
-    ///  3. Naive '-'→'/' decode (works for paths without spaces/dots)
-    ///  4. Last resort: prepend home dir
-    private func resolveProjectPath(dirName: String) -> String {
-        // 1. ~/.claude.json cache
+    nonisolated private static func resolveProjectPath(
+        dirName: String,
+        knownPaths: [String: String],
+        desktopCwdCache: [String: String]
+    ) -> String {
         if let known = knownPaths[dirName] { return known }
-
-        // 2. Desktop process cwd — fixes the space/dot ambiguity
         if let fromProcess = desktopCwdCache[dirName] { return fromProcess }
-
-        // 3. Naive decode (only reliable for paths with no spaces/dots/hyphens)
-        let candidate = "/" + dirName.dropFirst()  // drop leading '-', prepend '/'
+        let candidate = "/" + dirName.dropFirst()
             .replacingOccurrences(of: "-", with: "/")
         if FileManager.default.fileExists(atPath: candidate) { return candidate }
-
-        // 4. Last resort
         return NSHomeDirectory() + "/" + dirName
     }
 
-    // MARK: - Desktop process cwd cache
-
-    /// Returns the "best" project to show when no JSONL history exists.
-    /// Picks the first non-trivial cwd among running claude Desktop processes.
-    private func bestDesktopProject() -> WatchedProject? {
+    nonisolated private static func bestDesktopProject(desktopCwdCache: [String: String]) -> WatchedProject? {
         let home = NSHomeDirectory()
-        // Prefer paths that are actual code projects (not home dir, not root)
         let cwds = desktopCwdCache.values.filter {
             $0 != "/" && $0 != home && $0.count > home.count + 2
         }
@@ -350,14 +383,5 @@ final class ProjectWatcher: ObservableObject {
            let mtime = attrs[.modificationDate] as? Date {
             lastKnownPathsMtime = mtime
         }
-    }
-
-    private func reloadKnownPathsIfNeeded() {
-        guard let attrs = try? FileManager.default.attributesOfItem(
-            atPath: ProjectWatcher.claudeJsonPath),
-              let mtime = attrs[.modificationDate] as? Date,
-              mtime > lastKnownPathsMtime
-        else { return }
-        loadKnownPaths()
     }
 }

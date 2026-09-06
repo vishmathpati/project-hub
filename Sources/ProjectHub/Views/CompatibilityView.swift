@@ -14,6 +14,7 @@ struct CompatibilityIssueReportContext: Equatable {
 
 struct CompatibilityView: View {
     @EnvironmentObject var projectStore: ProjectStore
+    @EnvironmentObject var compatStore: CompatibilityStore
     private let fixedProject: Project?
     @State private var selectedProjectPath: String?
     @State private var report: CompatibilityScanResult?
@@ -23,7 +24,7 @@ struct CompatibilityView: View {
     @State private var verifyingMCP = false
     @State private var fixError: String?
     @State private var liveReports: [String: MCPHealthReport] = [:]
-    @State private var scanTarget: CompatibilityScanTarget = .project
+    @State private var scanTarget: CompatibilityScanTarget = .global
     @State private var scopeFilter: CompatibilityScopeFilter = .allSupported
     @State private var runtimeFilter: CompatibilityRuntimeFilter = .all
     @State private var codexRuntimeProfileName = ""
@@ -145,20 +146,26 @@ struct CompatibilityView: View {
 
     @ViewBuilder
     private var projectPicker: some View {
-        if fixedProject == nil && scanTarget == .project && !projectStore.projects.isEmpty {
+        if fixedProject == nil {
             Menu {
+                Button("Global") { applyTargetPreset(.global) }
                 ForEach(projectStore.projects) { project in
-                    Button(project.displayName) { selectedProjectPath = project.path }
+                    Button(project.displayName) {
+                        scanTarget = .project
+                        selectedProjectPath = project.path
+                        scopeFilter = .allSupported
+                        runtimeFilter = .all
+                    }
                 }
             } label: {
-                Text("scope: \(selectedProject?.displayName ?? "this project") ▾")
+                Text("for: \(scanTarget == .global ? "Global" : (selectedProject?.displayName ?? "—")) ▾")
                     .font(HubFont.mono(10))
                     .foregroundStyle(HubTheme.textMid)
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("Choose the project to scan")
+            .help("Scan global tool state or one project")
         }
     }
 
@@ -6939,7 +6946,7 @@ struct CompatibilityView: View {
                 projectRoot: requestedRoot,
                 codexProfileSelection: CodexProfileSelection.cliRuntimeOverride(normalizedProfileName)
             )
-            ConfigScanCache.save(scanResult)
+            ConfigScanCache.save(scanResult, kind: .full)
 
             await MainActor.run {
                 guard scanRequestID == requestID else {
@@ -6950,6 +6957,9 @@ struct CompatibilityView: View {
                 codexProfileNames = profileNames
                 codexRuntimeProfileName = normalizedProfileName
                 report = scanResult
+                if fixedProject == nil, requestedRoot == nil {
+                    compatStore.replace(scanResult)
+                }
                 liveReports = [:]
                 scanning = false
                 DispatchQueue.main.async {
@@ -6975,11 +6985,14 @@ struct CompatibilityView: View {
         let profile = CodexProfileSelection.cliRuntimeOverride(codexRuntimeProfileName)?.name
         Task.detached(priority: .utility) {
             let names = CompatibilityScanner.codexConfiguredProfileNames()
-            let cached = ConfigScanCache.load(projectRoot: root, profileName: profile)
+            let cached = ConfigScanCache.load(projectRoot: root, profileName: profile, kind: .full)
             await MainActor.run {
                 codexProfileNames = names
                 if replace || report == nil {
                     report = cached
+                    if fixedProject == nil, root == nil {
+                        compatStore.replace(cached)
+                    }
                 }
             }
         }

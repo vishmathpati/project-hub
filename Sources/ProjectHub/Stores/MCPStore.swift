@@ -9,6 +9,7 @@ final class MCPStore: ObservableObject {
     @Published var isLoading:  Bool          = false
     @Published var isVerifyingHealth: Bool   = false
     @Published private var verifiedHealthReports: [String: MCPHealthReport] = [:]
+    @Published private var evaluatedHealthReports: [String: MCPHealthReport] = [:]
     @Published var searchText: String        = ""
 
     // Only detected tools, in display order. Hidden tools excluded from UI.
@@ -45,12 +46,17 @@ final class MCPStore: ObservableObject {
         if let verified = verifiedHealthReports[key] {
             return verified
         }
+        if let evaluated = evaluatedHealthReports[key] {
+            return evaluated
+        }
         let tool = tools.first(where: { $0.toolID == toolID })
-        return MCPHealthChecker.evaluate(
+        let report = MCPHealthChecker.evaluate(
             server: server,
             toolID: toolID,
             configPath: configPath(for: server, tool: tool)
         )
+        evaluatedHealthReports[key] = report
+        return report
     }
 
     func verifyHealth() {
@@ -99,12 +105,16 @@ final class MCPStore: ObservableObject {
     func refresh(force: Bool = true) {
         guard !isLoading else { return }
         if !force && !tools.isEmpty { return }
-        isLoading = true
-        Task.detached(priority: .userInitiated) {
+        let showSpinner = tools.isEmpty
+        if showSpinner { isLoading = true }
+        Task.detached(priority: .utility) {
             let result = ConfigReader.shared.readAllTools()
             await MainActor.run {
-                self.tools     = result
-                self.verifiedHealthReports = [:]
+                if result != self.tools {
+                    self.tools = result
+                    self.verifiedHealthReports = [:]
+                    self.evaluatedHealthReports = [:]
+                }
                 self.isLoading = false
             }
         }

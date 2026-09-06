@@ -5,6 +5,7 @@ import AppKit
 
 struct GlobalMCPView: View {
     @EnvironmentObject var mcpStore: MCPStore
+    @EnvironmentObject var projectStore: ProjectStore
 
     @State private var showingImport = false
     @State private var editingServer: (toolID: String, name: String)? = nil
@@ -62,7 +63,7 @@ struct GlobalMCPView: View {
                 }
             )
             .environmentObject(mcpStore)
-            .environmentObject(ProjectStore())
+            .environmentObject(projectStore)
         }
         .sheet(item: $pluginPolicyPreview) { preview in
             codexPluginPolicyPreviewSheet(preview)
@@ -138,17 +139,10 @@ struct GlobalMCPView: View {
     private var mainContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
-                HubPageNote(
-                    text: "Servers are grouped by the provider that launches them. Health is checked in place, and a server that needs auth carries its sign-in on the same line."
-                )
-
                 healthStrip
 
-                ForEach(mcpStore.detectedTools) { tool in
-                    let visibleServers = tool.servers.filter { mcpStore.matches($0.name) }
-                    if mcpStore.searchText.isEmpty || !visibleServers.isEmpty {
-                        toolSection(tool: tool, servers: visibleServers)
-                    }
+                ForEach(mcpFamilies) { family in
+                    mcpFamilySection(family)
                 }
             }
             .padding(HubTheme.contentPadding)
@@ -184,13 +178,52 @@ struct GlobalMCPView: View {
 
     // MARK: - Provider group
 
-    private func toolSection(tool: ToolSummary, servers: [ServerEntry]) -> some View {
+    private var mcpFamilies: [MCPFamilySection] {
+        ProviderFamily.grouped(mcpStore.detectedTools, id: \.toolID).compactMap { group in
+            let tools = group.items.filter { tool in
+                let visible = tool.servers.filter { mcpStore.matches($0.name) }
+                return mcpStore.searchText.isEmpty || !visible.isEmpty
+            }
+            guard !tools.isEmpty else { return nil }
+            return MCPFamilySection(id: group.id, tools: tools)
+        }
+    }
+
+    private func mcpFamilySection(_ family: MCPFamilySection) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if family.tools.count > 1 {
+                HStack(spacing: 10) {
+                    ProviderTile(toolID: ProviderFamily.iconToolID(for: family.id))
+                    Text(ProviderFamily.displayName(for: family.id))
+                        .font(HubFont.sans(13, .semibold))
+                        .foregroundStyle(HubTheme.textStrong)
+                    Text(family.tools.map { ProviderFamily.memberLabel(for: $0.toolID) }.joined(separator: " · "))
+                        .font(HubFont.machine)
+                        .foregroundStyle(HubTheme.textDim)
+                }
+            }
+            ForEach(family.tools) { tool in
+                let visibleServers = tool.servers.filter { mcpStore.matches($0.name) }
+                if family.tools.count > 1 {
+                    Text(ProviderFamily.memberLabel(for: tool.toolID))
+                        .font(HubFont.mono(9))
+                        .foregroundStyle(HubTheme.textFaint)
+                        .padding(.leading, 4)
+                }
+                toolSection(tool: tool, servers: visibleServers, showBrand: family.tools.count == 1)
+            }
+        }
+    }
+
+    private func toolSection(tool: ToolSummary, servers: [ServerEntry], showBrand: Bool = true) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                ProviderTile(toolID: tool.toolID)
-                Text(tool.label)
-                    .font(HubFont.sans(13, .semibold))
-                    .foregroundStyle(HubTheme.textStrong)
+                if showBrand {
+                    ProviderTile(toolID: tool.toolID)
+                    Text(tool.label)
+                        .font(HubFont.sans(13, .semibold))
+                        .foregroundStyle(HubTheme.textStrong)
+                }
                 Text(configSummary(for: tool))
                     .font(HubFont.machine)
                     .foregroundStyle(HubTheme.textDim)
@@ -315,6 +348,15 @@ struct GlobalMCPView: View {
             }
             .disabled(server.isReadOnly)
             .opacity(server.isReadOnly ? 0.35 : 1)
+
+            if !server.isReadOnly, ProviderFamily.groupID(for: tool.toolID) == "claude" {
+                let sibling = tool.toolID == "claude-code" ? "claude-desktop" : "claude-code"
+                if mcpStore.detectedTools.contains(where: { $0.toolID == sibling }) {
+                    HubButton(title: "to \(ProviderFamily.memberLabel(for: sibling))", kind: .inlineAction) {
+                        _ = mcpStore.copyServer(name: server.name, from: tool.toolID, to: [sibling])
+                    }
+                }
+            }
 
             HubButton(title: "edit", kind: .inlineAction) {
                 editingServer = (toolID: tool.toolID, name: server.name)
@@ -498,6 +540,11 @@ struct GlobalMCPView: View {
 }
 
 // MARK: - Identifiable helpers for sheet presentation
+
+private struct MCPFamilySection: Identifiable {
+    let id: String
+    let tools: [ToolSummary]
+}
 
 private struct IdentifiableServer: Identifiable {
     let id = UUID()

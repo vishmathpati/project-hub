@@ -63,11 +63,19 @@ struct SkillsView: View {
             .frame(maxWidth: .infinity)
         }
         .frame(maxHeight: .infinity)
-        .id("\(reloadTick)-\(localTick)")   // force re-render when parent or local tick bumps
+        .alert("Couldn't update skill", isPresented: Binding(
+            get: { skillStore.lastError != nil },
+            set: { if !$0 { skillStore.lastError = nil } }
+        )) {
+            Button("OK", role: .cancel) { skillStore.lastError = nil }
+        } message: {
+            Text(skillStore.lastError ?? "")
+        }
         .sheet(item: $editingSkill) { skill in
             SkillEditorSheet(
                 skillPath: skill.claudePath ?? skill.codexPath ?? "",
                 onSaved: {
+                    skillStore.invalidateInstalledSkills(for: project.path)
                     skillStore.refresh()
                     localTick += 1
                 }
@@ -331,6 +339,8 @@ struct GlobalSkillsView: View {
     @State private var selectedProjectID: UUID? = nil
     @State private var projectUsagesBySkillID: [String: [SkillStore.ProjectSkillUsage]] = [:]
     @State private var loadingProjectUsageIDs: Set<String> = []
+    @State private var editingSkillPath: String?
+    @State private var showInstructions = false
 
     private var globalGroups: [SkillStore.GlobalSkillGroup] {
         SkillStore.deduplicatedGlobalSkills(skillStore.globalSkills)
@@ -367,10 +377,6 @@ struct GlobalSkillsView: View {
             )
             ScrollView {
                 VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
-                    HubPageNote(
-                        text: "A skill is one folder of instructions. The same folder can be visible to several providers at once — the tiles on each row are the providers that can currently see it."
-                    )
-                    metrics
                     switch selectedTab {
                     case .global:
                         globalContent
@@ -382,6 +388,21 @@ struct GlobalSkillsView: View {
             }
         }
         .background(HubTheme.bg)
+        .sheet(item: Binding(
+            get: { editingSkillPath.map { SkillsIdentifiablePath(path: $0) } },
+            set: { editingSkillPath = $0?.path }
+        )) { item in
+            SkillEditorSheet(skillPath: item.path) {
+                skillStore.refresh()
+            }
+            .frame(width: 520, height: 560)
+        }
+        .sheet(isPresented: $showInstructions) {
+            if let project = selectedProject {
+                ClaudeMdView(project: project)
+                    .frame(minWidth: 640, minHeight: 560)
+            }
+        }
         .onAppear {
             if selectedProjectID == nil {
                 selectedProjectID = projectStore.projects.first?.id
@@ -396,16 +417,28 @@ struct GlobalSkillsView: View {
         .task(id: installCountRefreshKey) {
             skillStore.refreshGlobalSkillInstallCounts(for: projectStore.projects)
         }
+        .alert("Couldn't update skill", isPresented: Binding(
+            get: { skillStore.lastError != nil },
+            set: { if !$0 { skillStore.lastError = nil } }
+        )) {
+            Button("OK", role: .cancel) { skillStore.lastError = nil }
+        } message: {
+            Text(skillStore.lastError ?? "")
+        }
     }
 
     @ViewBuilder
     private var headerActions: some View {
         Menu {
-            ForEach(CatalogTab.allCases) { tab in
-                Button(tab.title) { selectedTab = tab }
+            Button("Global") { selectedTab = .global }
+            ForEach(projectStore.projects) { project in
+                Button(project.displayName) {
+                    selectedTab = .project
+                    selectedProjectID = project.id
+                }
             }
         } label: {
-            Text("provider: \(selectedTab == .global ? "all" : "project") ▾")
+            Text("for: \(selectedTab == .global ? "Global" : (selectedProject?.displayName ?? "—")) ▾")
                 .font(HubFont.mono(10))
                 .foregroundStyle(HubTheme.textMid)
         }
@@ -413,25 +446,14 @@ struct GlobalSkillsView: View {
         .menuIndicator(.hidden)
         .fixedSize()
 
-        if !projectStore.projects.isEmpty {
-            Menu {
-                ForEach(projectStore.projects) { project in
-                    Button(project.displayName) { selectedProjectID = project.id }
-                }
-            } label: {
-                Text("for: \(selectedProject?.displayName ?? "—") ▾")
-                    .font(HubFont.mono(10))
-                    .foregroundStyle(HubTheme.textMid)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-        }
-
         if skillStore.isRefreshingInstallCounts {
             Text("counting projects")
                 .font(HubFont.machine)
                 .foregroundStyle(HubTheme.textFaint)
+        }
+
+        if selectedTab == .project, selectedProject != nil {
+            HubButton(title: "Instructions", kind: .secondary) { showInstructions = true }
         }
 
         HubIconButton(
@@ -442,34 +464,8 @@ struct GlobalSkillsView: View {
         ) { skillStore.refresh() }
     }
 
-    /// Global tab counts what the library holds; project tab counts health,
-    /// because that is the only scope where a skill has a state.
-    @ViewBuilder
-    private var metrics: some View {
-        switch selectedTab {
-        case .global:
-            HStack(spacing: 10) {
-                MetricTile(value: "\(globalGroups.count)", label: "unique skills")
-                MetricTile(value: "\(skillStore.globalSkills.count)", label: "origins")
-                MetricTile(value: "\(uniqueProviderCount)", label: "providers")
-            }
-        case .project:
-            let groups = projectSkillGroups
-            let working  = groups.filter { $0.state == .active }.count
-            let broken   = groups.filter { $0.state == .invalid }.count
-            let disabled = groups.filter { $0.state == .disabled }.count
-            HStack(spacing: 10) {
-                MetricTile(value: "\(working)",  label: "working",  tone: .ok)
-                MetricTile(value: "\(broken)",   label: "broken",   tone: broken > 0 ? .bad : .plain)
-                MetricTile(value: "\(disabled)", label: "disabled")
-            }
-        }
-    }
-
     private var uniqueProviderCount: Int {
-        var ids = Set<String>()
-        for group in globalGroups { ids.formUnion(group.providerIDs) }
-        return ids.count
+        Set(globalGroups.flatMap(\.providerIDs).map { ProviderFamily.groupID(for: $0) }).count
     }
 
     private var summaryText: String {
@@ -487,10 +483,12 @@ struct GlobalSkillsView: View {
 
     @ViewBuilder
     private var globalContent: some View {
-        if skillStore.isRefreshing {
-            loadingState
-        } else if globalGroups.isEmpty {
-            emptyGlobalState
+        if globalGroups.isEmpty {
+            if skillStore.isRefreshing {
+                loadingState
+            } else {
+                emptyGlobalState
+            }
         } else {
             globalList
         }
@@ -498,11 +496,7 @@ struct GlobalSkillsView: View {
 
     private var globalList: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HubSectionHeading(title: "In your library", count: globalGroups.count) {
-                Text("provider visibility →")
-                    .font(HubFont.mono(9))
-                    .foregroundStyle(HubTheme.textFaint)
-            }
+            HubSectionHeading("In your library", count: globalGroups.count)
             VStack(spacing: 0) {
                 ForEach(Array(globalGroups.enumerated()), id: \.element.id) { index, group in
                     if index > 0 { HubRowSeparator() }
@@ -516,63 +510,63 @@ struct GlobalSkillsView: View {
     private func globalSkillRow(_ group: SkillStore.GlobalSkillGroup) -> some View {
         let installedCount = skillStore.globalSkillInstallCounts[group.id] ?? 0
         let expanded = expandedGlobalSkillID == group.id
-        let hasSkillMD = group.skills.contains { !$0.description.isEmpty || FileManager.default.fileExists(
-            atPath: ($0.path as NSString).appendingPathComponent("SKILL.md")
-        ) }
+        let hasSkillMD = group.skills.contains { skillStore.skillMarkdownExists($0) }
 
         return VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(HubTheme.disclosureAnimation) {
-                    expandedGlobalSkillID = expanded ? nil : group.id
-                }
-                if !expanded { loadProjectUsage(for: group) }
-            } label: {
-                HStack(alignment: .center, spacing: 10) {
-                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(HubTheme.textFaint)
-                        .frame(width: 12)
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 8) {
-                            Text(group.name)
-                                .font(HubFont.rowPrimary)
-                                .foregroundStyle(HubTheme.text)
-                                .lineLimit(1)
-                            Text("global")
-                                .font(HubFont.mono(9))
-                                .foregroundStyle(HubTheme.textFaint)
-                            if !hasSkillMD {
-                                StatusLabel(status: .warn, text: "no SKILL.md", font: HubFont.mono(9))
-                            }
-                            if group.hasReadOnlyOrigins {
-                                Text("read-only")
-                                    .font(HubFont.mono(9))
-                                    .foregroundStyle(HubTheme.textFaint)
-                            }
-                        }
-                        if !group.primaryDescription.isEmpty {
-                            Text(group.primaryDescription)
-                                .font(HubFont.body)
-                                .foregroundStyle(HubTheme.textDim)
-                                .lineLimit(1)
-                        }
+            HStack(alignment: .center, spacing: 4) {
+                Button {
+                    withAnimation(HubTheme.disclosureAnimation) {
+                        expandedGlobalSkillID = expanded ? nil : group.id
                     }
+                    if !expanded { loadProjectUsage(for: group) }
+                } label: {
+                    HStack(alignment: .center, spacing: 10) {
+                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(HubTheme.textFaint)
+                            .frame(width: 12)
 
-                    Spacer(minLength: 12)
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 8) {
+                                Text(group.name)
+                                    .font(HubFont.rowPrimary)
+                                    .foregroundStyle(HubTheme.text)
+                                    .lineLimit(1)
+                                if !hasSkillMD {
+                                    StatusLabel(status: .warn, text: "no SKILL.md", font: HubFont.mono(9))
+                                }
+                                if group.hasReadOnlyOrigins {
+                                    Text("read-only")
+                                        .font(HubFont.mono(9))
+                                        .foregroundStyle(HubTheme.textFaint)
+                                }
+                            }
+                            if !group.primaryDescription.isEmpty {
+                                Text(group.primaryDescription)
+                                    .font(HubFont.body)
+                                    .foregroundStyle(HubTheme.textDim)
+                                    .lineLimit(1)
+                            }
+                        }
 
-                    ProviderTileRow(toolIDs: group.providerIDs)
+                        Spacer(minLength: 12)
 
-                    Text("\(installedCount) proj")
-                        .font(HubFont.machine)
-                        .foregroundStyle(HubTheme.textDim)
-                        .frame(width: 52, alignment: .trailing)
+                        ProviderTileRow(toolIDs: group.tileIDs)
+
+                        Text("\(installedCount) proj")
+                            .font(HubFont.machine)
+                            .foregroundStyle(HubTheme.textDim)
+                            .frame(width: 52, alignment: .trailing)
+                    }
+                    .padding(.leading, HubTheme.contentPadding)
+                    .frame(minHeight: HubTheme.listRowHeight)
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, HubTheme.contentPadding)
-                .frame(minHeight: HubTheme.listRowHeight)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+
+                globalSkillActions(group)
+                    .padding(.trailing, HubTheme.contentPadding)
             }
-            .buttonStyle(.plain)
 
             if expanded {
                 globalSkillDetail(group)
@@ -582,24 +576,59 @@ struct GlobalSkillsView: View {
         }
     }
 
+    @ViewBuilder
+    private func globalSkillActions(_ group: SkillStore.GlobalSkillGroup) -> some View {
+        Menu {
+            ForEach(projectStore.projects) { project in
+                Button("Copy to \(project.displayName)") {
+                    if let skill = group.skills.first {
+                        skillStore.copy(skill, to: project.path)
+                        reloadUsage(for: group)
+                    }
+                }
+            }
+            if let project = selectedProject, let skill = group.skills.first {
+                Button("Copy into all tool folders in \(project.displayName)") {
+                    skillStore.copyAcrossProviders(skill, in: project.path)
+                    reloadUsage(for: group)
+                }
+            }
+            if let skill = group.skills.first(where: { skillStore.skillMarkdownExists($0) }) {
+                Button("Edit SKILL.md") {
+                    editingSkillPath = skill.path
+                }
+            }
+            if !group.skills.filter({ $0.source != .codexAdmin && $0.source != .codexManaged }).isEmpty {
+                Divider()
+                ForEach(group.skills.filter { $0.source != .codexAdmin && $0.source != .codexManaged }, id: \.path) { skill in
+                    Button("Remove \(SkillStore.GlobalSkillGroup.sourceLabel(skill.source))", role: .destructive) {
+                        skillStore.removeOrigin(skill)
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(HubTheme.textMid)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
 
     private func globalSkillDetail(_ group: SkillStore.GlobalSkillGroup) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Divider()
-
-            if !group.primaryDescription.isEmpty {
-                Text(group.primaryDescription)
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                    .lineLimit(2)
-            }
 
             detailSection(title: "Origins") {
                 VStack(spacing: 5) {
                     ForEach(group.skills, id: \.path) { skill in
                         originRow(
                             title: SkillStore.GlobalSkillGroup.sourceLabel(skill.source),
-                            subtitle: shortPath(skill.path),
+                            path: skill.path,
                             badges: SkillStore.GlobalSkillGroup.toolLabels(for: skill.source)
                         )
                     }
@@ -626,7 +655,7 @@ struct GlobalSkillsView: View {
                     } else {
                         VStack(spacing: 5) {
                             ForEach(usages) { usage in
-                                projectUsageRow(usage)
+                                projectUsageRow(usage, group: group)
                             }
                         }
                     }
@@ -635,7 +664,10 @@ struct GlobalSkillsView: View {
         }
     }
 
-    private func projectUsageRow(_ usage: SkillStore.ProjectSkillUsage) -> some View {
+    private func projectUsageRow(
+        _ usage: SkillStore.ProjectSkillUsage,
+        group: SkillStore.GlobalSkillGroup
+    ) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: usage.state == .installed ? "checkmark.circle.fill" : "circle")
                 .font(.system(size: 11, weight: .semibold))
@@ -654,14 +686,27 @@ struct GlobalSkillsView: View {
                         .font(.system(size: 9))
                         .foregroundColor(.secondary)
                 } else {
-                    Text(usage.origins.map { "\($0.sourceLabel) · \(shortPath($0.path))" }.joined(separator: "  |  "))
-                        .font(.system(size: 9, design: .monospaced))
+                    Text(usage.origins.map(\.sourceLabel).joined(separator: " · "))
+                        .font(.system(size: 9))
                         .foregroundColor(.secondary)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
+                        .lineLimit(1)
                 }
             }
             Spacer(minLength: 8)
+            if usage.state == .available, let skill = group.skills.first {
+                HubButton(title: "copy here", kind: .accentInline) {
+                    skillStore.copy(skill, to: usage.project.path)
+                    reloadUsage(for: group)
+                }
+            } else if usage.state == .installed {
+                HubButton(title: "remove", kind: .inlineAction) {
+                    skillStore.remove(skillName: group.name, from: usage.project.path)
+                    reloadUsage(for: group)
+                }
+            }
+            if let path = usage.origins.first?.path {
+                PathOverflowMenu(path: path)
+            }
         }
         .padding(7)
         .background(HubTheme.bg.opacity(0.55))
@@ -686,11 +731,7 @@ struct GlobalSkillsView: View {
         return VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
             if !enabled.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    HubSectionHeading(title: "In this project", count: enabled.count) {
-                        Text("provider visibility →")
-                            .font(HubFont.mono(9))
-                            .foregroundStyle(HubTheme.textFaint)
-                    }
+                    HubSectionHeading("In this project", count: enabled.count)
                     VStack(spacing: 0) {
                         ForEach(Array(enabled.enumerated()), id: \.element.id) { index, group in
                             if index > 0 { HubRowSeparator() }
@@ -727,57 +768,62 @@ struct GlobalSkillsView: View {
         }()
 
         return VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(HubTheme.disclosureAnimation) {
-                    expandedProjectSkillID = expanded ? nil : group.id
-                }
-            } label: {
-                HStack(alignment: .center, spacing: 10) {
-                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(HubTheme.textFaint)
-                        .frame(width: 12)
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 8) {
-                            Text(group.name)
-                                .font(HubFont.rowPrimary)
-                                .foregroundStyle(HubTheme.text)
-                                .lineLimit(1)
-                            ForEach(group.scopeLabels, id: \.self) { label in
-                                Text(label.lowercased())
-                                    .font(HubFont.mono(9))
-                                    .foregroundStyle(HubTheme.textFaint)
-                            }
-                            StatusLabel(status: status, text: group.state.label.lowercased(), font: HubFont.mono(9))
-                            if group.readOnly {
-                                Text("read-only")
-                                    .font(HubFont.mono(9))
-                                    .foregroundStyle(HubTheme.textFaint)
-                            }
-                        }
-                        if let description = group.description, !description.isEmpty {
-                            Text(description)
-                                .font(HubFont.body)
-                                .foregroundStyle(HubTheme.textDim)
-                                .lineLimit(1)
-                        }
+            HStack(alignment: .center, spacing: 4) {
+                Button {
+                    withAnimation(HubTheme.disclosureAnimation) {
+                        expandedProjectSkillID = expanded ? nil : group.id
                     }
+                } label: {
+                    HStack(alignment: .center, spacing: 10) {
+                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(HubTheme.textFaint)
+                            .frame(width: 12)
 
-                    Spacer(minLength: 12)
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 8) {
+                                Text(group.name)
+                                    .font(HubFont.rowPrimary)
+                                    .foregroundStyle(HubTheme.text)
+                                    .lineLimit(1)
+                                ForEach(group.scopeLabels, id: \.self) { label in
+                                    Text(label.lowercased())
+                                        .font(HubFont.mono(9))
+                                        .foregroundStyle(HubTheme.textFaint)
+                                }
+                                StatusLabel(status: status, text: group.state.label.lowercased(), font: HubFont.mono(9))
+                                if group.readOnly {
+                                    Text("read-only")
+                                        .font(HubFont.mono(9))
+                                        .foregroundStyle(HubTheme.textFaint)
+                                }
+                            }
+                            if let description = group.description, !description.isEmpty {
+                                Text(description)
+                                    .font(HubFont.body)
+                                    .foregroundStyle(HubTheme.textDim)
+                                    .lineLimit(1)
+                            }
+                        }
 
-                    ProviderTileRow(toolIDs: group.providerIDs)
+                        Spacer(minLength: 12)
 
-                    Text("\(group.origins.count) org")
-                        .font(HubFont.machine)
-                        .foregroundStyle(HubTheme.textDim)
-                        .frame(width: 52, alignment: .trailing)
+                        ProviderTileRow(toolIDs: ProviderFamily.uniqueTileIDs(from: group.providerIDs))
+
+                        Text("\(group.origins.count) org")
+                            .font(HubFont.machine)
+                            .foregroundStyle(HubTheme.textDim)
+                            .frame(width: 52, alignment: .trailing)
+                    }
+                    .padding(.leading, HubTheme.contentPadding)
+                    .frame(minHeight: HubTheme.listRowHeight)
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, HubTheme.contentPadding)
-                .frame(minHeight: HubTheme.listRowHeight)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+
+                projectSkillActions(group)
+                    .padding(.trailing, HubTheme.contentPadding)
             }
-            .buttonStyle(.plain)
 
             if expanded {
                 projectSkillDetail(group)
@@ -787,22 +833,61 @@ struct GlobalSkillsView: View {
         }
     }
 
+    @ViewBuilder
+    private func projectSkillActions(_ group: ProjectSkillGroup) -> some View {
+        Menu {
+            if let project = selectedProject, let origin = group.origins.first {
+                ForEach(projectStore.projects.filter { $0.path != project.path }) { target in
+                    Button("Copy to \(target.displayName)") {
+                        skillStore.copyInstalled(origin, to: target.path)
+                    }
+                }
+                Button("Copy into all tool folders") {
+                    skillStore.copyAcrossProviders(
+                        Skill(
+                            name: origin.name,
+                            description: origin.description,
+                            triggers: [],
+                            source: .claudeGlobal,
+                            path: origin.path
+                        ),
+                        in: project.path
+                    )
+                }
+                if origin.canEdit {
+                    Button("Edit SKILL.md") {
+                        editingSkillPath = origin.path
+                    }
+                }
+                if origin.canRemove {
+                    Divider()
+                    Button("Remove from this project", role: .destructive) {
+                        skillStore.remove(skill: origin, from: project.path)
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(HubTheme.textMid)
+                .frame(width: 22, height: 22)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
 
     private func projectSkillDetail(_ group: ProjectSkillGroup) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Divider()
-            if let description = group.description, !description.isEmpty {
-                Text(description)
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                    .lineLimit(2)
-            }
             detailSection(title: "Project Origins") {
                 VStack(spacing: 5) {
                     ForEach(group.origins) { origin in
                         originRow(
                             title: origin.sourceLabel,
-                            subtitle: shortPath(origin.path),
+                            path: origin.path,
                             badges: origin.toolLabels + [origin.scopeLabel, origin.state.label]
                         )
                     }
@@ -823,8 +908,8 @@ struct GlobalSkillsView: View {
         }
     }
 
-    private func originRow(title: String, subtitle: String, badges: [String]) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+    private func originRow(title: String, path: String, badges: [String]) -> some View {
+        HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     Text(title)
@@ -834,13 +919,9 @@ struct GlobalSkillsView: View {
                         badge(label, color: toolColor(label))
                     }
                 }
-                Text(subtitle)
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
             }
             Spacer(minLength: 8)
+            PathOverflowMenu(path: path)
         }
         .padding(7)
         .background(HubTheme.bg.opacity(0.55))
@@ -869,6 +950,13 @@ struct GlobalSkillsView: View {
             .padding(.vertical, 2)
             .background(color.opacity(0.10))
             .clipShape(Capsule())
+    }
+
+    private func reloadUsage(for group: SkillStore.GlobalSkillGroup) {
+        projectUsagesBySkillID[group.id] = nil
+        loadingProjectUsageIDs.remove(group.id)
+        loadProjectUsage(for: group)
+        skillStore.refreshGlobalSkillInstallCounts(for: projectStore.projects)
     }
 
     private func loadProjectUsage(for group: SkillStore.GlobalSkillGroup) {
@@ -1099,4 +1187,9 @@ private struct ProjectSkillGroup: Identifiable {
         }
         return output
     }
+}
+
+private struct SkillsIdentifiablePath: Identifiable {
+    let path: String
+    var id: String { path }
 }

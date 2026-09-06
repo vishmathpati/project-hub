@@ -8,6 +8,7 @@ let package = Package(
         .executableTarget(
             name: "ProjectHub",
             path: "Sources/ProjectHub",
+            resources: [.process("Resources")],
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .testTarget(

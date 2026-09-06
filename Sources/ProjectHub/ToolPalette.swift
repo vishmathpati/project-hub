@@ -91,8 +91,9 @@ struct ToolPalette {
     }
 
     static let brands: [String: Brand] = [
+        "claude":         Brand(mark: "Cl", label: "Claude",        fgDark: "#D06A6A", bgDark: "#2A1616", fgLight: "#8E3232", bgLight: "#F7E9E9"),
         "claude-code":    Brand(mark: "CC", label: "Claude Code",   fgDark: "#D06A6A", bgDark: "#2A1616", fgLight: "#8E3232", bgLight: "#F7E9E9"),
-        "claude-desktop": Brand(mark: "Cl", label: "Claude",        fgDark: "#D06A6A", bgDark: "#2A1616", fgLight: "#8E3232", bgLight: "#F7E9E9"),
+        "claude-desktop": Brand(mark: "Cl", label: "Claude Desktop", fgDark: "#D06A6A", bgDark: "#2A1616", fgLight: "#8E3232", bgLight: "#F7E9E9"),
         "codex":          Brand(mark: "Cx", label: "Codex",         fgDark: "#4FD187", bgDark: "#12251A", fgLight: "#1D7746", bgLight: "#E6F6EC"),
         "cursor":         Brand(mark: "Cu", label: "Cursor",        fgDark: "#A985F8", bgDark: "#1E1830", fgLight: "#5B37B0", bgLight: "#EFEAFB"),
         "vscode":         Brand(mark: "VS", label: "VS Code",       fgDark: "#4A9BEA", bgDark: "#10202F", fgLight: "#1C5C9C", bgLight: "#E6F0FA"),
@@ -155,7 +156,25 @@ struct ToolPalette {
 
     // Returns the real app icon if the .app bundle is installed.
     // Uses Bundle to read CFBundleIconFile directly — more reliable than NSWorkspace.
+    private static var imageCache: [String: NSImage] = [:]
+    private static var missingIconIDs: Set<String> = []
+
     static func appImage(for toolID: String) -> NSImage? {
+        if missingIconIDs.contains(toolID) { return nil }
+        if let cached = imageCache[toolID] { return cached }
+        guard let img = loadAppImage(for: toolID) else {
+            missingIconIDs.insert(toolID)
+            return nil
+        }
+        imageCache[toolID] = img
+        return img
+    }
+
+    private static func loadAppImage(for toolID: String) -> NSImage? {
+        let familyIcon = ProviderFamily.iconToolID(for: ProviderFamily.groupID(for: toolID))
+        if let bundled = bundledIcon(named: toolID) ?? bundledIcon(named: familyIcon) {
+            return bundled
+        }
         let candidates: [String: [String]] = [
             "claude-desktop": ["/Applications/Claude.app"],
             "claude-code":    ["/Applications/Claude.app"],   // same icon as Desktop
@@ -173,6 +192,9 @@ struct ToolPalette {
             "gemini":         ["/Applications/Gemini.app",
                                "/Applications/Google Gemini.app"],
             "antigravity":    ["/Applications/Antigravity.app"],
+            "pi":             ["/Applications/Pi.app"],
+            "command-code":   ["/Applications/Command Code.app"],
+            "grok":           ["/Applications/Grok.app"],
         ]
         guard let paths = candidates[toolID] else { return nil }
         let fm = FileManager.default
@@ -197,5 +219,12 @@ struct ToolPalette {
             return NSWorkspace.shared.icon(forFile: path)
         }
         return nil
+    }
+
+    private static func bundledIcon(named id: String) -> NSImage? {
+        guard let url = Bundle.module.url(forResource: id, withExtension: "png", subdirectory: "Providers"),
+              let img = NSImage(contentsOf: url) else { return nil }
+        img.size = NSSize(width: 36, height: 36)
+        return img
     }
 }

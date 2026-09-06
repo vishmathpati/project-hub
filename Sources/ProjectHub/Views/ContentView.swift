@@ -86,6 +86,7 @@ struct ContentView: View {
             }
         }
         .background(HubTheme.bg)
+        .environmentObject(compatStore)
         .onAppear {
             compatStore.restore(projectRoot: nil)
             loadUsage()
@@ -127,21 +128,9 @@ struct ContentView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    railGroup(
-                        "Workspace",
-                        caption: "The folders you work in",
-                        items: [.projects]
-                    )
-                    railGroup(
-                        "Capabilities",
-                        caption: "What your agents can do",
-                        items: [.skills, .plugins, .mcp, .providers]
-                    )
-                    railGroup(
-                        "Health",
-                        caption: "Is anything wrong, and what it costs",
-                        items: [.checks, .usage]
-                    )
+                    railGroup("Workspace", items: [.projects])
+                    railGroup("Capabilities", items: [.skills, .plugins, .mcp, .providers])
+                    railGroup("Health", items: [.checks, .usage])
                 }
                 .padding(.horizontal, 12)
             }
@@ -187,17 +176,11 @@ struct ContentView: View {
         .frame(height: HubTheme.toolbarHeight)
     }
 
-    private func railGroup(_ title: String, caption: String, items: [HubDestination]) -> some View {
+    private func railGroup(_ title: String, items: [HubDestination]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).groupHeadingStyle(HubTheme.headingText)
-                // These captions are the point of the redesign — do not dim further.
-                Text(caption)
-                    .font(HubFont.railCaption)
-                    .foregroundStyle(HubTheme.textDim)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 8)
+            Text(title)
+                .groupHeadingStyle(HubTheme.headingText)
+                .padding(.horizontal, 8)
 
             VStack(spacing: 2) {
                 ForEach(items) { item in

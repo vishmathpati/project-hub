@@ -98,9 +98,6 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             HubSectionHeading("Where skills are read from", count: SettingsView.skillPaths.count)
             VStack(alignment: .leading, spacing: 10) {
-                HubPageNote(
-                    text: "Every folder Project Hub looks in. A skill becomes available to a provider when it sits in that provider's path."
-                )
                 LazyVGrid(
                     columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
                     alignment: .leading,

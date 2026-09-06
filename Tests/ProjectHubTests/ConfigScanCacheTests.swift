@@ -41,6 +41,13 @@ final class ConfigScanCacheTests: XCTestCase {
         XCTAssertFalse(ConfigScanCache.fileURL(projectRoot: project.path, profileName: nil).path.contains("/.claude/"))
     }
 
+    func testKindKeysDoNotCollide() {
+        XCTAssertNotEqual(
+            ConfigScanCache.cacheKey(projectRoot: nil, profileName: nil, kind: .full),
+            ConfigScanCache.cacheKey(projectRoot: nil, profileName: nil, kind: .plugins)
+        )
+    }
+
     func testGlobalAndProjectKeysAreDifferent() {
         XCTAssertNotEqual(
             ConfigScanCache.cacheKey(projectRoot: nil, profileName: nil),

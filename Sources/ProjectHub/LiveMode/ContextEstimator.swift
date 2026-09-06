@@ -88,22 +88,61 @@ enum ContextEstimator {
 
     // MARK: - Public
 
-    static func estimate(for projectPath: String) -> ContextSnapshot {
-        let allSkills = estimateSkills(projectPath: projectPath)
-        let mcps     = estimateMCPs(projectPath: projectPath)
-        let claudeMd = estimateClaudeMd(projectPath: projectPath)
-        let session  = readSessionTokens(projectPath: projectPath)
+    private static var staticCache: [String: StaticEstimate] = [:]
+    private static let cacheLock = NSLock()
+
+    private struct StaticEstimate {
+        let skills: [SkillTokenItem]
+        let mcpServers: [MCPTokenItem]
+        let claudeMdTokens: Int
+    }
+
+    static func estimate(for projectPath: String, reuseStatic: Bool = true) -> ContextSnapshot {
+        let session = readSessionTokens(projectPath: projectPath)
+        let packed: StaticEstimate
+        if reuseStatic, let cached = cachedStatic(for: projectPath) {
+            packed = cached
+        } else {
+            packed = StaticEstimate(
+                skills: estimateSkills(projectPath: projectPath),
+                mcpServers: estimateMCPs(projectPath: projectPath),
+                claudeMdTokens: estimateClaudeMd(projectPath: projectPath)
+            )
+            storeStatic(packed, for: projectPath)
+        }
 
         return ContextSnapshot(
             projectPath:         projectPath,
-            skills:              allSkills,
-            mcpServers:          mcps,
-            claudeMdTokens:      claudeMd,
+            skills:              packed.skills,
+            mcpServers:          packed.mcpServers,
+            claudeMdTokens:      packed.claudeMdTokens,
             sessionInputTokens:  session.input,
             sessionCacheCreate:  session.cacheCreate,
             sessionCacheRead:    session.cacheRead,
             sessionOutputTokens: session.output
         )
+    }
+
+    static func invalidate(projectPath: String? = nil) {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        if let projectPath {
+            staticCache.removeValue(forKey: projectPath)
+        } else {
+            staticCache.removeAll()
+        }
+    }
+
+    private static func cachedStatic(for projectPath: String) -> StaticEstimate? {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        return staticCache[projectPath]
+    }
+
+    private static func storeStatic(_ value: StaticEstimate, for projectPath: String) {
+        cacheLock.lock()
+        staticCache[projectPath] = value
+        cacheLock.unlock()
     }
 
     // MARK: - Session token count (real, from JSONL)

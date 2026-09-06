@@ -179,7 +179,7 @@ struct ProjectsView: View {
     // attached to the line. An item with no inline action belongs in Checks.
 
     private var attentionItems: [AttentionItem] {
-        projects.projects.filter { !$0.exists }.map { project in
+        projects.projects.filter { !projects.cachedExists($0) }.map { project in
             AttentionItem(
                 id: project.id.uuidString,
                 subject: project.displayName,
@@ -329,7 +329,7 @@ struct ProjectsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 HubSectionHeading("What this project can do")
                 VStack(spacing: 0) {
-                    let facts = ProjectFacts(path: project.path)
+                    let facts = projects.facts(for: project) ?? ProjectFacts(path: project.path)
                     inspectorRow("Skills",        value: facts.skills == 0 ? nil : "\(facts.skills) active")
                     HubRowSeparator()
                     inspectorRow("MCP servers",   value: facts.mcpServers == 0 ? nil : "\(facts.mcpServers) declared")
@@ -619,7 +619,7 @@ struct ProjectsView: View {
         HubListRow(
             status: .neutral,
             name: disc.displayName,
-            providers: ProjectStore.detectedTools(at: disc.path, fm: FileManager.default),
+            providers: disc.detectedTools,
             caption: shortPath(disc.path)
         ) { _ in
             HubButton(title: "track", kind: .accentInline) { _ = projects.addDiscovered(disc) }
@@ -688,10 +688,10 @@ struct ProjectsView: View {
     // MARK: - Added project row
 
     private func projectRow(for project: Project) -> some View {
-        let missing    = !project.exists
+        let missing    = !projects.cachedExists(project)
         let isRenaming = renamingID == project.id
         let selected   = selection?.id == project.id
-        let facts      = missing ? nil : ProjectFacts(path: project.path)
+        let facts      = missing ? nil : projects.facts(for: project)
 
         return HubListRow(
             status: missing ? .neutral : .ok,

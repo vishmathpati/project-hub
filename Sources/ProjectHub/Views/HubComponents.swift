@@ -517,6 +517,35 @@ struct HubPageNote: View {
     }
 }
 
+struct PathOverflowMenu: View {
+    let path: String
+
+    var body: some View {
+        Menu {
+            Button("Copy path") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(path, forType: .string)
+            }
+            Button("Show in Finder") {
+                let url = URL(fileURLWithPath: path)
+                if FileManager.default.fileExists(atPath: path) {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                } else {
+                    NSWorkspace.shared.activateFileViewerSelecting([url.deletingLastPathComponent()])
+                }
+            }
+        } label: {
+            Image(systemName: "folder")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(HubTheme.textFaint)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: 18, height: 18)
+        .help("Path")
+    }
+}
+
 // MARK: - Search field
 
 struct HubSearchField: View {

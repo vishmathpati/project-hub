@@ -22,7 +22,7 @@ enum SkillSource: String, Codable {
     }
 }
 
-struct Skill: Identifiable {
+struct Skill: Identifiable, Equatable {
     var id: String { name }
     let name: String
     let description: String
@@ -301,7 +301,7 @@ struct ServerEntry: Identifiable, Hashable {
     }
 }
 
-struct ToolSummary: Identifiable {
+struct ToolSummary: Identifiable, Equatable {
     var id: String { toolID }
     let toolID: String
     let label: String

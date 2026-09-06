@@ -55,6 +55,10 @@ final class SkillStore: ObservableObject {
             return ids
         }
 
+        var tileIDs: [String] {
+            ProviderFamily.uniqueTileIDs(from: providerIDs)
+        }
+
         static func providerID(for source: SkillSource) -> String? {
             switch source {
             case .claudeGlobal: return "claude-code"
@@ -138,8 +142,11 @@ final class SkillStore: ObservableObject {
     @Published private(set) var globalSkillInstallCounts: [String: Int] = [:]
     @Published private(set) var isRefreshing: Bool = false
     @Published private(set) var isRefreshingInstallCounts: Bool = false
+    @Published var lastError: String?
 
     private var installCountTask: Task<Void, Never>?
+    private var installedCache: [String: [InstalledSkill]] = [:]
+    private var skillMarkdownCache: [String: Bool] = [:]
 
     init() {
         Task { @MainActor [weak self] in
@@ -150,14 +157,23 @@ final class SkillStore: ObservableObject {
 
     func refresh() {
         guard !isRefreshing else { return }
-        isRefreshing = true
+        let showSpinner = globalSkills.isEmpty
+        if showSpinner { isRefreshing = true }
         Task { [weak self] in
             let skills = await Task.detached(priority: .utility) {
                 SkillStore.scanGlobalSkills()
             }.value
-            self?.globalSkills = skills
-            self?.globalSkillInstallCounts = [:]
-            self?.isRefreshing = false
+            guard let self else { return }
+            let pathsChanged = skills.map(\.path) != self.globalSkills.map(\.path)
+            if skills != self.globalSkills {
+                self.globalSkills = skills
+            }
+            if pathsChanged {
+                self.globalSkillInstallCounts = [:]
+                self.installedCache = [:]
+                self.skillMarkdownCache = [:]
+            }
+            self.isRefreshing = false
         }
     }
 
@@ -192,7 +208,29 @@ final class SkillStore: ObservableObject {
     // MARK: - Project-scoped queries
 
     func installedSkills(for projectPath: String) -> [InstalledSkill] {
-        SkillStore.scanInstalledSkills(for: projectPath)
+        if let cached = installedCache[projectPath] { return cached }
+        let skills = SkillStore.scanInstalledSkills(for: projectPath)
+        installedCache[projectPath] = skills
+        return skills
+    }
+
+    func skillMarkdownExists(_ skill: Skill) -> Bool {
+        if !skill.description.isEmpty { return true }
+        if let cached = skillMarkdownCache[skill.path] { return cached }
+        let exists = FileManager.default.fileExists(
+            atPath: (skill.path as NSString).appendingPathComponent("SKILL.md")
+        )
+        skillMarkdownCache[skill.path] = exists
+        return exists
+    }
+
+    func invalidateInstalledSkills(for projectPath: String? = nil) {
+        if let projectPath {
+            installedCache.removeValue(forKey: projectPath)
+        } else {
+            installedCache.removeAll()
+        }
+        objectWillChange.send()
     }
 
     /// Install a global skill into the matching project skill root.
@@ -200,6 +238,7 @@ final class SkillStore: ObservableObject {
         let fm = FileManager.default
         let targets = installTargets(for: skill, projectPath: projectPath)
 
+        var firstError: String?
         for (baseDir, name) in targets {
             let destDir = (baseDir as NSString).appendingPathComponent(name)
             if fm.fileExists(atPath: destDir) { continue }   // already installed
@@ -207,8 +246,12 @@ final class SkillStore: ObservableObject {
                 try fm.createDirectory(atPath: baseDir, withIntermediateDirectories: true)
                 try fm.copyItem(atPath: skill.path, toPath: destDir)
             } catch {
-                // Best-effort; surface errors silently for now
+                if firstError == nil { firstError = error.localizedDescription }
             }
+        }
+        invalidateInstalledSkills(for: projectPath)
+        if let firstError {
+            lastError = firstError
         }
     }
 
@@ -246,6 +289,7 @@ final class SkillStore: ObservableObject {
             """.write(toFile: md, atomically: true, encoding: .utf8)
             return dir
         } catch {
+            lastError = error.localizedDescription
             return nil
         }
     }
@@ -265,8 +309,9 @@ final class SkillStore: ObservableObject {
         do {
             try fm.createDirectory(atPath: base, withIntermediateDirectories: true)
             try fm.copyItem(atPath: skill.path, toPath: destDir)
+            invalidateInstalledSkills(for: projectPath)
         } catch {
-            return
+            lastError = error.localizedDescription
         }
     }
 
@@ -290,6 +335,7 @@ final class SkillStore: ObservableObject {
                 continue
             }
         }
+        invalidateInstalledSkills(for: projectPath)
     }
 
     /// Remove only the selected installed skill origin.
@@ -299,12 +345,29 @@ final class SkillStore: ObservableObject {
         let canonicalSkill = canonicalFilePath(skill.path)
         guard canonicalSkill == canonicalProject || canonicalSkill.hasPrefix(canonicalProject + "/") else { return }
         try? FileManager.default.removeItem(atPath: skill.path)
+        invalidateInstalledSkills(for: projectPath)
     }
 
     /// Legacy caller support: remove writable origins with the selected name.
     func remove(skillName: String, from projectPath: String) {
         for skill in installedSkills(for: projectPath) where skill.name == skillName && skill.canRemove {
             remove(skill: skill, from: projectPath)
+        }
+    }
+
+    func removeOrigin(_ skill: Skill) {
+        switch skill.source {
+        case .codexAdmin, .codexManaged:
+            lastError = "This origin is managed and cannot be removed here."
+            return
+        default:
+            break
+        }
+        do {
+            try FileManager.default.removeItem(atPath: skill.path)
+            refresh()
+        } catch {
+            lastError = error.localizedDescription
         }
     }
 

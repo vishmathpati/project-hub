@@ -440,7 +440,7 @@ struct LiveModeView: View {
         let path = proj.path
 
         Task.detached(priority: .userInitiated) {
-            let snap = ContextEstimator.estimate(for: path)
+            let snap = ContextEstimator.estimate(for: path, reuseStatic: false)
             await MainActor.run {
                 // Discard result if a newer refresh already fired
                 guard self.refreshGeneration == gen else { return }
@@ -497,6 +497,7 @@ struct LiveModeView: View {
             }
         } catch { /* silent — never steal focus */ }
 
+        ContextEstimator.invalidate(projectPath: snapshot.projectPath)
         refreshSnapshot()
     }
 
@@ -514,6 +515,7 @@ struct LiveModeView: View {
                 enable: enable
             )
         }
+        ContextEstimator.invalidate(projectPath: snapshot.projectPath)
         refreshSnapshot()
     }
 

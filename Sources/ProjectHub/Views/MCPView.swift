@@ -13,6 +13,7 @@ struct MCPView: View {
     @State private var pendingToggle: ProjectMCPToggle? = nil
     @State private var toggleError: ProjectMCPError? = nil
     @State private var reloadTick = 0
+    @State private var serversByTool: [String: [ProjectMCPServerRow]] = [:]
 
     private var projectScopedToolIDs: [String] {
         ALL_TOOL_META
@@ -30,7 +31,7 @@ struct MCPView: View {
                 ScrollView {
                     VStack(spacing: 10) {
                         ForEach(projectScopedToolIDs, id: \.self) { toolID in
-                            toolSection(toolID: toolID, servers: projectServers(for: toolID))
+                            toolSection(toolID: toolID, servers: serversByTool[toolID] ?? [])
                         }
                     }
                     .padding(.horizontal, 12)
@@ -38,7 +39,8 @@ struct MCPView: View {
                 }
             }
         }
-        .id(reloadTick)
+        .onAppear { reloadProjectServers() }
+        .onChange(of: reloadTick) { _, _ in reloadProjectServers() }
         .sheet(isPresented: $showImport) {
             MCPImportSheet(onClose: {
                 showImport = false
@@ -120,6 +122,14 @@ struct MCPView: View {
 
     // MARK: - Data helpers
 
+    private func reloadProjectServers() {
+        var next: [String: [ProjectMCPServerRow]] = [:]
+        for toolID in projectScopedToolIDs {
+            next[toolID] = projectServers(for: toolID)
+        }
+        serversByTool = next
+    }
+
     private func projectServers(for toolID: String) -> [ProjectMCPServerRow] {
         let claudeApproval = toolID == "claude-code"
             ? MCPReader.claudeCodeProjectMCPApprovalState(projectPath: project.path)
@@ -159,7 +169,7 @@ struct MCPView: View {
 
     private var allServers: [(toolID: String, name: String)] {
         projectScopedToolIDs.flatMap { toolID in
-            projectServers(for: toolID).map { (toolID: toolID, name: $0.name) }
+            (serversByTool[toolID] ?? []).map { (toolID: toolID, name: $0.name) }
         }
     }
 
@@ -266,9 +276,11 @@ struct MCPView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(label)
                         .font(.system(size: 12, weight: .semibold))
-                    Text(configPath)
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundColor(.secondary)
+                    if !configPath.isEmpty {
+                        Text("project config")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                    }
                 }
                 Spacer()
                 Text("\(servers.count)")
@@ -317,14 +329,13 @@ struct MCPView: View {
                         .font(.system(size: 9, weight: .medium))
                         .foregroundColor(.secondary)
                 }
-                Text("\(server.sourceLabel) • \(server.sourcePathLabel)")
-                    .font(.system(size: 9, design: .monospaced))
+                Text("\(server.sourceLabel)")
+                    .font(.system(size: 9))
                     .foregroundColor(.secondary)
                     .lineLimit(1)
-                    .truncationMode(.middle)
-                if !server.detail.isEmpty {
+                if !server.detail.isEmpty, !server.detail.hasPrefix("/"), !server.detail.hasPrefix("~") {
                     Text(server.detail)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(size: 10))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)

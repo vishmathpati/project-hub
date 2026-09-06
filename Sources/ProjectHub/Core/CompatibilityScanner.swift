@@ -457,6 +457,11 @@ extension CompatibilityMatrixEntry {
     var supportsProjectSettings: Bool { kind == .settings || kind == .context }
 }
 
+enum CompatibilityScanKind: String, Codable {
+    case full
+    case plugins
+}
+
 // MARK: - Scanner
 
 enum CompatibilityScanner {
@@ -557,7 +562,11 @@ enum CompatibilityScanner {
         return FileManager.default.fileExists(atPath: path) ? path : nil
     }
 
-    static func scan(projectRoot: String?, codexProfileSelection: CodexProfileSelection? = nil) -> CompatibilityScanResult {
+    static func scan(
+        projectRoot: String?,
+        codexProfileSelection: CodexProfileSelection? = nil,
+        kind: CompatibilityScanKind = .full
+    ) -> CompatibilityScanResult {
         let selectedPath = projectRoot.map(expandedPath)
         let normalizedRoot = projectRoot.map(Project.canonicalize)
         let matrix = compatibilityMatrix(
@@ -565,6 +574,28 @@ enum CompatibilityScanner {
             selectedPath: selectedPath,
             codexProfileSelection: codexProfileSelection
         )
+        if kind == .plugins {
+            let pluginRead = readPlugins(
+                from: matrix,
+                projectRoot: normalizedRoot,
+                codexProfileSelection: codexProfileSelection
+            )
+            return CompatibilityScanResult(
+                projectRoot: normalizedRoot,
+                codexProfileSelection: codexProfileSelection,
+                generatedAt: Date(),
+                matrix: matrix,
+                servers: [],
+                skills: [],
+                skillSupport: [],
+                plugins: pluginRead.plugins,
+                settings: [],
+                issues: pluginRead.issues.sorted {
+                    if $0.severity != $1.severity { return $0.severity > $1.severity }
+                    return $0.code.rawValue < $1.code.rawValue
+                }
+            )
+        }
         var issues: [CompatibilityIssue] = []
         var servers: [CompatibilityServerObservation] = []
         var settings: [CompatibilitySettingsObservation] = []

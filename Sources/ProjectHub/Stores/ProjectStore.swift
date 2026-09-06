@@ -85,6 +85,8 @@ final class ProjectStore: ObservableObject {
     @Published private(set) var isScanning: Bool = false
 
     private let defaultsKey = "projecthub.projects.v1"
+    private var inspectionCache: [String: ProjectInspection] = [:]
+    private var configFileCache: [String: String] = [:]
 
     init() {
         load()
@@ -114,11 +116,15 @@ final class ProjectStore: ObservableObject {
             lastOpenedAt: now
         )
         projects.append(project)
+        invalidateInspectionCache(path: path)
         sortAndPersist()
         return project
     }
 
     func remove(id: UUID) {
+        if let path = projects.first(where: { $0.id == id })?.path {
+            invalidateInspectionCache(path: path)
+        }
         projects.removeAll { $0.id == id }
         persist()
     }
@@ -151,15 +157,21 @@ final class ProjectStore: ObservableObject {
 
     func scan() {
         guard !isScanning else { return }
-        isScanning = true
+        let showSpinner = projects.isEmpty && discovered.isEmpty
+        if showSpinner { isScanning = true }
         let existingPaths = Set(projects.map { ProjectStore.discoveryDedupKey($0.path) })
         Task { [weak self] in
             let result = await Task.detached(priority: .utility) {
                 ProjectStore.findProjects(excluding: existingPaths)
             }.value
             guard let self else { return }
-            discovered = result.projects
-            hiddenWorktrees = result.hiddenWorktrees
+            if discovered != result.projects {
+                discovered = result.projects
+            }
+            if hiddenWorktrees != result.hiddenWorktrees {
+                hiddenWorktrees = result.hiddenWorktrees
+            }
+            invalidateInspectionCache()
             isScanning = false
         }
     }
@@ -643,8 +655,54 @@ final class ProjectStore: ObservableObject {
         return ids
     }
 
+    private struct ProjectInspection {
+        let exists: Bool
+        let facts: ProjectFacts
+        let toolIDs: [String]
+    }
+
+    private func inspection(for project: Project) -> ProjectInspection {
+        if let cached = inspectionCache[project.path] { return cached }
+        let exists = project.exists
+        let facts = ProjectFacts(path: project.path)
+        let toolIDs = exists
+            ? ProjectStore.detectedTools(at: project.path, fm: FileManager.default)
+            : []
+        let value = ProjectInspection(exists: exists, facts: facts, toolIDs: toolIDs)
+        inspectionCache[project.path] = value
+        return value
+    }
+
+    func invalidateInspectionCache(path: String? = nil) {
+        if let path {
+            inspectionCache.removeValue(forKey: path)
+            let prefix = path + "\u{1f}"
+            configFileCache = configFileCache.filter { !$0.key.hasPrefix(prefix) && $0.key != path }
+            return
+        }
+        inspectionCache.removeAll()
+        configFileCache.removeAll()
+    }
+
     func detectedToolIDs(for project: Project) -> [String] {
-        ProjectStore.detectedTools(at: project.path, fm: FileManager.default)
+        inspection(for: project).toolIDs
+    }
+
+    func facts(for project: Project) -> ProjectFacts? {
+        guard inspection(for: project).exists else { return nil }
+        return inspection(for: project).facts
+    }
+
+    func configFileSummary(for toolID: String, at path: String) -> String {
+        let key = path + "\u{1f}" + toolID
+        if let cached = configFileCache[key] { return cached }
+        let value = ProjectFacts.configFiles(for: toolID, at: path)
+        configFileCache[key] = value
+        return value
+    }
+
+    func cachedExists(_ project: Project) -> Bool {
+        inspection(for: project).exists
     }
 
     // MARK: - Persistence

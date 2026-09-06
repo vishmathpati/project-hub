@@ -17,7 +17,9 @@ final class DashboardWindow {
     func open(projectStore: ProjectStore, skillStore: SkillStore, agentStore: AgentStore, mcpStore: MCPStore) {
         if let existing = window, existing.isVisible {
             existing.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            if NSApp.isActive == false {
+                NSApp.activate(ignoringOtherApps: true)
+            }
             return
         }
 
@@ -36,7 +38,9 @@ final class DashboardWindow {
         w.collectionBehavior.insert(.fullScreenPrimary)
         w.isReleasedWhenClosed = false
         w.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if NSApp.isActive == false {
+            NSApp.activate(ignoringOtherApps: true)
+        }
         window = w
     }
 

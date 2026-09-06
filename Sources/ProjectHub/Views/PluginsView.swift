@@ -66,9 +66,6 @@ struct PluginsView: View {
             )
             ScrollView {
                 VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
-                    HubPageNote(
-                        text: "A plugin is a bundle that installs several things at once — skills, sub-agents, MCP servers and slash commands. Expand one to see exactly what it will put on disk before you install it."
-                    )
                     content
                 }
                 .padding(HubTheme.contentPadding)
@@ -130,11 +127,9 @@ struct PluginsView: View {
             .disabled(scanning)
         }
 
-        Text(scanRoot.map(shortPath) ?? "global plugin state")
-            .font(HubFont.machine)
-            .foregroundStyle(HubTheme.textFaint)
-            .lineLimit(1)
-            .truncationMode(.middle)
+        if let scanRoot {
+            PathOverflowMenu(path: scanRoot)
+        }
 
         HubButton(title: scanning ? "Scanning" : "Rescan", kind: .primary, action: scan)
             .disabled(scanning || (scanTarget == .project && selectedProject == nil))
@@ -250,7 +245,7 @@ struct PluginsView: View {
 
                     Spacer(minLength: 12)
 
-                    ProviderTileRow(toolIDs: group.providerIDs)
+                    ProviderTileRow(toolIDs: ProviderFamily.uniqueTileIDs(from: group.providerIDs))
 
                     Text("\(group.observations.count) srf")
                         .font(HubFont.machine)
@@ -331,16 +326,11 @@ struct PluginsView: View {
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
                     .lineLimit(2)
-
-                if let path = plugin.installPath ?? plugin.sourcePath {
-                    Text(shortPath(path))
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
             }
             Spacer(minLength: 8)
+            if let path = plugin.installPath ?? plugin.sourcePath {
+                PathOverflowMenu(path: path)
+            }
         }
         .padding(7)
         .background(HubTheme.bg.opacity(0.55))
@@ -473,8 +463,12 @@ final class PluginInventoryStore: ObservableObject {
 
     func restore(key: String, projectRoot: String?) {
         guard reports[key] == nil else { return }
-        if let cached = ConfigScanCache.load(projectRoot: projectRoot) {
+        if let cached = ConfigScanCache.load(projectRoot: projectRoot, kind: .plugins) {
             reports[key] = cached
+            return
+        }
+        if let full = ConfigScanCache.load(projectRoot: projectRoot, kind: .full) {
+            reports[key] = full
         }
     }
 
@@ -484,9 +478,9 @@ final class PluginInventoryStore: ObservableObject {
 
         Task {
             let result = await Task.detached(priority: .utility) {
-                CompatibilityScanner.scan(projectRoot: projectRoot)
+                CompatibilityScanner.scan(projectRoot: projectRoot, kind: .plugins)
             }.value
-            ConfigScanCache.save(result)
+            ConfigScanCache.save(result, kind: .plugins)
 
             await MainActor.run {
                 reports[key] = result

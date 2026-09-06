@@ -27,35 +27,31 @@ struct ProvidersView: View {
         VStack(spacing: 0) {
             HubPageHeader(
                 title: "Providers",
-                subtitle: "\(installed.count) of \(rows.count) installed on this Mac",
+                subtitle: "\(installedFamilies.count) of \(familyCards.count) installed on this Mac",
                 actions: { headerActions }
             )
             ScrollView {
                 VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
-                    HubPageNote(
-                        text: "A provider is an app that reads config out of your folders. This page is where you see what each one is currently reading, and push the same setup into another one."
-                    )
-
                     HStack(spacing: 10) {
                         MetricTile(value: "\(totalAssets(.skill))", label: "skills")
                         MetricTile(value: "\(totalAssets(.mcp))",   label: "servers")
                         MetricTile(value: "\(totalAssets(.plugin))", label: "plugins")
                     }
 
-                    if !installed.isEmpty {
+                    if !installedFamilies.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
-                            HubSectionHeading("Installed", count: installed.count)
+                            HubSectionHeading("Installed", count: installedFamilies.count)
                             VStack(spacing: 8) {
-                                ForEach(installed) { row in providerCard(row) }
+                                ForEach(installedFamilies) { card in familyCard(card) }
                             }
                         }
                     }
 
-                    if !notInstalled.isEmpty {
+                    if !notInstalledFamilies.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
-                            HubSectionHeading("Not installed", count: notInstalled.count)
+                            HubSectionHeading("Not installed", count: notInstalledFamilies.count)
                             VStack(spacing: 8) {
-                                ForEach(notInstalled) { row in providerCard(row) }
+                                ForEach(notInstalledFamilies) { card in familyCard(card) }
                             }
                         }
                     }
@@ -109,8 +105,19 @@ struct ProvidersView: View {
         }
     }
 
-    private var installed: [ProviderSnapshot] { rows.filter(\.detected) }
-    private var notInstalled: [ProviderSnapshot] { rows.filter { !$0.detected } }
+    private var familyCards: [ProviderFamilyCard] {
+        ProviderFamily.grouped(rows, id: \.id).map {
+            ProviderFamilyCard(id: $0.id, members: $0.items)
+        }
+    }
+
+    private var installedFamilies: [ProviderFamilyCard] {
+        familyCards.filter(\.detected)
+    }
+
+    private var notInstalledFamilies: [ProviderFamilyCard] {
+        familyCards.filter { !$0.detected }
+    }
 
     private func totalAssets(_ kind: ProviderAsset.Kind) -> Int {
         var seen = Set<String>()
@@ -171,36 +178,40 @@ struct ProvidersView: View {
 
     // MARK: - Provider card (§3 — 28pt tile, brand colour confined to the tile)
 
-    private func providerCard(_ row: ProviderSnapshot) -> some View {
-        let expanded = expandedID == row.id
+    private func familyCard(_ card: ProviderFamilyCard) -> some View {
+        let expanded = expandedID == card.id
+        let detected = card.detected
 
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {
-                ProviderTile(toolID: row.id, size: 28)
+                ProviderTile(toolID: ProviderFamily.iconToolID(for: card.id), size: 28)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(row.name)
+                    Text(ProviderFamily.displayName(for: card.id))
                         .font(HubFont.sans(13, .semibold))
                         .foregroundStyle(HubTheme.textStrong)
-                    Text(shortPath(row.globalHome))
-                        .font(HubFont.machine)
-                        .foregroundStyle(HubTheme.textDim)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    if card.members.count > 1 {
+                        Text(card.members.map { ProviderFamily.memberLabel(for: $0.id) }.joined(separator: " · "))
+                            .font(HubFont.machine)
+                            .foregroundStyle(HubTheme.textDim)
+                    }
                 }
 
                 Spacer(minLength: 12)
+                if card.members.count == 1, let home = card.members.first?.globalHome {
+                    PathOverflowMenu(path: home)
+                }
 
-                Text("\(assetCount(row, .skill)) skills")
+                Text("\(card.members.reduce(0) { $0 + assetCount($1, .skill) }) skills")
                     .font(HubFont.machine)
                     .foregroundStyle(HubTheme.textDim)
-                Text("\(assetCount(row, .mcp)) mcp")
+                Text("\(card.members.reduce(0) { $0 + assetCount($1, .mcp) }) mcp")
                     .font(HubFont.machine)
                     .foregroundStyle(HubTheme.textDim)
 
-                if row.detected {
+                if detected {
                     HubButton(title: expanded ? "hide" : "manage", kind: .accentInline) {
-                        expandedID = expanded ? nil : row.id
+                        expandedID = expanded ? nil : card.id
                     }
                 } else {
                     Text("not installed")
@@ -213,11 +224,27 @@ struct ProvidersView: View {
 
             if expanded {
                 Rectangle().fill(HubTheme.hairline).frame(height: 1)
-                controls(for: row)
+                VStack(alignment: .leading, spacing: 20) {
+                    ForEach(card.members) { row in
+                        VStack(alignment: .leading, spacing: 10) {
+                            if card.members.count > 1 {
+                                HStack {
+                                    Text(ProviderFamily.memberLabel(for: row.id))
+                                        .font(HubFont.sans(12, .semibold))
+                                        .foregroundStyle(HubTheme.textStrong)
+                                    Spacer()
+                                    PathOverflowMenu(path: row.globalHome)
+                                }
+                            }
+                            controls(for: row)
+                        }
+                    }
+                }
+                .padding(.bottom, 4)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .opacity(row.detected ? 1 : 0.55)
+        .opacity(detected ? 1 : 0.55)
         .hubCard()
         .animation(HubTheme.disclosureAnimation, value: expanded)
     }
@@ -402,7 +429,6 @@ struct ProvidersView: View {
 
     private func reload() {
         let projectPath = selectedProject?.path
-        loading = true
         Task.detached(priority: .utility) {
             let result = ProviderCatalog.snapshots(projectPath: projectPath)
             await MainActor.run {
@@ -420,6 +446,12 @@ struct ProvidersView: View {
             NSWorkspace.shared.open(URL(fileURLWithPath: path))
         }
     }
+}
+
+private struct ProviderFamilyCard: Identifiable {
+    let id: String
+    let members: [ProviderSnapshot]
+    var detected: Bool { members.contains(where: \.detected) }
 }
 
 private struct IdentifiablePath: Identifiable {
