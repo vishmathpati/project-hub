@@ -11,30 +11,31 @@ struct SkillsView: View {
     @EnvironmentObject var projectStore: ProjectStore
 
     @State private var editingSkill: InstalledSkill? = nil
-    @State private var localTick: Int = 0
-
 
     var body: some View {
-        let _ = localTick
-        let installed = skillStore.installedSkills(for: project.path)
+        let installed = skillStore.cachedInstalledSkills(for: project.path)
         let globals   = skillStore.globalSkills
 
         HStack(alignment: .top, spacing: 0) {
             // MARK: Left — Installed
             VStack(alignment: .leading, spacing: 0) {
-                sectionHeader(title: "Installed", count: installed.count, color: .green)
+                sectionHeader(title: "Installed", count: installed?.count, color: .green)
                 Divider()
-                if installed.isEmpty {
-                    emptyInstalled
-                } else {
-                    ScrollView {
-                        VStack(spacing: 4) {
-                            ForEach(installed) { skill in
-                                installedRow(skill, projectPath: project.path)
+                if let installed {
+                    if installed.isEmpty {
+                        emptyInstalled
+                    } else {
+                        ScrollView {
+                            VStack(spacing: 4) {
+                                ForEach(installed) { skill in
+                                    installedRow(skill, projectPath: project.path)
+                                }
                             }
+                            .padding(8)
                         }
-                        .padding(8)
                     }
+                } else {
+                    scanningInstalled
                 }
             }
             .frame(maxWidth: .infinity)
@@ -52,7 +53,7 @@ struct SkillsView: View {
                         VStack(spacing: 4) {
                             ForEach(globals) { skill in
                                 globalRow(skill,
-                                          alreadyInstalled: skillStore.isInstalled(skill, in: installed),
+                                          alreadyInstalled: skillStore.isInstalled(skill, in: installed ?? []),
                                           projectPath: project.path)
                             }
                         }
@@ -63,6 +64,9 @@ struct SkillsView: View {
             .frame(maxWidth: .infinity)
         }
         .frame(maxHeight: .infinity)
+        .task(id: project.path) {
+            await skillStore.loadInstalledSkills(for: project.path)
+        }
         .alert("Couldn't update skill", isPresented: Binding(
             get: { skillStore.lastError != nil },
             set: { if !$0 { skillStore.lastError = nil } }
@@ -77,7 +81,6 @@ struct SkillsView: View {
                 onSaved: {
                     skillStore.invalidateInstalledSkills(for: project.path)
                     skillStore.refresh()
-                    localTick += 1
                 }
             )
         }
@@ -85,12 +88,12 @@ struct SkillsView: View {
 
     // MARK: - Section header
 
-    private func sectionHeader(title: String, count: Int, color: Color) -> some View {
+    private func sectionHeader(title: String, count: Int?, color: Color) -> some View {
         HStack(spacing: 6) {
             Text(title)
                 .font(.system(size: 11, weight: .bold))
                 .foregroundColor(.primary)
-            Text("\(count)")
+            Text(count.map(String.init) ?? "—")
                 .font(.system(size: 10, weight: .bold))
                 .foregroundColor(color)
                 .padding(.horizontal, 5)
@@ -140,7 +143,6 @@ struct SkillsView: View {
                     ),
                     in: projectPath
                 )
-                localTick &+= 1
             }) {
                 Image(systemName: "square.on.square")
                     .font(.system(size: 11))
@@ -229,6 +231,21 @@ struct SkillsView: View {
     }
 
     // MARK: - Empty states
+
+    private var scanningInstalled: some View {
+        VStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Reading installed skills…")
+                .font(.system(size: 12, weight: .semibold))
+            Text("Scanning this project's skill folders.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(20)
+    }
 
     private var emptyInstalled: some View {
         VStack(spacing: 8) {
@@ -354,11 +371,11 @@ struct GlobalSkillsView: View {
         return projectStore.projects.first
     }
 
-    private var projectSkillGroups: [ProjectSkillGroup] {
+    private var projectSkillGroups: [ProjectSkillGroup]? {
         guard let selectedProject else { return [] }
+        guard let installed = skillStore.cachedInstalledSkills(for: selectedProject.path) else { return nil }
         return ProjectSkillGroup.groups(
-            from: skillStore.installedSkills(for: selectedProject.path)
-                .filter { $0.scopeLabel == "Project" || $0.scopeLabel == "Private" }
+            from: installed.filter { $0.scopeLabel == "Project" || $0.scopeLabel == "Private" }
         )
     }
 
@@ -416,6 +433,10 @@ struct GlobalSkillsView: View {
         }
         .task(id: installCountRefreshKey) {
             skillStore.refreshGlobalSkillInstallCounts(for: projectStore.projects)
+        }
+        .task(id: selectedProject?.path) {
+            guard let path = selectedProject?.path else { return }
+            await skillStore.loadInstalledSkills(for: path)
         }
         .alert("Couldn't update skill", isPresented: Binding(
             get: { skillStore.lastError != nil },
@@ -475,7 +496,10 @@ struct GlobalSkillsView: View {
             return "\(count) unique, across \(uniqueProviderCount) provider\(uniqueProviderCount == 1 ? "" : "s")"
         case .project:
             if let selectedProject {
-                return "\(projectSkillGroups.count) project skill\(projectSkillGroups.count == 1 ? "" : "s") in \(selectedProject.displayName)"
+                guard let groups = projectSkillGroups else {
+                    return "Reading \(selectedProject.displayName)…"
+                }
+                return "\(groups.count) project skill\(groups.count == 1 ? "" : "s") in \(selectedProject.displayName)"
             }
             return "No saved projects"
         }
@@ -485,7 +509,7 @@ struct GlobalSkillsView: View {
     private var globalContent: some View {
         if globalGroups.isEmpty {
             if skillStore.isRefreshing {
-                loadingState
+                loadingState("Loading global skills…")
             } else {
                 emptyGlobalState
             }
@@ -717,16 +741,20 @@ struct GlobalSkillsView: View {
     private var projectContent: some View {
         if projectStore.projects.isEmpty {
             emptyProjectState
-        } else if projectSkillGroups.isEmpty {
-            emptySelectedProjectState
+        } else if let groups = projectSkillGroups {
+            if groups.isEmpty {
+                emptySelectedProjectState
+            } else {
+                projectSkillList(groups)
+            }
         } else {
-            projectSkillList
+            loadingState("Reading project skills…")
         }
     }
 
-    private var projectSkillList: some View {
-        let enabled  = projectSkillGroups.filter { $0.state != .disabled }
-        let disabled = projectSkillGroups.filter { $0.state == .disabled }
+    private func projectSkillList(_ groups: [ProjectSkillGroup]) -> some View {
+        let enabled  = groups.filter { $0.state != .disabled }
+        let disabled = groups.filter { $0.state == .disabled }
 
         return VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
             if !enabled.isEmpty {
@@ -985,10 +1013,10 @@ struct GlobalSkillsView: View {
         }
     }
 
-    private var loadingState: some View {
+    private func loadingState(_ label: String) -> some View {
         VStack(spacing: 10) {
             ProgressView()
-            Text("Loading global skills…")
+            Text(label)
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
         }
