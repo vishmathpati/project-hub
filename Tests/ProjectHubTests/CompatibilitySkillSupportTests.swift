@@ -428,6 +428,42 @@ final class CompatibilitySkillSupportTests: XCTestCase {
         XCTAssertFalse(preview.after.contains("enabled = false"))
     }
 
+    func testCodexSkillOverridePreviewMatchesSectionByFileWhenSkillsShareProjectRoot() throws {
+        let root = try makeTempProject()
+        let skillsRoot = root.appendingPathComponent(".agents/skills", isDirectory: true)
+        let configPath = root.appendingPathComponent(".codex/config.toml")
+        try FileManager.default.createDirectory(at: configPath.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try writeSkill(named: "docs-skill", under: skillsRoot)
+        try writeSkill(named: "deploy-skill", under: skillsRoot)
+        let docsSkillMD = skillsRoot.appendingPathComponent("docs-skill/SKILL.md")
+        let deploySkillMD = skillsRoot.appendingPathComponent("deploy-skill/SKILL.md")
+        try """
+        [[skills.config]]
+        path = "\(docsSkillMD.path)"
+        enabled = false
+
+        [[skills.config]]
+        path = "\(deploySkillMD.path)"
+        enabled = false
+        """.write(to: configPath, atomically: true, encoding: .utf8)
+
+        let preview = try XCTUnwrap(ConfigWriter.previewSetCodexSkillOverrideEnabled(
+            configPath: configPath.path,
+            skillMDPath: deploySkillMD.path,
+            enabled: true
+        ))
+
+        XCTAssertEqual(preview.after, """
+        [[skills.config]]
+        path = "\(docsSkillMD.path)"
+        enabled = false
+
+        [[skills.config]]
+        path = "\(deploySkillMD.path)"
+        enabled = true
+        """)
+    }
+
     func testRuntimeProfileFileCodexSkillOverrideDisablesCLIOnly() throws {
         let root = try makeTempProject()
         let codexHome = root.appendingPathComponent("codex-home", isDirectory: true)

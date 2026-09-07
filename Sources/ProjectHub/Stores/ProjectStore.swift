@@ -59,10 +59,15 @@ struct Project: Codable, Identifiable, Equatable {
     var addedAt: Date
     var lastOpenedAt: Date
 
-    static func canonicalize(_ raw: String) -> String {
-        let expanded = (raw as NSString).expandingTildeInPath
-        let url = URL(fileURLWithPath: expanded).standardizedFileURL.resolvingSymlinksInPath()
-        return ProjectRootDetector.detect(from: url.path)
+    static func resolvedFilePath(_ raw: String) -> String {
+        URL(fileURLWithPath: (raw as NSString).expandingTildeInPath)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
+    }
+
+    static func rootOwning(_ raw: String) -> String {
+        ProjectRootDetector.detect(from: resolvedFilePath(raw))
     }
 
     static func folderName(at path: String) -> String {
@@ -100,7 +105,7 @@ final class ProjectStore: ObservableObject {
 
     @discardableResult
     func add(path rawPath: String, displayName: String? = nil) -> Project {
-        let path = Project.canonicalize(rawPath)
+        let path = Project.rootOwning(rawPath)
         if let idx = projects.firstIndex(where: { $0.path == path }) {
             projects[idx].lastOpenedAt = Date()
             if let name = displayName { projects[idx].displayName = name }
@@ -150,7 +155,7 @@ final class ProjectStore: ObservableObject {
         panel.title = "Add project folder"
         panel.prompt = "Add"
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
-        return Project.canonicalize(url.path)
+        return Project.rootOwning(url.path)
     }
 
     // MARK: - Auto-discovery
@@ -427,7 +432,7 @@ final class ProjectStore: ObservableObject {
             return nil
         }
         let candidate = isDir.boolValue ? standardized.path : standardized.deletingLastPathComponent().path
-        let canonical = Project.canonicalize(candidate)
+        let canonical = Project.rootOwning(candidate)
         var canonicalIsDir: ObjCBool = false
         guard fm.fileExists(atPath: canonical, isDirectory: &canonicalIsDir),
               canonicalIsDir.boolValue else {

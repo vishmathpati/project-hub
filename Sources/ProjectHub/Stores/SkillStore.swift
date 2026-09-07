@@ -344,7 +344,7 @@ final class SkillStore: ObservableObject {
     /// symlinked skill directory can never escape the project on delete.
     func remove(skill: InstalledSkill, from projectPath: String) {
         guard skill.canRemove else { return }
-        let canonicalProject = Project.canonicalize(ProjectRootDetector.detect(from: projectPath))
+        let canonicalProject = Project.rootOwning(ProjectRootDetector.detect(from: projectPath))
         let canonicalSkill = canonicalFilePath(skill.path)
         guard canonicalSkill == canonicalProject || canonicalSkill.hasPrefix(canonicalProject + "/") else { return }
         guard canonicalFilePath((skill.path as NSString).appendingPathComponent("SKILL.md")).hasPrefix(canonicalSkill + "/") else { return }

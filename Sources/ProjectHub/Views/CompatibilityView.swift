@@ -6075,13 +6075,15 @@ struct CompatibilityView: View {
               surface.format == .toml,
               surface.writeMethod == .file,
               let path = surface.path,
-              let subjectPath = issue.subjectPath,
-              let skill = report.skills.first(where: { skill in
-                  guard skill.enabledOverride == false else { return false }
-                  let skillMD = (skill.path as NSString).appendingPathComponent("SKILL.md")
-                  return Project.canonicalize(skillMD) == Project.canonicalize(subjectPath)
-              })
+              let subjectPath = issue.subjectPath
         else { return nil }
+
+        let subjectFilePath = Project.resolvedFilePath(subjectPath)
+        guard let skill = report.skills.first(where: { skill in
+            guard skill.enabledOverride == false else { return false }
+            let skillMD = (skill.path as NSString).appendingPathComponent("SKILL.md")
+            return Project.resolvedFilePath(skillMD) == subjectFilePath
+        }) else { return nil }
 
         let skillMD = subjectPath
         guard let preview = ConfigWriter.previewSetCodexSkillOverrideEnabled(

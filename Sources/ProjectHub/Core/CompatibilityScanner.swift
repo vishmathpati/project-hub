@@ -474,7 +474,7 @@ enum CompatibilityScanner {
         codexProfileSelection: CodexProfileSelection? = nil
     ) -> [CompatibilityMCPInventoryRow] {
         let selectedPath = projectRoot.map(expandedPath)
-        let normalizedRoot = projectRoot.map(Project.canonicalize)
+        let normalizedRoot = projectRoot.map(Project.rootOwning)
         let matrix = compatibilityMatrix(
             projectRoot: normalizedRoot,
             selectedPath: selectedPath,
@@ -568,7 +568,7 @@ enum CompatibilityScanner {
         kind: CompatibilityScanKind = .full
     ) -> CompatibilityScanResult {
         let selectedPath = projectRoot.map(expandedPath)
-        let normalizedRoot = projectRoot.map(Project.canonicalize)
+        let normalizedRoot = projectRoot.map(Project.rootOwning)
         let matrix = compatibilityMatrix(
             projectRoot: normalizedRoot,
             selectedPath: selectedPath,
@@ -706,7 +706,7 @@ enum CompatibilityScanner {
                 continue
             }
             let key = [
-                Project.canonicalize(server.path),
+                Project.rootOwning(server.path),
                 server.scope.rawValue,
                 server.name,
                 server.fingerprint
@@ -1815,7 +1815,7 @@ enum CompatibilityScanner {
             for entry in entries.sorted()
                 where !entry.hasPrefix(".") && entry.lowercased().hasSuffix(".json") {
                 let path = (dropInDir as NSString).appendingPathComponent(entry)
-                guard seen.insert(Project.canonicalize(path)).inserted else { continue }
+                guard seen.insert(Project.rootOwning(path)).inserted else { continue }
                 surfaces.append(.init(
                     id: "claude-code-managed-settings-dropin|\(path)",
                     toolID: .claudeCode,
@@ -1873,7 +1873,7 @@ enum CompatibilityScanner {
         let startURL = URL(fileURLWithPath: expandedPath(start))
             .standardizedFileURL
             .resolvingSymlinksInPath()
-        let stopURL = URL(fileURLWithPath: Project.canonicalize(repoRoot))
+        let stopURL = URL(fileURLWithPath: Project.rootOwning(repoRoot))
         var directories: [URL] = []
         var current = startURL
 
@@ -2052,7 +2052,7 @@ enum CompatibilityScanner {
             return lhs.source.precedence < rhs.source.precedence
         }
         let uniqueDirectories = prioritizedDirectories.filter { entry in
-            seenDirectories.insert(Project.canonicalize(entry.path)).inserted
+            seenDirectories.insert(Project.rootOwning(entry.path)).inserted
         }
 
         return ClaudeMemoryConfiguration(
@@ -2270,7 +2270,7 @@ enum CompatibilityScanner {
 
     static func skillInventory(projectRoot: String?) -> CompatibilitySkillInventory {
         let selectedPath = projectRoot.map(expandedPath)
-        let normalizedRoot = projectRoot.map(Project.canonicalize)
+        let normalizedRoot = projectRoot.map(Project.rootOwning)
         let matrix = compatibilityMatrix(
             projectRoot: normalizedRoot,
             selectedPath: selectedPath,
@@ -2859,7 +2859,7 @@ enum CompatibilityScanner {
         let startURL = URL(fileURLWithPath: expandedPath(start))
             .standardizedFileURL
             .resolvingSymlinksInPath()
-        let stopURL = URL(fileURLWithPath: Project.canonicalize(repoRoot))
+        let stopURL = URL(fileURLWithPath: Project.rootOwning(repoRoot))
         var directories: [URL] = []
         var current = startURL
 
@@ -2919,7 +2919,7 @@ enum CompatibilityScanner {
         let startURL = URL(fileURLWithPath: expandedPath(start))
             .standardizedFileURL
             .resolvingSymlinksInPath()
-        let stopURL = URL(fileURLWithPath: Project.canonicalize(repoRoot))
+        let stopURL = URL(fileURLWithPath: Project.rootOwning(repoRoot))
         var directories: [URL] = []
         var current = startURL
 
@@ -4129,7 +4129,7 @@ enum CompatibilityScanner {
             return []
         }
 
-        let normalizedProjectRoot = projectRoot.map(Project.canonicalize)
+        let normalizedProjectRoot = projectRoot.map(Project.rootOwning)
         var installed: [ClaudeInstalledPlugin] = []
         for pluginID in plugins.keys.sorted() {
             for install in pluginInstallDictionaries(plugins[pluginID]) {
@@ -4748,7 +4748,7 @@ enum CompatibilityScanner {
         let startURL = URL(fileURLWithPath: expandedPath(start))
             .standardizedFileURL
             .resolvingSymlinksInPath()
-        let stopURL = URL(fileURLWithPath: Project.canonicalize(repoRoot))
+        let stopURL = URL(fileURLWithPath: Project.rootOwning(repoRoot))
         var directories: [URL] = []
         var current = startURL
 
@@ -4877,7 +4877,7 @@ enum CompatibilityScanner {
     }
 
     private static func isMeaningfulProjectRoot(_ path: String) -> Bool {
-        let home = Project.canonicalize(NSHomeDirectory())
+        let home = Project.rootOwning(NSHomeDirectory())
         let broadPaths: Set<String> = [
             "/",
             home,
@@ -4886,7 +4886,7 @@ enum CompatibilityScanner {
             (home as NSString).appendingPathComponent("Downloads"),
             (home as NSString).appendingPathComponent("Library")
         ]
-        return !broadPaths.contains(Project.canonicalize(path))
+        return !broadPaths.contains(Project.rootOwning(path))
     }
 
     // MARK: - MCP reading
