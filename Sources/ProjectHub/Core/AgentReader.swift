@@ -57,12 +57,20 @@ enum AgentReader {
         }
 
         // Sanitise the name into a filename
-        let filename = agent.name
+        let stem = agent.name
             .lowercased()
             .replacingOccurrences(of: " ", with: "-")
             .components(separatedBy: CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_")).inverted)
             .joined()
-        let filePath = (agentsDir as NSString).appendingPathComponent("\(filename).md")
+        let base = stem.isEmpty ? "agent" : stem
+
+        var filename = "\(base).md"
+        var counter = 2
+        while fm.fileExists(atPath: (agentsDir as NSString).appendingPathComponent(filename)) {
+            filename = "\(base)-\(counter).md"
+            counter += 1
+        }
+        let filePath = (agentsDir as NSString).appendingPathComponent(filename)
 
         let toolsLine = agent.tools.isEmpty ? "" : agent.tools.joined(separator: ", ")
         let content = """
