@@ -815,7 +815,79 @@ final class ProjectStore: ObservableObject {
 // MARK: - Project root detection
 
 enum ProjectRootDetector {
+    private struct FileStamp: Equatable {
+        let device: dev_t
+        let inode: ino_t
+        let size: off_t
+        let modifiedSeconds: Int
+        let modifiedNanoseconds: Int
+
+        init?(path: String) {
+            var status = stat()
+            guard stat(path, &status) == 0 else { return nil }
+            device = status.st_dev
+            inode = status.st_ino
+            size = status.st_size
+            modifiedSeconds = status.st_mtimespec.tv_sec
+            modifiedNanoseconds = status.st_mtimespec.tv_nsec
+        }
+    }
+
+    private struct ConfigStamp: Equatable {
+        let claudeJSONPath: String
+        let codexConfigPath: String
+        let claudeJSON: FileStamp?
+        let codexConfig: FileStamp?
+
+        static func current() -> ConfigStamp {
+            let claudeJSONPath = ProjectRootDetector.claudeJSONPath()
+            let codexConfigPath = (ProjectHubPaths.codexHome(home: NSHomeDirectory()) as NSString)
+                .appendingPathComponent("config.toml")
+            return ConfigStamp(
+                claudeJSONPath: claudeJSONPath,
+                codexConfigPath: codexConfigPath,
+                claudeJSON: FileStamp(path: claudeJSONPath),
+                codexConfig: FileStamp(path: codexConfigPath)
+            )
+        }
+    }
+
+    private struct ConfigSnapshot {
+        let stamp: ConfigStamp
+        let configuredRoots: Set<String>
+        let markers: [String]
+
+        init(stamp: ConfigStamp) {
+            self.stamp = stamp
+            let codexConfig = try? String(contentsOfFile: stamp.codexConfigPath, encoding: .utf8)
+            configuredRoots = codexProjectRoots(in: codexConfig)
+                .union(claudeProjectRoots(at: stamp.claudeJSONPath))
+            markers = projectRootMarkers(codexConfig: codexConfig)
+        }
+    }
+
+    private static var cachedSnapshot: ConfigSnapshot?
+    private static let cacheLock = NSLock()
+
     static func detect(from rawPath: String) -> String {
+        resolveRoot(from: rawPath, in: currentSnapshot())
+    }
+
+    private static func currentSnapshot() -> ConfigSnapshot {
+        let stamp = ConfigStamp.current()
+        cacheLock.lock()
+        let installed = cachedSnapshot
+        cacheLock.unlock()
+        if let installed, installed.stamp == stamp { return installed }
+
+        let rebuilt = ConfigSnapshot(stamp: stamp)
+        cacheLock.lock()
+        cachedSnapshot = rebuilt
+        cacheLock.unlock()
+        return rebuilt
+    }
+
+    private static func resolveRoot(from rawPath: String, in snapshot: ConfigSnapshot) -> String {
         let expanded = (rawPath as NSString).expandingTildeInPath
         let requested = URL(fileURLWithPath: expanded).standardizedFileURL.resolvingSymlinksInPath()
         let fm = FileManager.default
@@ -828,8 +900,7 @@ enum ProjectRootDetector {
         }
 
         let candidates = ancestorPaths(from: startURL.path)
-        let configuredRoots = codexProjectRoots().union(claudeProjectRoots())
-        let configuredRoot = bestConfiguredRoot(in: candidates, configuredRoots: configuredRoots)
+        let configuredRoot = bestConfiguredRoot(in: candidates, configuredRoots: snapshot.configuredRoots)
         let gitRoot = nearestGitRoot(in: candidates, fm: fm)
         if let configuredRoot {
             if let gitRoot,
@@ -843,13 +914,11 @@ enum ProjectRootDetector {
         if let gitRoot { return gitRoot }
 
         var best = startURL.path
-        let markers = projectRootMarkers()
-
         var url = startURL
         while true {
             let path = url.path
             if isMeaningfulConfiguredRoot(path),
-               hasProjectMarkers(path, markers: markers) {
+               hasProjectMarkers(path, markers: snapshot.markers) {
                 best = path
             }
             let parent = url.deletingLastPathComponent()
@@ -887,8 +956,7 @@ enum ProjectRootDetector {
         return false
     }
 
-    private static func claudeProjectRoots() -> Set<String> {
-        let path = claudeJSONPath()
+    private static func claudeProjectRoots(at path: String) -> Set<String> {
         guard let data = FileManager.default.contents(atPath: path),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let projects = json["projects"] as? [String: Any] else {
@@ -905,13 +973,8 @@ enum ProjectRootDetector {
         return (home as NSString).appendingPathComponent(".claude.json")
     }
 
-    private static func codexProjectRoots() -> Set<String> {
-        let codexDir = ProjectHubPaths.codexHome(home: NSHomeDirectory())
-        let path = (codexDir as NSString).appendingPathComponent("config.toml")
-        guard let content = try? String(contentsOfFile: path, encoding: .utf8) else {
-            return []
-        }
-
+    private static func codexProjectRoots(in content: String?) -> Set<String> {
+        guard let content else { return [] }
         return Set(codexProjectRootPaths(in: content))
     }
 
@@ -927,7 +990,7 @@ enum ProjectRootDetector {
         return uniqueStringsPreservingOrder(paths)
     }
 
-    private static func projectRootMarkers() -> [String] {
+    private static func projectRootMarkers(codexConfig: String?) -> [String] {
         let builtIn = [
             "Package.swift",
             "package.json",
@@ -946,13 +1009,11 @@ enum ProjectRootDetector {
             ".claude/launch.json",
             ".claude/skills"
         ]
-        return uniqueStringsPreservingOrder(builtIn + codexProjectRootMarkers())
+        return uniqueStringsPreservingOrder(builtIn + codexProjectRootMarkers(in: codexConfig))
     }
 
-    private static func codexProjectRootMarkers() -> [String] {
-        let codexDir = ProjectHubPaths.codexHome(home: NSHomeDirectory())
-        let path = (codexDir as NSString).appendingPathComponent("config.toml")
-        guard let content = try? String(contentsOfFile: path, encoding: .utf8),
+    private static func codexProjectRootMarkers(in content: String?) -> [String] {
+        guard let content,
               let raw = topLevelTOMLValue(named: "project_root_markers", in: content),
               let values = parseTOMLStringArrayLiteral(raw) else { return [] }
         return values
@@ -968,9 +1029,9 @@ enum ProjectRootDetector {
             .path
     }
 
-    private static func isMeaningfulConfiguredRoot(_ path: String) -> Bool {
+    private static let broadConfiguredRoots: Set<String> = {
         let home = normalizeConfiguredPath(NSHomeDirectory())
-        let broadPaths: Set<String> = [
+        return [
             "/",
             home,
             (home as NSString).appendingPathComponent("Desktop"),
@@ -978,7 +1039,10 @@ enum ProjectRootDetector {
             (home as NSString).appendingPathComponent("Downloads"),
             (home as NSString).appendingPathComponent("Library")
         ]
-        return !broadPaths.contains(path)
+    }()
+
+    private static func isMeaningfulConfiguredRoot(_ path: String) -> Bool {
+        !broadConfiguredRoots.contains(path)
     }
 
     private static func unescapeTOMLBasicString(_ raw: String) -> String {
