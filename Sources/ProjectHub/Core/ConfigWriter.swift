@@ -2722,10 +2722,10 @@ enum ConfigWriter {
         enabled: Bool
     ) -> String? {
         var lines = toml.components(separatedBy: "\n")
-        let target = Project.canonicalize(skillMDPath)
+        let target = Project.resolvedFilePath(skillMDPath)
         guard FileManager.default.fileExists(atPath: target) else { return nil }
         let matches = codexSkillConfigSections(in: lines, configPath: configPath)
-            .filter { Project.canonicalize($0.resolvedPath) == target }
+            .filter { Project.resolvedFilePath($0.resolvedPath) == target }
         guard matches.count == 1, let section = matches.first else { return nil }
         if enabled {
             guard section.enabled == false else { return nil }

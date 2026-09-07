@@ -34,7 +34,7 @@ struct CompatibilityView: View {
     @State private var scanning = false
     @State private var scanRequestID = UUID()
     @State private var applyingScanResult = false
-    @State private var fixPlanCache: [UUID: CompatibilityFixPlan] = [:]
+    @State private var fixPlanCache: [UUID: CompatibilityFixPlan?] = [:]
     @State private var fixPlanCacheKey = ""
 
     init(project: Project? = nil) {
@@ -6075,13 +6075,15 @@ struct CompatibilityView: View {
               surface.format == .toml,
               surface.writeMethod == .file,
               let path = surface.path,
-              let subjectPath = issue.subjectPath,
-              let skill = report.skills.first(where: { skill in
-                  guard skill.enabledOverride == false else { return false }
-                  let skillMD = (skill.path as NSString).appendingPathComponent("SKILL.md")
-                  return Project.canonicalize(skillMD) == Project.canonicalize(subjectPath)
-              })
+              let subjectPath = issue.subjectPath
         else { return nil }
+
+        let subjectFilePath = Project.resolvedFilePath(subjectPath)
+        guard let skill = report.skills.first(where: { skill in
+            guard skill.enabledOverride == false else { return false }
+            let skillMD = (skill.path as NSString).appendingPathComponent("SKILL.md")
+            return Project.resolvedFilePath(skillMD) == subjectFilePath
+        }) else { return nil }
 
         let skillMD = subjectPath
         guard let preview = ConfigWriter.previewSetCodexSkillOverrideEnabled(
@@ -6816,12 +6818,10 @@ struct CompatibilityView: View {
         let key = fixPlanCacheKey(for: report)
         guard fixPlanCacheKey != key else { return }
         let lookup = matrixLookup(report)
-        var next: [UUID: CompatibilityFixPlan] = [:]
+        var next: [UUID: CompatibilityFixPlan?] = [:]
         next.reserveCapacity(report.issues.count)
         for issue in report.issues {
-            if let plan = fixPlan(for: issue, matrix: lookup) {
-                next[issue.id] = plan
-            }
+            next.updateValue(fixPlan(for: issue, matrix: lookup), forKey: issue.id)
         }
         fixPlanCache = next
         fixPlanCacheKey = key
