@@ -3916,7 +3916,32 @@ enum ConfigWriter {
         let enabled: Bool?
     }
 
+    private static var cachedSkillSections: (configPath: String, lines: [String], sections: [CodexSkillConfigSection])?
+    private static let skillSectionsLock = NSLock()
+
+    /// A fix-plan rebuild asks for the same unchanged config once per issue, so parsing
+    /// it every time dominates that pass.
     private static func codexSkillConfigSections(
+        in lines: [String],
+        configPath: String
+    ) -> [CodexSkillConfigSection] {
+        skillSectionsLock.lock()
+        if let cached = cachedSkillSections, cached.configPath == configPath, cached.lines == lines {
+            let sections = cached.sections
+            skillSectionsLock.unlock()
+            return sections
+        }
+        skillSectionsLock.unlock()
+
+        let sections = parseCodexSkillConfigSections(in: lines, configPath: configPath)
+
+        skillSectionsLock.lock()
+        cachedSkillSections = (configPath, lines, sections)
+        skillSectionsLock.unlock()
+        return sections
+    }
+
+    private static func parseCodexSkillConfigSections(
         in lines: [String],
         configPath: String
     ) -> [CodexSkillConfigSection] {
