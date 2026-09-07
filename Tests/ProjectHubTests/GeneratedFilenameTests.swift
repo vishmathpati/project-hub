@@ -69,6 +69,21 @@ final class GeneratedFilenameTests: XCTestCase {
         XCTAssertEqual(files, ["agent.md"], "A name with nothing usable must fall back to a real filename, not \".md\".")
     }
 
+    func testCreatingTheSameAgentNameTwiceIsRejected() throws {
+        let root = try makeTempDirectory()
+        let template = AgentTemplate(name: "Code Helper", description: "first", model: "sonnet", tools: [])
+        try AgentReader.create(agent: template, in: root.path)
+
+        XCTAssertThrowsError(
+            try AgentReader.create(agent: template, in: root.path),
+            "Agent.id is the name, so two agents sharing one name give SwiftUI duplicate ids and make delete-by-name ambiguous."
+        )
+
+        let dir = root.appendingPathComponent(".claude/agents", isDirectory: true)
+        let files = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+        XCTAssertEqual(files, ["code-helper.md"], "the rejected create must not leave a second file behind")
+    }
+
     private func makeTempDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("ProjectHubGeneratedFilenameTests-\(UUID().uuidString)", isDirectory: true)

@@ -333,7 +333,7 @@ final class SkillStore: ObservableObject {
                 try fm.createDirectory(atPath: baseDir, withIntermediateDirectories: true)
                 try fm.copyItem(atPath: skill.path, toPath: destDir)
             } catch {
-                failures.append("\((baseDir as NSString).lastPathComponent): \(error.localizedDescription)")
+                failures.append("\(baseDir): \(error.localizedDescription)")
             }
         }
         if !failures.isEmpty {

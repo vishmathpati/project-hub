@@ -48,8 +48,23 @@ enum AgentReader {
             }
     }
 
+    enum WriteError: LocalizedError {
+        case duplicateName(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .duplicateName(let name):
+                return "An agent named \(name) already exists in this project."
+            }
+        }
+    }
+
     /// Write a new agent .md file from a template.
     static func create(agent: AgentTemplate, in projectPath: String) throws {
+        guard !agents(for: projectPath).contains(where: { $0.name == agent.name }) else {
+            throw WriteError.duplicateName(agent.name)
+        }
+
         let agentsDir = (projectPath as NSString).appendingPathComponent(".claude/agents")
         let fm = FileManager.default
         if !fm.fileExists(atPath: agentsDir) {
