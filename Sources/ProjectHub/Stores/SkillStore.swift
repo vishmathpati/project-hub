@@ -142,10 +142,11 @@ final class SkillStore: ObservableObject {
     @Published private(set) var globalSkillInstallCounts: [String: Int] = [:]
     @Published private(set) var isRefreshing: Bool = false
     @Published private(set) var isRefreshingInstallCounts: Bool = false
+    @Published private(set) var installedSkillsByProject: [String: [InstalledSkill]] = [:]
     @Published var lastError: String?
 
     private var installCountTask: Task<Void, Never>?
-    private var installedCache: [String: [InstalledSkill]] = [:]
+    private var installedSkillsTasks: [String: Task<[InstalledSkill], Never>] = [:]
     private var skillMarkdownCache: [String: Bool] = [:]
 
     init() {
@@ -170,7 +171,7 @@ final class SkillStore: ObservableObject {
             }
             if pathsChanged {
                 self.globalSkillInstallCounts = [:]
-                self.installedCache = [:]
+                self.invalidateInstalledSkills()
                 self.skillMarkdownCache = [:]
             }
             self.isRefreshing = false
@@ -207,10 +208,34 @@ final class SkillStore: ObservableObject {
 
     // MARK: - Project-scoped queries
 
-    func installedSkills(for projectPath: String) -> [InstalledSkill] {
-        if let cached = installedCache[projectPath] { return cached }
-        let skills = SkillStore.scanInstalledSkills(for: projectPath)
-        installedCache[projectPath] = skills
+    /// `nil` means no scan has completed yet, so render a loading state rather
+    /// than an empty one; `[]` means the project genuinely has no skills.
+    func cachedInstalledSkills(for projectPath: String) -> [InstalledSkill]? {
+        installedSkillsByProject[projectPath]
+    }
+
+    /// The only entry point that may scan a project's skill roots (~450ms).
+    /// Concurrent callers for one path share a single scan.
+    @discardableResult
+    func loadInstalledSkills(for projectPath: String) async -> [InstalledSkill] {
+        if let cached = installedSkillsByProject[projectPath] { return cached }
+
+        let scan: Task<[InstalledSkill], Never>
+        if let inFlight = installedSkillsTasks[projectPath] {
+            scan = inFlight
+        } else {
+            scan = Task.detached(priority: .utility) {
+                SkillStore.scanInstalledSkills(for: projectPath)
+            }
+            installedSkillsTasks[projectPath] = scan
+        }
+
+        let skills = await scan.value
+        // An invalidation while this scan ran already replaced or dropped the
+        // entry, so publishing now would resurrect pre-mutation data.
+        guard installedSkillsTasks[projectPath] == scan else { return skills }
+        installedSkillsTasks.removeValue(forKey: projectPath)
+        installedSkillsByProject[projectPath] = skills
         return skills
     }
 
@@ -224,13 +249,17 @@ final class SkillStore: ObservableObject {
         return exists
     }
 
+    /// Re-scans only paths already loaded or loading: a view is waiting on those
+    /// and its `.task(id:)` will not re-fire on its own.
     func invalidateInstalledSkills(for projectPath: String? = nil) {
-        if let projectPath {
-            installedCache.removeValue(forKey: projectPath)
-        } else {
-            installedCache.removeAll()
+        let watched = Set(installedSkillsByProject.keys).union(installedSkillsTasks.keys)
+        let paths = projectPath.map { watched.contains($0) ? [$0] : [] } ?? Array(watched)
+        for path in paths {
+            installedSkillsTasks[path]?.cancel()
+            installedSkillsTasks.removeValue(forKey: path)
+            installedSkillsByProject.removeValue(forKey: path)
+            Task { await loadInstalledSkills(for: path) }
         }
-        objectWillChange.send()
     }
 
     /// Install a global skill into the matching project skill root.
@@ -362,7 +391,7 @@ final class SkillStore: ObservableObject {
 
     /// Legacy caller support: remove writable origins with the selected name.
     func remove(skillName: String, from projectPath: String) {
-        for skill in installedSkills(for: projectPath) where skill.name == skillName && skill.canRemove {
+        for skill in SkillInventoryReader.installedSkills(for: projectPath) where skill.name == skillName && skill.canRemove {
             remove(skill: skill, from: projectPath)
         }
     }

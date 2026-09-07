@@ -63,7 +63,7 @@ final class SkillInventoryReaderTests: XCTestCase {
 
         try withIsolatedToolHomes(root) {
             let store = SkillStore()
-            let skill = try XCTUnwrap(store.installedSkills(for: root.path).first { $0.name == "deploy" })
+            let skill = try XCTUnwrap(SkillInventoryReader.installedSkills(for: root.path).first { $0.name == "deploy" })
             store.remove(skill: skill, from: root.path)
 
             XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(".claude/skills/deploy").path))
@@ -78,7 +78,7 @@ final class SkillInventoryReaderTests: XCTestCase {
 
         try withIsolatedToolHomes(root) {
             let store = SkillStore()
-            let skills = store.installedSkills(for: root.path)
+            let skills = SkillInventoryReader.installedSkills(for: root.path)
             let codexSkill = try XCTUnwrap(skills.first { $0.name == "deploy" && $0.codexPath != nil })
 
             store.remove(skill: codexSkill, from: root.path)
