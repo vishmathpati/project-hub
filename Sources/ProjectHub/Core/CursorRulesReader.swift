@@ -85,7 +85,14 @@ enum CursorRulesReader {
         alwaysApply: Bool,
         body: String
     ) throws {
-        let content = buildContent(description: description, globs: globs, alwaysApply: alwaysApply, body: body)
+        let existing = (try? String(contentsOfFile: rule.filePath, encoding: .utf8)) ?? ""
+        let content = buildContent(
+            description: description,
+            globs: globs,
+            alwaysApply: alwaysApply,
+            body: body,
+            preserved: SkillReader.preservedFrontmatterLines(in: existing, excluding: editedKeys)
+        )
         try content.write(toFile: rule.filePath, atomically: true, encoding: .utf8)
     }
 
@@ -114,14 +121,18 @@ enum CursorRulesReader {
         )
     }
 
+    private static let editedKeys: Set<String> = ["description", "globs", "alwaysApply"]
+
     private static func buildContent(
         description: String,
         globs: String,
         alwaysApply: Bool,
-        body: String
+        body: String,
+        preserved: [String] = []
     ) -> String {
         let globLine = globs.isEmpty ? "globs: \"\"\n" : "globs: \"\(globs)\"\n"
-        let fm = "---\ndescription: \(description)\n\(globLine)alwaysApply: \(alwaysApply)\n---"
+        let carried = preserved.isEmpty ? "" : preserved.joined(separator: "\n") + "\n"
+        let fm = "---\ndescription: \(description)\n\(globLine)alwaysApply: \(alwaysApply)\n\(carried)---"
         let trimmedBody = body.trimmingCharacters(in: .newlines)
         return trimmedBody.isEmpty ? fm : "\(fm)\n\n\(trimmedBody)"
     }

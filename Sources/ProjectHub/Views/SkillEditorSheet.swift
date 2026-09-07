@@ -16,6 +16,9 @@ struct SkillEditorSheet: View {
     @State private var bodyText: String = ""
     @State private var loadError: String? = nil
     @State private var saveError: String? = nil
+    @State private var preservedFrontmatter: [String] = []
+
+    private static let editedKeys: Set<String> = ["name", "description", "triggers"]
 
     private var skillMdPath: String {
         (skillPath as NSString).appendingPathComponent("SKILL.md")
@@ -147,6 +150,11 @@ struct SkillEditorSheet: View {
             return
         }
 
+        preservedFrontmatter = SkillReader.preservedFrontmatterLines(
+            in: content,
+            excluding: Self.editedKeys
+        )
+
         if let fm = SkillReader.parseFrontmatter(content) {
             name        = fm["name"] ?? ((skillPath as NSString).lastPathComponent)
             description = fm["description"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -193,6 +201,9 @@ struct SkillEditorSheet: View {
             for t in triggers {
                 fm += "  - \(t)\n"
             }
+        }
+        for line in preservedFrontmatter {
+            fm += "\(line)\n"
         }
         fm += "---"
 

@@ -251,6 +251,38 @@ enum SkillReader {
         parseFrontmatter(lines: content.components(separatedBy: "\n"))
     }
 
+    /// Frontmatter lines whose key is not in `replacedKeys`, verbatim.
+    /// An editor that models only some keys uses this to carry the rest through a save
+    /// instead of deleting them.
+    static func preservedFrontmatterLines(in content: String, excluding replacedKeys: Set<String>) -> [String] {
+        var kept: [String] = []
+        var keepingCurrentKey = false
+        for line in frontmatterBody(of: content.components(separatedBy: "\n")) {
+            if !line.hasPrefix(" ") && !line.hasPrefix("\t"), let colon = line.firstIndex(of: ":") {
+                let key = String(line[line.startIndex..<colon]).trimmingCharacters(in: .whitespaces)
+                keepingCurrentKey = !replacedKeys.contains(key)
+                if keepingCurrentKey { kept.append(line) }
+            } else if keepingCurrentKey {
+                kept.append(line)
+            }
+        }
+        return kept
+    }
+
+    private static func frontmatterBody(of lines: [String]) -> [String] {
+        guard lines.first?.trimmingCharacters(in: .whitespaces) == "---" else { return [] }
+        var inFrontmatter = false
+        var body: [String] = []
+        for line in lines {
+            if line.trimmingCharacters(in: .whitespaces) == "---" {
+                if !inFrontmatter { inFrontmatter = true; continue }
+                return body
+            }
+            if inFrontmatter { body.append(line) }
+        }
+        return []
+    }
+
     static func parseFrontmatter(lines: [String]) -> [String: String]? {
         guard lines.first?.trimmingCharacters(in: .whitespaces) == "---" else { return nil }
 
