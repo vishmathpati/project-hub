@@ -78,6 +78,22 @@ final class FrontmatterPreservationTests: XCTestCase {
         XCTAssertTrue(written.contains("owner: platform-team"), "owner is not modelled by the editor and must survive")
     }
 
+    func testPreservesNothingWhenTheFrontmatterIsNeverClosed() {
+        let content = """
+        ---
+        name: deploy
+        version: 1.2.0
+
+        body text that must never be re-emitted inside the frontmatter
+        """
+
+        XCTAssertEqual(
+            SkillReader.preservedFrontmatterLines(in: content, excluding: ["name"]),
+            [String](),
+            "Without a closing delimiter the whole document would otherwise be treated as frontmatter and the body would be written back inside it."
+        )
+    }
+
     private func makeTempDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("ProjectHubFrontmatterTests-\(UUID().uuidString)", isDirectory: true)

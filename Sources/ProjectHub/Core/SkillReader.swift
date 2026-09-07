@@ -276,11 +276,11 @@ enum SkillReader {
         for line in lines {
             if line.trimmingCharacters(in: .whitespaces) == "---" {
                 if !inFrontmatter { inFrontmatter = true; continue }
-                break
+                return body
             }
             if inFrontmatter { body.append(line) }
         }
-        return body
+        return []
     }
 
     static func parseFrontmatter(lines: [String]) -> [String: String]? {
