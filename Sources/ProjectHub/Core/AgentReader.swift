@@ -60,7 +60,7 @@ enum AgentReader {
         let filename = agent.name
             .lowercased()
             .replacingOccurrences(of: " ", with: "-")
-            .components(separatedBy: CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_")))
+            .components(separatedBy: CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_")).inverted)
             .joined()
         let filePath = (agentsDir as NSString).appendingPathComponent("\(filename).md")
 

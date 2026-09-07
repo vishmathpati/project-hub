@@ -42,11 +42,12 @@ enum SkillReader {
     /// or doesn't have a valid frontmatter block.
     static func parse(at filePath: String) -> (name: String, description: String, triggers: [String])? {
         guard let content = try? String(contentsOfFile: filePath, encoding: .utf8) else { return nil }
-        guard let fm = parseFrontmatter(content) else { return nil }
+        let lines = content.components(separatedBy: "\n")
+        guard let fm = parseFrontmatter(lines: lines) else { return nil }
 
         let name        = fm["name"] ?? ((filePath as NSString).deletingLastPathComponent as NSString).lastPathComponent
         let description = fm["description"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let triggers    = parseTriggers(from: content)
+        let triggers    = parseTriggers(lines: lines)
 
         return (name: name, description: description, triggers: triggers)
     }
@@ -247,7 +248,10 @@ enum SkillReader {
     /// Returns a flat [key: value] dictionary. Multi-line values (block scalars) are
     /// captured as-is by joining continuation lines.
     static func parseFrontmatter(_ content: String) -> [String: String]? {
-        let lines = content.components(separatedBy: "\n")
+        parseFrontmatter(lines: content.components(separatedBy: "\n"))
+    }
+
+    static func parseFrontmatter(lines: [String]) -> [String: String]? {
         guard lines.first?.trimmingCharacters(in: .whitespaces) == "---" else { return nil }
 
         var inFrontmatter = false
@@ -300,7 +304,10 @@ enum SkillReader {
 
     /// Parse `triggers:` list items (lines starting with `- `).
     private static func parseTriggers(from content: String) -> [String] {
-        let lines = content.components(separatedBy: "\n")
+        parseTriggers(lines: content.components(separatedBy: "\n"))
+    }
+
+    private static func parseTriggers(lines: [String]) -> [String] {
         var inTriggers = false
         var triggers: [String] = []
 

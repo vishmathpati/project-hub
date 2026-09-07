@@ -13,6 +13,7 @@ struct GlobalMCPView: View {
     @State private var confirmDelete: (toolID: String, name: String)? = nil
     @State private var pluginPolicyPreview: CodexPluginMCPPolicyPreview?
     @State private var policyError: String?
+    @State private var actionError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -75,7 +76,10 @@ struct GlobalMCPView: View {
         )) {
             Button("Delete", role: .destructive) {
                 if let d = confirmDelete {
-                    mcpStore.removeServer(toolID: d.toolID, name: d.name)
+                    let result = mcpStore.removeServer(toolID: d.toolID, name: d.name)
+                    if !result.ok {
+                        actionError = result.error ?? "\(d.name) could not be removed."
+                    }
                 }
                 confirmDelete = nil
             }
@@ -92,6 +96,14 @@ struct GlobalMCPView: View {
             Button("OK", role: .cancel) { policyError = nil }
         } message: {
             Text(policyError ?? "Unknown error")
+        }
+        .alert("Could not update server", isPresented: Binding(
+            get: { actionError != nil },
+            set: { if !$0 { actionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { actionError = nil }
+        } message: {
+            Text(actionError ?? "Unknown error")
         }
         .onAppear { mcpStore.refresh(force: false) }
     }
@@ -353,7 +365,10 @@ struct GlobalMCPView: View {
                 let sibling = tool.toolID == "claude-code" ? "claude-desktop" : "claude-code"
                 if mcpStore.detectedTools.contains(where: { $0.toolID == sibling }) {
                     HubButton(title: "to \(ProviderFamily.memberLabel(for: sibling))", kind: .inlineAction) {
-                        _ = mcpStore.copyServer(name: server.name, from: tool.toolID, to: [sibling])
+                        let result = mcpStore.copyServer(name: server.name, from: tool.toolID, to: [sibling])
+                        if let failure = result.failures.first {
+                            actionError = failure.message
+                        }
                     }
                 }
             }

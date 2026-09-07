@@ -1,0 +1,49 @@
+import XCTest
+@testable import ProjectHub
+
+final class GeneratedFilenameTests: XCTestCase {
+    func testEachCreatedAgentGetsItsOwnFile() throws {
+        let root = try makeTempDirectory()
+        try AgentReader.create(
+            agent: AgentTemplate(name: "Reviewer", description: "reviews code", model: "sonnet", tools: []),
+            in: root.path
+        )
+        try AgentReader.create(
+            agent: AgentTemplate(name: "Deploy Bot", description: "ships things", model: "opus", tools: []),
+            in: root.path
+        )
+
+        let dir = root.appendingPathComponent(".claude/agents", isDirectory: true)
+        let files = try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted()
+
+        XCTAssertEqual(
+            files,
+            ["deploy-bot.md", "reviewer.md"],
+            "Each agent must land in a file named after it. A shared filename means the second create silently destroys the first."
+        )
+    }
+
+    func testCursorRuleFilenameComesFromItsDescription() throws {
+        let root = try makeTempDirectory()
+        try CursorRulesReader.create(
+            description: "Swift Style",
+            globs: "*.swift",
+            alwaysApply: false,
+            body: "use four spaces",
+            in: root.path
+        )
+
+        let dir = root.appendingPathComponent(".cursor/rules", isDirectory: true)
+        let files = try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted()
+
+        XCTAssertEqual(files, ["swift-style.mdc"], "The filename is meant to be derived from the description.")
+    }
+
+    private func makeTempDirectory() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ProjectHubGeneratedFilenameTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
+}

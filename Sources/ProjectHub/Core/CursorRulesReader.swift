@@ -53,7 +53,7 @@ enum CursorRulesReader {
         let stem = description
             .lowercased()
             .replacingOccurrences(of: " ", with: "-")
-            .components(separatedBy: CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-")))
+            .components(separatedBy: CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-")).inverted)
             .joined()
             .prefix(60)
         let base = stem.isEmpty ? "rule" : String(stem)
