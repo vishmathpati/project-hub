@@ -68,12 +68,16 @@ struct MCPView: View {
         )) {
             Button("Delete", role: .destructive) {
                 if let d = confirmDelete {
-                    try? ConfigWriter.removeServer(
-                        toolID: d.toolID,
-                        scope: .project,
-                        projectRoot: project.path,
-                        name: d.name
-                    )
+                    do {
+                        try ConfigWriter.removeServer(
+                            toolID: d.toolID,
+                            scope: .project,
+                            projectRoot: project.path,
+                            name: d.name
+                        )
+                    } catch {
+                        toggleError = ProjectMCPError(message: error.localizedDescription)
+                    }
                     confirmDelete = nil
                     reloadTick += 1
                 }

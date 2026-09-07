@@ -348,7 +348,11 @@ final class SkillStore: ObservableObject {
         let canonicalSkill = canonicalFilePath(skill.path)
         guard canonicalSkill == canonicalProject || canonicalSkill.hasPrefix(canonicalProject + "/") else { return }
         guard canonicalFilePath((skill.path as NSString).appendingPathComponent("SKILL.md")).hasPrefix(canonicalSkill + "/") else { return }
-        try? FileManager.default.removeItem(atPath: canonicalSkill)
+        do {
+            try FileManager.default.removeItem(atPath: canonicalSkill)
+        } catch {
+            lastError = "Could not remove \(skill.name). \(error.localizedDescription)"
+        }
         invalidateInstalledSkills(for: projectPath)
     }
 
