@@ -53,7 +53,7 @@ struct SkillsView: View {
                         VStack(spacing: 4) {
                             ForEach(globals) { skill in
                                 globalRow(skill,
-                                          alreadyInstalled: skillStore.isInstalled(skill, in: installed ?? []),
+                                          alreadyInstalled: installed.map { skillStore.isInstalled(skill, in: $0) },
                                           projectPath: project.path)
                             }
                         }
@@ -192,8 +192,13 @@ struct SkillsView: View {
 
     // MARK: - Global library row
 
-    private func globalRow(_ skill: Skill, alreadyInstalled: Bool, projectPath: String) -> some View {
+    /// `alreadyInstalled` is nil until the project scan lands. Treating that as false
+    /// would offer Install for a skill that is already there.
+    private func globalRow(_ skill: Skill, alreadyInstalled: Bool?, projectPath: String) -> some View {
         let canInstall = !skillStore.installTargets(for: skill, projectPath: projectPath).isEmpty
+        let installed = alreadyInstalled == true
+        let undecided = alreadyInstalled == nil
+        let inert = installed || undecided || !canInstall
         return HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(skill.name)
@@ -211,16 +216,17 @@ struct SkillsView: View {
             Button(action: {
                 skillStore.install(skill: skill, to: projectPath)
             }) {
-                Text(alreadyInstalled ? "Installed" : installLabel(for: skill))
+                Text(installed ? "Installed" : installLabel(for: skill))
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor((alreadyInstalled || !canInstall) ? .secondary : .white)
+                    .foregroundColor(inert ? .secondary : .white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background((alreadyInstalled || !canInstall) ? Color.secondary.opacity(0.15) : HubTheme.accent)
+                    .background(inert ? Color.secondary.opacity(0.15) : HubTheme.accent)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .opacity(undecided ? 0.5 : 1)
             }
             .buttonStyle(.plain)
-            .disabled(alreadyInstalled || !canInstall)
+            .disabled(inert)
             .help(canInstall ? installLabel(for: skill) : "No safe primary-tool install target for this skill source")
         }
         .padding(8)
