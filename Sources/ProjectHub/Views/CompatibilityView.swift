@@ -34,6 +34,8 @@ struct CompatibilityView: View {
     @State private var scanning = false
     @State private var scanRequestID = UUID()
     @State private var applyingScanResult = false
+    @State private var fixPlanCache: [UUID: CompatibilityFixPlan] = [:]
+    @State private var fixPlanCacheKey = ""
 
     init(project: Project? = nil) {
         self.fixedProject = project
@@ -1514,7 +1516,7 @@ struct CompatibilityView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .hubCard()
             } else {
-                VStack(spacing: 0) {
+                LazyVStack(spacing: 0) {
                     ForEach(Array(issues.enumerated()), id: \.element.id) { index, issue in
                         if index > 0 { HubRowSeparator() }
                         issueRow(issue, canPreviewFix: previewableIDs.contains(issue.id))
@@ -6799,13 +6801,40 @@ struct CompatibilityView: View {
         return true
     }
 
+    private func fixPlanCacheKey(for report: CompatibilityScanResult) -> String {
+        "\(report.projectRoot ?? "global")|\(report.generatedAt.timeIntervalSince1970)|\(report.issues.count)"
+    }
+
+    private func fixPlanCached(for issue: CompatibilityIssue, key: String, matrix: [String: CompatibilityMatrixEntry]) -> CompatibilityFixPlan? {
+        if fixPlanCacheKey == key, let cached = fixPlanCache[issue.id] {
+            return cached
+        }
+        return fixPlan(for: issue, matrix: matrix)
+    }
+
+    private func rebuildFixPlanCache(for report: CompatibilityScanResult) {
+        let key = fixPlanCacheKey(for: report)
+        guard fixPlanCacheKey != key else { return }
+        let lookup = matrixLookup(report)
+        var next: [UUID: CompatibilityFixPlan] = [:]
+        next.reserveCapacity(report.issues.count)
+        for issue in report.issues {
+            if let plan = fixPlan(for: issue, matrix: lookup) {
+                next[issue.id] = plan
+            }
+        }
+        fixPlanCache = next
+        fixPlanCacheKey = key
+    }
+
     private func manualActions(_ report: CompatibilityScanResult) -> [CompatibilityManualAction] {
         var actions = postFixActions
         let lookup = matrixLookup(report)
+        let key = fixPlanCacheKey(for: report)
 
         for issue in filteredIssues(report) {
             guard isManualActionIssue(issue) else { continue }
-            guard fixPlan(for: issue, matrix: lookup) == nil else { continue }
+            guard fixPlanCached(for: issue, key: key, matrix: lookup) == nil else { continue }
             actions.append(CompatibilityManualAction(
                 title: issue.title,
                 detail: issue.detail,
@@ -6839,8 +6868,9 @@ struct CompatibilityView: View {
 
     private func previewableFixes(_ report: CompatibilityScanResult) -> [CompatibilityPreviewableFix] {
         let lookup = matrixLookup(report)
+        let key = fixPlanCacheKey(for: report)
         return filteredIssues(report).compactMap { issue in
-            guard let plan = fixPlan(for: issue, matrix: lookup) else { return nil }
+            guard let plan = fixPlanCached(for: issue, key: key, matrix: lookup) else { return nil }
             return CompatibilityPreviewableFix(issue: issue, plan: plan)
         }
     }
@@ -6968,6 +6998,7 @@ struct CompatibilityView: View {
                 codexProfileNames = profileNames
                 codexRuntimeProfileName = normalizedProfileName
                 report = scanResult
+                rebuildFixPlanCache(for: scanResult)
                 if fixedProject == nil, requestedRoot == nil {
                     compatStore.replace(scanResult)
                 }
@@ -7001,6 +7032,9 @@ struct CompatibilityView: View {
                 codexProfileNames = names
                 if replace || report == nil {
                     report = cached
+                    if let cached {
+                        rebuildFixPlanCache(for: cached)
+                    }
                     if fixedProject == nil, root == nil {
                         compatStore.replace(cached)
                     }
