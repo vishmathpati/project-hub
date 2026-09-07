@@ -325,6 +325,7 @@ final class SkillStore: ObservableObject {
             }
         }
         let fm = FileManager.default
+        var failures: [String] = []
         for baseDir in roots {
             let destDir = (baseDir as NSString).appendingPathComponent(skill.name)
             if fm.fileExists(atPath: destDir) { continue }
@@ -332,8 +333,11 @@ final class SkillStore: ObservableObject {
                 try fm.createDirectory(atPath: baseDir, withIntermediateDirectories: true)
                 try fm.copyItem(atPath: skill.path, toPath: destDir)
             } catch {
-                continue
+                failures.append("\(baseDir): \(error.localizedDescription)")
             }
+        }
+        if !failures.isEmpty {
+            lastError = "Could not copy \(skill.name) everywhere. \(failures.joined(separator: "; "))"
         }
         invalidateInstalledSkills(for: projectPath)
     }

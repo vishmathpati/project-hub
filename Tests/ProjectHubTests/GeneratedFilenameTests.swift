@@ -39,6 +39,51 @@ final class GeneratedFilenameTests: XCTestCase {
         XCTAssertEqual(files, ["swift-style.mdc"], "The filename is meant to be derived from the description.")
     }
 
+    func testAgentNamesThatCollapseToTheSameStemDoNotOverwrite() throws {
+        let root = try makeTempDirectory()
+        try AgentReader.create(
+            agent: AgentTemplate(name: "Code Helper", description: "first", model: "sonnet", tools: []),
+            in: root.path
+        )
+        try AgentReader.create(
+            agent: AgentTemplate(name: "code-helper", description: "second", model: "opus", tools: []),
+            in: root.path
+        )
+
+        let dir = root.appendingPathComponent(".claude/agents", isDirectory: true)
+        let files = try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted()
+
+        XCTAssertEqual(files.count, 2, "Two agents whose names sanitise to the same stem must not share a file. Found \(files).")
+    }
+
+    func testAgentWithNoUsableCharactersStillGetsAFilename() throws {
+        let root = try makeTempDirectory()
+        try AgentReader.create(
+            agent: AgentTemplate(name: "!!!", description: "punctuation only", model: "sonnet", tools: []),
+            in: root.path
+        )
+
+        let dir = root.appendingPathComponent(".claude/agents", isDirectory: true)
+        let files = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+
+        XCTAssertEqual(files, ["agent.md"], "A name with nothing usable must fall back to a real filename, not \".md\".")
+    }
+
+    func testCreatingTheSameAgentNameTwiceIsRejected() throws {
+        let root = try makeTempDirectory()
+        let template = AgentTemplate(name: "Code Helper", description: "first", model: "sonnet", tools: [])
+        try AgentReader.create(agent: template, in: root.path)
+
+        XCTAssertThrowsError(
+            try AgentReader.create(agent: template, in: root.path),
+            "Agent.id is the name, so two agents sharing one name give SwiftUI duplicate ids and make delete-by-name ambiguous."
+        )
+
+        let dir = root.appendingPathComponent(".claude/agents", isDirectory: true)
+        let files = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+        XCTAssertEqual(files, ["code-helper.md"], "the rejected create must not leave a second file behind")
+    }
+
     private func makeTempDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("ProjectHubGeneratedFilenameTests-\(UUID().uuidString)", isDirectory: true)
