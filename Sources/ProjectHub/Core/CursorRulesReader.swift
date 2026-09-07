@@ -107,7 +107,7 @@ enum CursorRulesReader {
 
         let fm          = SkillReader.parseFrontmatter(content)
         let description = fm?["description"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let globs       = fm?["globs"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let globs       = unquoted(fm?["globs"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
         let alwaysApply = fm?["alwaysApply"].flatMap { Bool($0) } ?? false
         let body        = stripFrontmatter(from: content)
 
@@ -119,6 +119,15 @@ enum CursorRulesReader {
             alwaysApply: alwaysApply,
             body:        body
         )
+    }
+
+    /// buildContent always wraps globs in quotes, so the parsed value has to come back
+    /// bare or every save adds another pair.
+    private static func unquoted(_ raw: String) -> String {
+        guard raw.count >= 2 else { return raw }
+        let quoted = (raw.hasPrefix("\"") && raw.hasSuffix("\""))
+            || (raw.hasPrefix("'") && raw.hasSuffix("'"))
+        return quoted ? String(raw.dropFirst().dropLast()) : raw
     }
 
     private static let editedKeys: Set<String> = ["description", "globs", "alwaysApply"]

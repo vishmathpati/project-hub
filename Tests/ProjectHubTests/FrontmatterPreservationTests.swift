@@ -94,6 +94,40 @@ final class FrontmatterPreservationTests: XCTestCase {
         )
     }
 
+    func testGlobsSurviveARealReadWriteRoundTripWithoutGrowingQuotes() throws {
+        let root = try makeTempDirectory()
+        let rulesDir = root.appendingPathComponent(".cursor/rules", isDirectory: true)
+        try FileManager.default.createDirectory(at: rulesDir, withIntermediateDirectories: true)
+        let path = rulesDir.appendingPathComponent("style.mdc")
+        try """
+        ---
+        description: swift style
+        globs: "*.swift"
+        alwaysApply: false
+        ---
+
+        body
+        """.write(to: path, atomically: true, encoding: .utf8)
+
+        for _ in 0..<3 {
+            let rule = try XCTUnwrap(CursorRulesReader.rules(for: root.path).first)
+            try CursorRulesReader.update(
+                rule: rule,
+                description: rule.description,
+                globs: rule.globs,
+                alwaysApply: rule.alwaysApply,
+                body: rule.body
+            )
+        }
+
+        let written = try String(contentsOf: path, encoding: .utf8)
+        XCTAssertTrue(
+            written.contains("globs: \"*.swift\""),
+            "globs must round trip unchanged. Saving three times produced:\n\(written)"
+        )
+        XCTAssertFalse(written.contains("\"\"*.swift"), "quotes must not accumulate on each save")
+    }
+
     private func makeTempDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("ProjectHubFrontmatterTests-\(UUID().uuidString)", isDirectory: true)
