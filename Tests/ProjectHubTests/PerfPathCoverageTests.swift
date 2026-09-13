@@ -176,6 +176,40 @@ final class PerfPathCoverageTests: XCTestCase {
         print("")
     }
 
+    /// Reproduces the reported 23s Skills load. The project is the parent folder that
+    /// holds every other project, and its tree is large enough that `du` times out.
+    func testSlowProjectRepro() throws {
+        print("\n── Slow project repro ─────────────────────────────")
+        let project = (NSHomeDirectory() as NSString).appendingPathComponent("Arel Ecosystem")
+        guard FileManager.default.fileExists(atPath: project) else {
+            print("  project missing\n"); return
+        }
+        print("  project: ~/Arel Ecosystem")
+
+        SkillInventoryReader.invalidateCaches()
+        var skills: [InstalledSkill] = []
+        time("installedSkills cold") { skills = SkillInventoryReader.installedSkills(for: project) }
+        time("installedSkills warm") { _ = SkillInventoryReader.installedSkills(for: project) }
+
+        print(String(format: "%-44@ %9d", "skills returned" as NSString, skills.count))
+        let byScope = Dictionary(grouping: skills, by: { $0.scopeLabel })
+        for (scope, group) in byScope.sorted(by: { $0.value.count > $1.value.count }) {
+            print(String(format: "%-44@ %9d", "  scope \(scope)" as NSString, group.count))
+        }
+        let bySource = Dictionary(grouping: skills, by: { $0.sourceLabel })
+        for (source, group) in bySource.sorted(by: { $0.value.count > $1.value.count }).prefix(6) {
+            print(String(format: "%-44@ %9d", "  source \(source)" as NSString, group.count))
+        }
+
+        time("ProjectFacts (Health tab)") { _ = ProjectFacts(path: project) }
+        time("detectedTools") { _ = ProjectStore.detectedTools(at: project, fm: FileManager.default) }
+        time("AgentReader.agents") { _ = AgentReader.agents(for: project) }
+        time("ConfigWriter.readAllServerEntries") {
+            _ = ConfigWriter.readAllServerEntries(toolID: "claude-code", scope: .project, projectRoot: project)
+        }
+        print("")
+    }
+
     /// Attributes the Usage tab's 21s cold cost: the directory walk versus reading
     /// whole session files and parsing every line.
     func testUsageAttribution() throws {

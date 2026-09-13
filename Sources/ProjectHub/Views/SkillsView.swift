@@ -15,6 +15,8 @@ struct SkillsView: View {
     var body: some View {
         let installed = skillStore.cachedInstalledSkills(for: project.path)
         let globals   = skillStore.globalSkills
+        let installedNames = SkillStore.nameIndex(installed ?? [])
+        let otherProjects = projectStore.projects.filter { $0.path != project.path }
 
         HStack(alignment: .top, spacing: 0) {
             // MARK: Left — Installed
@@ -26,9 +28,9 @@ struct SkillsView: View {
                         emptyInstalled
                     } else {
                         ScrollView {
-                            VStack(spacing: 4) {
+                            LazyVStack(spacing: 4) {
                                 ForEach(installed) { skill in
-                                    installedRow(skill, projectPath: project.path)
+                                    installedRow(skill, projectPath: project.path, copyTargets: otherProjects)
                                 }
                             }
                             .padding(8)
@@ -50,10 +52,10 @@ struct SkillsView: View {
                     emptyLibrary
                 } else {
                     ScrollView {
-                        VStack(spacing: 4) {
+                        LazyVStack(spacing: 4) {
                             ForEach(globals) { skill in
                                 globalRow(skill,
-                                          alreadyInstalled: installed.map { skillStore.isInstalled(skill, in: $0) },
+                                          alreadyInstalled: installedNames.contains(skill),
                                           projectPath: project.path)
                             }
                         }
@@ -108,7 +110,7 @@ struct SkillsView: View {
 
     // MARK: - Installed row
 
-    private func installedRow(_ skill: InstalledSkill, projectPath: String) -> some View {
+    private func installedRow(_ skill: InstalledSkill, projectPath: String, copyTargets: [Project]) -> some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(skill.name)
@@ -151,7 +153,7 @@ struct SkillsView: View {
             .buttonStyle(.plain)
             .help("Copy this skill into Claude, Codex, and Cursor folders")
             Menu {
-                ForEach(projectStore.projects.filter { $0.path != projectPath }) { target in
+                ForEach(copyTargets) { target in
                     Button(target.displayName) {
                         skillStore.copyInstalled(skill, to: target.path)
                     }

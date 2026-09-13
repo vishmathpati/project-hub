@@ -25,10 +25,12 @@ enum SkillInventoryReader {
 
     /// Plugin bundles nest three levels deep, so the fingerprint comes from the
     /// markets themselves; installing, removing, or updating a plugin changes one.
+    /// Which ones are enabled lives in config.toml, so that file is part of the key.
     private struct PluginCacheStamp: Equatable {
         let signature: [String]
+        let configModified: Date?
 
-        init(cachePath: String) {
+        init(cachePath: String, configPath: String) {
             let fm = FileManager.default
             var parts: [String] = []
             for market in (try? fm.contentsOfDirectory(atPath: cachePath)) ?? [] where !market.hasPrefix(".") {
@@ -38,6 +40,7 @@ enum SkillInventoryReader {
                 parts.append("\(market)|\(entries)|\(modified?.timeIntervalSince1970 ?? 0)")
             }
             signature = parts.sorted()
+            configModified = (try? fm.attributesOfItem(atPath: configPath))?[.modificationDate] as? Date
         }
     }
 
@@ -349,40 +352,96 @@ enum SkillInventoryReader {
     }
 
     private static func codexPluginSkills() -> [RawSkill] {
-        let cache = (ProjectHubPaths.codexHome() as NSString).appendingPathComponent("plugins/cache")
-        let stamp = PluginCacheStamp(cachePath: cache)
+        let codexHome = ProjectHubPaths.codexHome()
+        let cache = (codexHome as NSString).appendingPathComponent("plugins/cache")
+        let configPath = (codexHome as NSString).appendingPathComponent("config.toml")
+        let stamp = PluginCacheStamp(cachePath: cache, configPath: configPath)
         if let hit = memo.pluginRows(matching: stamp) { return hit }
 
-        guard let markets = try? FileManager.default.contentsOfDirectory(atPath: cache) else { return [] }
-        var rows: [RawSkill] = []
-        for market in markets where !market.hasPrefix(".") {
-            let marketDir = (cache as NSString).appendingPathComponent(market)
-            guard let plugins = try? FileManager.default.contentsOfDirectory(atPath: marketDir) else { continue }
-            for plugin in plugins where !plugin.hasPrefix(".") {
-                let pluginDir = (marketDir as NSString).appendingPathComponent(plugin)
-                guard let versions = try? FileManager.default.contentsOfDirectory(atPath: pluginDir) else { continue }
-                for versionName in versions.sorted().reversed() {
-                    let root = (pluginDir as NSString).appendingPathComponent(versionName)
-                    let skillDir = (root as NSString).appendingPathComponent("skills")
-                    for skill in SkillReader.scanSkillDir(skillDir, source: .codexManaged) {
-                        rows.append(
-                            RawSkill(
-                                skill: skill,
-                                sourceLabel: "Codex plugin",
-                                toolLabels: ["Codex CLI", "Codex Desktop"],
-                                claude: false,
-                                codex: true,
-                                canMutate: false,
-                                readOnlyReason: "Installed by a Codex plugin.",
-                                nameOverride: "\(plugin):\(skill.name)"
-                            )
-                        )
-                    }
-                    break
-                }
+        let enabled = enabledCodexPlugins(configPath: configPath)
+        let rows: [RawSkill]
+        if enabled.isEmpty {
+            rows = allCachedPluginSkills(cachePath: cache)
+        } else {
+            var collected: [RawSkill] = []
+            for plugin in enabled {
+                collected.append(contentsOf: pluginSkillRows(name: plugin.name, market: plugin.market, cachePath: cache))
             }
+            rows = collected
         }
         memo.storePluginRows(rows, matching: stamp)
+        return rows
+    }
+
+    /// Codex records every known plugin in `~/.codex/config.toml` as
+    /// `[plugins."name@market"]` with an `enabled` flag. Reading that one small file
+    /// beats walking the cache: this machine holds 65 cached plugins but only 15 are
+    /// enabled, so the walk parsed 435 SKILL.md files and reported roughly 50
+    /// plugins that are not installed as if they were.
+    private static func enabledCodexPlugins(configPath: String) -> [(name: String, market: String)] {
+        guard let text = try? String(contentsOfFile: configPath, encoding: .utf8) else { return [] }
+        var enabled: [(name: String, market: String)] = []
+        var pending: (name: String, market: String)?
+
+        for rawLine in text.split(whereSeparator: \.isNewline) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+
+            if line.hasPrefix("[plugins.") {
+                let inner = line.dropFirst("[plugins.".count).dropLast(line.hasSuffix("]") ? 1 : 0)
+                let cleaned = inner.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                guard let at = cleaned.lastIndex(of: "@") else { pending = nil; continue }
+                let name = String(cleaned[cleaned.startIndex..<at])
+                let market = String(cleaned[cleaned.index(after: at)...])
+                pending = (name.isEmpty || market.isEmpty) ? nil : (name, market)
+                continue
+            }
+
+            guard let current = pending, line.hasPrefix("enabled") else { continue }
+            if line.contains("true") { enabled.append(current) }
+            pending = nil
+        }
+        return enabled
+    }
+
+    /// Newest version only, matching how Codex resolves a plugin's active bundle.
+    private static func pluginSkillRows(name: String, market: String, cachePath: String) -> [RawSkill] {
+        let pluginDir = ((cachePath as NSString).appendingPathComponent(market) as NSString)
+            .appendingPathComponent(name)
+        guard let versions = try? FileManager.default.contentsOfDirectory(atPath: pluginDir) else { return [] }
+        for versionName in versions.sorted().reversed() {
+            let skillDir = ((pluginDir as NSString).appendingPathComponent(versionName) as NSString)
+                .appendingPathComponent("skills")
+            return pluginRows(plugin: name, in: skillDir)
+        }
+        return []
+    }
+
+    private static func pluginRows(plugin: String, in skillDir: String) -> [RawSkill] {
+        SkillReader.scanSkillDir(skillDir, source: .codexManaged).map { skill in
+            RawSkill(
+                skill: skill,
+                sourceLabel: "Codex plugin",
+                toolLabels: ["Codex CLI", "Codex Desktop"],
+                claude: false,
+                codex: true,
+                canMutate: false,
+                readOnlyReason: "Installed by a Codex plugin.",
+                nameOverride: "\(plugin):\(skill.name)"
+            )
+        }
+    }
+
+    /// Fallback for a Codex install whose config has no `[plugins.*]` section.
+    private static func allCachedPluginSkills(cachePath: String) -> [RawSkill] {
+        guard let markets = try? FileManager.default.contentsOfDirectory(atPath: cachePath) else { return [] }
+        var rows: [RawSkill] = []
+        for market in markets where !market.hasPrefix(".") {
+            let marketDir = (cachePath as NSString).appendingPathComponent(market)
+            guard let plugins = try? FileManager.default.contentsOfDirectory(atPath: marketDir) else { continue }
+            for plugin in plugins where !plugin.hasPrefix(".") {
+                rows.append(contentsOf: pluginSkillRows(name: plugin, market: market, cachePath: cachePath))
+            }
+        }
         return rows
     }
 

@@ -483,14 +483,38 @@ final class SkillStore: ObservableObject {
     }
 
     func isInstalled(_ skill: Skill, in installed: [InstalledSkill]) -> Bool {
-        switch skill.source {
-        case .claudeGlobal:
-            return installed.contains { $0.name == skill.name && $0.claudePath != nil }
-        case .codexGlobal, .codexAdmin, .codexManaged:
-            return installed.contains { $0.name == skill.name && $0.codexPath != nil }
-        case .cursorGlobal, .providerGlobal:
-            return installed.contains { $0.name == skill.name }
+        SkillStore.nameIndex(installed).contains(skill)
+    }
+
+    /// Precomputed name sets so a list can ask "is this installed?" in constant time
+    /// per row instead of rescanning the whole inventory for every catalog entry.
+    struct InstalledNameIndex {
+        let claude: Set<String>
+        let codex: Set<String>
+        let all: Set<String>
+
+        func contains(_ skill: Skill) -> Bool {
+            switch skill.source {
+            case .claudeGlobal: return claude.contains(skill.name)
+            case .codexGlobal, .codexAdmin, .codexManaged: return codex.contains(skill.name)
+            case .cursorGlobal, .providerGlobal: return all.contains(skill.name)
+            }
         }
+    }
+
+    nonisolated static func nameIndex(_ installed: [InstalledSkill]) -> InstalledNameIndex {
+        var claude = Set<String>()
+        var codex = Set<String>()
+        var all = Set<String>()
+        claude.reserveCapacity(installed.count)
+        codex.reserveCapacity(installed.count)
+        all.reserveCapacity(installed.count)
+        for skill in installed {
+            all.insert(skill.name)
+            if skill.claudePath != nil { claude.insert(skill.name) }
+            if skill.codexPath != nil { codex.insert(skill.name) }
+        }
+        return InstalledNameIndex(claude: claude, codex: codex, all: all)
     }
 
     // MARK: - Global skill scan (nonisolated)
