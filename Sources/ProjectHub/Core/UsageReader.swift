@@ -413,38 +413,87 @@ enum UsageReader {
     private static func loadEvents(under roots: [String], kind: Kind) -> [Event] {
         var events: [Event] = []
         var seen = Set<String>()
+        // Session logs are append-only, so nothing inside the reporting window can
+        // sit further back than the same cutoff already applied to file selection.
+        let windowStart = Date().addingTimeInterval(-8 * 24 * 60 * 60)
         for file in newestSessionFiles(under: roots, limit: 80) {
-            events.append(contentsOf: eventsInFile(file.path, kind: kind, seen: &seen))
+            events.append(contentsOf: eventsInFile(
+                file.path,
+                kind: kind,
+                windowStart: windowStart,
+                newestOnly: kind == .codex,
+                seen: &seen
+            ))
         }
         return events.sorted { $0.date < $1.date }
     }
 
-    private static func eventsInFile(_ path: String, kind: Kind, seen: inout Set<String>) -> [Event] {
+    /// Builds one event from a single JSONL line, or nil when the line carries no
+    /// usage. Shared by the forward and backward readers.
+    private static func event(
+        fromLine line: Data,
+        path: String,
+        kind: Kind,
+        seen: inout Set<String>
+    ) -> Event? {
+        guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { return nil }
+        guard let totals = totals(in: object, kind: kind), totals.tokens > 0 else { return nil }
+        let requestID = string(object["requestId"]) ?? string(object["request_id"])
+        if let requestID, !seen.insert("\(path)|\(requestID)").inserted { return nil }
+        let date = parseDate(object["timestamp"]) ?? parseDate(object["created_at"]) ?? .distantPast
+        let model = string((object["message"] as? [String: Any])?["model"])
+            ?? string(object["model"])
+        return Event(date: date, file: path, model: model, totals: totals, requestID: requestID)
+    }
+
+    /// Reads a session log backwards in chunks and stops at the first event older
+    /// than the window. The log is append-only, so everything in range is at the
+    /// end; reading whole files cost ~500 MB per refresh because codex keeps only
+    /// its newest event per file.
+    private static func eventsInFile(
+        _ path: String,
+        kind: Kind,
+        windowStart: Date,
+        newestOnly: Bool,
+        seen: inout Set<String>
+    ) -> [Event] {
         guard let handle = FileHandle(forReadingAtPath: path) else { return [] }
         defer { try? handle.close() }
-        let data = handle.readDataToEndOfFile()
-        guard data.count < 8_000_000,
-              let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
-        else { return [] }
 
-        var result: [Event] = []
-        for line in text.split(whereSeparator: \.isNewline) {
-            guard let payload = String(line).data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any] else {
-                continue
+        let chunkSize = 256 * 1024
+        var cursor = handle.seekToEndOfFile()
+        var carry: Data?
+        var collected: [Event] = []
+        var reachedOlderEvents = false
+
+        while cursor > 0 && !reachedOlderEvents {
+            let start = cursor > UInt64(chunkSize) ? cursor - UInt64(chunkSize) : 0
+            handle.seek(toFileOffset: start)
+            var data = handle.readData(ofLength: Int(cursor - start))
+            cursor = start
+
+            // The chunk's first line is usually cut in half; its head lives in the
+            // earlier chunk, so hold it and stitch it onto that chunk's last line.
+            if let carry { data.append(carry) }
+            var lines = data.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: false)
+            if start > 0, !lines.isEmpty {
+                carry = Data(lines.removeFirst())
+            } else {
+                carry = nil
             }
-            guard let totals = totals(in: object, kind: kind), totals.tokens > 0 else { continue }
-            let requestID = string(object["requestId"]) ?? string(object["request_id"])
-            if let requestID, !seen.insert("\(path)|\(requestID)").inserted { continue }
-            let date = parseDate(object["timestamp"]) ?? parseDate(object["created_at"]) ?? .distantPast
-            let model = string((object["message"] as? [String: Any])?["model"])
-                ?? string(object["model"])
-            result.append(Event(date: date, file: path, model: model, totals: totals, requestID: requestID))
+
+            for line in lines.reversed() where !line.isEmpty {
+                guard let parsed = event(fromLine: Data(line), path: path, kind: kind, seen: &seen) else { continue }
+                if parsed.date >= windowStart {
+                    collected.append(parsed)
+                    if newestOnly { return collected }
+                } else {
+                    reachedOlderEvents = true
+                    break
+                }
+            }
         }
-        if kind == .codex {
-            return result.suffix(1).map { $0 }
-        }
-        return result
+        return collected
     }
 
     private static func snapshot(from events: [Event]) -> Snapshot {

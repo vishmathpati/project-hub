@@ -159,4 +159,98 @@ final class PerfPathCoverageTests: XCTestCase {
 
         print("\n════════════ END ════════════\n")
     }
+
+    /// Prints the actual card values next to the timing so the reverse scan can be
+    /// checked for both speed and equivalence, not just speed.
+    func testUsageSpeedAndValues() throws {
+        print("\n── Usage after the reverse scan ───────────────────")
+        var cards: [UsageCard] = []
+        time("UsageReader.summarize() cold") { cards = UsageReader.summarize() }
+        time("UsageReader.summarize() warm") { _ = UsageReader.summarize() }
+        for card in cards where card.featured || card.today.tokens > 0 || card.week.tokens > 0 {
+            print(String(format: "  %-16@ today %8d  week %8d  last %8d  plan %@",
+                         card.provider as NSString,
+                         card.today.tokens, card.week.tokens, card.lastSession.tokens,
+                         (card.plan ?? "-") as NSString))
+        }
+        print("")
+    }
+
+    /// Attributes the Usage tab's 21s cold cost: the directory walk versus reading
+    /// whole session files and parsing every line.
+    func testUsageAttribution() throws {
+        print("\n── Usage attribution ──────────────────────────────")
+        let fm = FileManager.default
+        let home = NSHomeDirectory()
+        let roots: [(String, String)] = [
+            ("~/.claude/projects", (home as NSString).appendingPathComponent(".claude/projects")),
+            ("~/.codex/sessions", (home as NSString).appendingPathComponent(".codex/sessions")),
+            ("~/Library/.../local-agent-mode-sessions",
+             (home as NSString).appendingPathComponent("Library/Application Support/Claude/local-agent-mode-sessions"))
+        ]
+
+        var found: [String: [String]] = [:]
+        for (label, root) in roots {
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: root, isDirectory: &isDir), isDir.boolValue else {
+                print(String(format: "%-44@ %9@", label as NSString, "missing" as NSString)); continue
+            }
+            var files: [String] = []
+            let elapsed = time("walk \(label)") {
+                guard let enumerator = fm.enumerator(atPath: root) else { return }
+                var visited = 0
+                while let relative = enumerator.nextObject() as? String {
+                    visited += 1
+                    if visited > 4_000 { break }
+                    let lowered = relative.lowercased()
+                    if lowered.contains("node_modules") || lowered.contains("/.git/") || lowered.contains("/.build/") {
+                        enumerator.skipDescendants(); continue
+                    }
+                    guard relative.hasSuffix(".jsonl") else { continue }
+                    let path = (root as NSString).appendingPathComponent(relative)
+                    _ = (try? fm.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? .distantPast
+                    files.append(path)
+                }
+            }
+            _ = elapsed
+            found[label] = files
+            print(String(format: "%-44@ %9d", "  jsonl seen within 4k cap" as NSString, files.count))
+        }
+
+        let claudeFiles = (found["~/.claude/projects"] ?? []).sorted().suffix(80)
+        var bytes = 0
+        time("read + JSON-parse newest \(claudeFiles.count) claude files") {
+            for path in claudeFiles {
+                guard let handle = FileHandle(forReadingAtPath: path) else { continue }
+                defer { try? handle.close() }
+                let data = handle.readDataToEndOfFile()
+                bytes += data.count
+                guard data.count < 8_000_000,
+                      let text = String(data: data, encoding: .utf8) else { continue }
+                for line in text.split(whereSeparator: \.isNewline) {
+                    _ = try? JSONSerialization.jsonObject(with: Data(line.utf8))
+                }
+            }
+        }
+        print(String(format: "%-44@ %9.1f MB", "  bytes read" as NSString, Double(bytes) / 1_048_576))
+
+        let codexFiles = (found["~/.codex/sessions"] ?? []).suffix(80)
+        var codexBytes = 0
+        var codexTotal = 0
+        time("read + JSON-parse newest \(codexFiles.count) codex files") {
+            for path in codexFiles {
+                guard let handle = FileHandle(forReadingAtPath: path) else { continue }
+                defer { try? handle.close() }
+                let data = handle.readDataToEndOfFile()
+                codexBytes += data.count
+                guard data.count < 8_000_000, let text = String(data: data, encoding: .utf8) else { continue }
+                for line in text.split(whereSeparator: \.isNewline) {
+                    if (try? JSONSerialization.jsonObject(with: Data(line.utf8))) != nil { codexTotal += 1 }
+                }
+            }
+        }
+        print(String(format: "%-44@ %9.1f MB (%d lines)",
+                     "  bytes read" as NSString, Double(codexBytes) / 1_048_576, codexTotal))
+        print("")
+    }
 }
