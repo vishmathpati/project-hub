@@ -368,7 +368,7 @@ struct GlobalSkillsView: View {
     @State private var showInstructions = false
 
     private var globalGroups: [SkillStore.GlobalSkillGroup] {
-        SkillStore.deduplicatedGlobalSkills(skillStore.globalSkills)
+        skillStore.globalSkillGroups
     }
 
     private var selectedProject: Project? {
@@ -387,10 +387,15 @@ struct GlobalSkillsView: View {
         )
     }
 
-    private var installCountRefreshKey: String {
-        let skillKey = globalGroups.map(\.name).sorted().joined(separator: "|")
-        let projectKey = projectStore.projects.map(\.path).sorted().joined(separator: "|")
-        return "\(skillKey)#\(projectKey)"
+    /// A hash instead of a joined string: the string form built ~33 KB and sorted
+    /// both lists on every render just to feed `.task(id:)`.
+    private var installCountRefreshKey: Int {
+        var hasher = Hasher()
+        hasher.combine(skillStore.globalSkillGroups.count)
+        for group in skillStore.globalSkillGroups { hasher.combine(group.id) }
+        hasher.combine(projectStore.projects.count)
+        for project in projectStore.projects { hasher.combine(project.path) }
+        return hasher.finalize()
     }
 
     var body: some View {
@@ -494,7 +499,7 @@ struct GlobalSkillsView: View {
     }
 
     private var uniqueProviderCount: Int {
-        Set(globalGroups.flatMap(\.providerIDs).map { ProviderFamily.groupID(for: $0) }).count
+        skillStore.globalSkillProviderCount
     }
 
     private var summaryText: String {
@@ -527,19 +532,20 @@ struct GlobalSkillsView: View {
     }
 
     private var globalList: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let copyTargets = projectStore.projects
+        return VStack(alignment: .leading, spacing: 8) {
             HubSectionHeading("In your library", count: globalGroups.count)
-            VStack(spacing: 0) {
+            LazyVStack(spacing: 0) {
                 ForEach(Array(globalGroups.enumerated()), id: \.element.id) { index, group in
                     if index > 0 { HubRowSeparator() }
-                    globalSkillRow(group)
+                    globalSkillRow(group, copyTargets: copyTargets)
                 }
             }
             .hubCard()
         }
     }
 
-    private func globalSkillRow(_ group: SkillStore.GlobalSkillGroup) -> some View {
+    private func globalSkillRow(_ group: SkillStore.GlobalSkillGroup, copyTargets: [Project]) -> some View {
         let installedCount = skillStore.globalSkillInstallCounts[group.id] ?? 0
         let expanded = expandedGlobalSkillID == group.id
         let hasSkillMD = group.skills.contains { skillStore.skillMarkdownExists($0) }
@@ -596,7 +602,7 @@ struct GlobalSkillsView: View {
                 }
                 .buttonStyle(.plain)
 
-                globalSkillActions(group)
+                globalSkillActions(group, copyTargets: copyTargets)
                     .padding(.trailing, HubTheme.contentPadding)
             }
 
@@ -609,9 +615,10 @@ struct GlobalSkillsView: View {
     }
 
     @ViewBuilder
-    private func globalSkillActions(_ group: SkillStore.GlobalSkillGroup) -> some View {
+    private func globalSkillActions(_ group: SkillStore.GlobalSkillGroup, copyTargets: [Project]) -> some View {
+        let removable = group.skills.filter { $0.source != .codexAdmin && $0.source != .codexManaged }
         Menu {
-            ForEach(projectStore.projects) { project in
+            ForEach(copyTargets) { project in
                 Button("Copy to \(project.displayName)") {
                     if let skill = group.skills.first {
                         skillStore.copy(skill, to: project.path)
@@ -630,9 +637,9 @@ struct GlobalSkillsView: View {
                     editingSkillPath = skill.path
                 }
             }
-            if !group.skills.filter({ $0.source != .codexAdmin && $0.source != .codexManaged }).isEmpty {
+            if !removable.isEmpty {
                 Divider()
-                ForEach(group.skills.filter { $0.source != .codexAdmin && $0.source != .codexManaged }, id: \.path) { skill in
+                ForEach(removable, id: \.path) { skill in
                     Button("Remove \(SkillStore.GlobalSkillGroup.sourceLabel(skill.source))", role: .destructive) {
                         skillStore.removeOrigin(skill)
                     }
@@ -763,15 +770,16 @@ struct GlobalSkillsView: View {
     private func projectSkillList(_ groups: [ProjectSkillGroup]) -> some View {
         let enabled  = groups.filter { $0.state != .disabled }
         let disabled = groups.filter { $0.state == .disabled }
+        let copyTargets = projectStore.projects.filter { $0.path != selectedProject?.path }
 
         return VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
             if !enabled.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     HubSectionHeading("In this project", count: enabled.count)
-                    VStack(spacing: 0) {
+                    LazyVStack(spacing: 0) {
                         ForEach(Array(enabled.enumerated()), id: \.element.id) { index, group in
                             if index > 0 { HubRowSeparator() }
-                            projectSkillRow(group)
+                            projectSkillRow(group, copyTargets: copyTargets)
                         }
                     }
                     .hubCard()
@@ -780,10 +788,10 @@ struct GlobalSkillsView: View {
             if !disabled.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     HubSectionHeading("Disabled", count: disabled.count)
-                    VStack(spacing: 0) {
+                    LazyVStack(spacing: 0) {
                         ForEach(Array(disabled.enumerated()), id: \.element.id) { index, group in
                             if index > 0 { HubRowSeparator() }
-                            projectSkillRow(group)
+                            projectSkillRow(group, copyTargets: copyTargets)
                         }
                     }
                     .hubCard()
@@ -792,7 +800,7 @@ struct GlobalSkillsView: View {
         }
     }
 
-    private func projectSkillRow(_ group: ProjectSkillGroup) -> some View {
+    private func projectSkillRow(_ group: ProjectSkillGroup, copyTargets: [Project]) -> some View {
         let expanded = expandedProjectSkillID == group.id
         let status: HubStatus = {
             switch group.state {
@@ -857,7 +865,7 @@ struct GlobalSkillsView: View {
                 }
                 .buttonStyle(.plain)
 
-                projectSkillActions(group)
+                projectSkillActions(group, copyTargets: copyTargets)
                     .padding(.trailing, HubTheme.contentPadding)
             }
 
@@ -870,10 +878,10 @@ struct GlobalSkillsView: View {
     }
 
     @ViewBuilder
-    private func projectSkillActions(_ group: ProjectSkillGroup) -> some View {
+    private func projectSkillActions(_ group: ProjectSkillGroup, copyTargets: [Project]) -> some View {
         Menu {
             if let project = selectedProject, let origin = group.origins.first {
-                ForEach(projectStore.projects.filter { $0.path != project.path }) { target in
+                ForEach(copyTargets) { target in
                     Button("Copy to \(target.displayName)") {
                         skillStore.copyInstalled(origin, to: target.path)
                     }
@@ -1159,18 +1167,26 @@ private struct ProjectSkillGroup: Identifiable {
         return .active
     }
 
+    /// Provider id to skill directory, built once per process. Deriving this per
+    /// row rebuilt the whole catalog for every visible row on every render.
+    private static let providerDirectories: [(id: String, directory: String)] = {
+        var out: [(id: String, directory: String)] = []
+        for spec in ProviderCatalog.specs() {
+            for directory in spec.globalSkillDirs + spec.projectSkillDirs {
+                out.append((spec.id, directory))
+            }
+        }
+        return out
+    }()
+
     /// Providers that can see this skill — the tiles on each row (§3c).
     var providerIDs: [String] {
         var ids: [String] = []
-        let specs = ProviderCatalog.specs()
         for origin in origins {
             var matched = false
-            for spec in specs {
-                let directories = spec.globalSkillDirs + spec.projectSkillDirs
-                for directory in directories where origin.path.contains(directory) {
-                    if !ids.contains(spec.id) { ids.append(spec.id) }
-                    matched = true
-                }
+            for entry in Self.providerDirectories where origin.path.contains(entry.directory) {
+                if !ids.contains(entry.id) { ids.append(entry.id) }
+                matched = true
             }
             if !matched {
                 for label in origin.toolLabels {

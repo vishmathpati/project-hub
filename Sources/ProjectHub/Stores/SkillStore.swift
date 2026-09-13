@@ -8,6 +8,47 @@ final class SkillStore: ObservableObject {
         var id: String { name.lowercased() }
         let name: String
         let skills: [Skill]
+        /// Resolved once when the group is built. Deriving these per render rebuilt
+        /// the whole provider catalog (~11 specs) for every row on screen.
+        let providerIDs: [String]
+        let tileIDs: [String]
+
+        init(name: String, skills: [Skill]) {
+            self.name = name
+            self.skills = skills
+            let ids = Self.resolveProviderIDs(for: skills)
+            self.providerIDs = ids
+            self.tileIDs = ProviderFamily.uniqueTileIDs(from: ids)
+        }
+
+        /// Provider id to skill directory, built once per process instead of once
+        /// per row per render.
+        private static let providerDirectories: [(id: String, directory: String)] = {
+            var out: [(id: String, directory: String)] = []
+            for spec in ProviderCatalog.specs() {
+                for directory in spec.globalSkillDirs { out.append((spec.id, directory)) }
+            }
+            return out
+        }()
+
+        /// Provider ids whose skill directories this skill actually sits in —
+        /// the tiles on each row in screen 3c. Resolved from the origin path
+        /// against the catalog, with the declared source as the fallback.
+        private static func resolveProviderIDs(for skills: [Skill]) -> [String] {
+            var ids: [String] = []
+            for skill in skills {
+                var matched = false
+                for entry in providerDirectories where skill.path.hasPrefix(entry.directory) {
+                    if !ids.contains(entry.id) { ids.append(entry.id) }
+                    matched = true
+                }
+                if !matched {
+                    let fallback = Self.providerID(for: skill.source)
+                    if let fallback, !ids.contains(fallback) { ids.append(fallback) }
+                }
+            }
+            return ids
+        }
 
         var originCount: Int { skills.count }
 
@@ -31,32 +72,6 @@ final class SkillStore: ObservableObject {
                 }
             }
             return labels
-        }
-
-        /// Provider ids whose skill directories this skill actually sits in —
-        /// the tiles on each row in screen 3c. Resolved from the origin path
-        /// against the catalog, with the declared source as the fallback.
-        var providerIDs: [String] {
-            var ids: [String] = []
-            let specs = ProviderCatalog.specs()
-            for skill in skills {
-                var matched = false
-                for spec in specs {
-                    for directory in spec.globalSkillDirs where skill.path.hasPrefix(directory) {
-                        if !ids.contains(spec.id) { ids.append(spec.id) }
-                        matched = true
-                    }
-                }
-                if !matched {
-                    let fallback = Self.providerID(for: skill.source)
-                    if let fallback, !ids.contains(fallback) { ids.append(fallback) }
-                }
-            }
-            return ids
-        }
-
-        var tileIDs: [String] {
-            ProviderFamily.uniqueTileIDs(from: providerIDs)
         }
 
         static func providerID(for source: SkillSource) -> String? {
@@ -139,6 +154,11 @@ final class SkillStore: ObservableObject {
     }
 
     @Published private(set) var globalSkills: [Skill] = []
+    /// Deduplicated once per scan. Deriving this in a view body cost a group, two
+    /// sorts per group, and a catalog rebuild per row, repeated seven times per
+    /// render and again on every badge publish.
+    @Published private(set) var globalSkillGroups: [GlobalSkillGroup] = []
+    @Published private(set) var globalSkillProviderCount: Int = 0
     @Published private(set) var globalSkillInstallCounts: [String: Int] = [:]
     @Published private(set) var isRefreshing: Bool = false
     @Published private(set) var isRefreshingInstallCounts: Bool = false
@@ -168,6 +188,11 @@ final class SkillStore: ObservableObject {
             let pathsChanged = skills.map(\.path) != self.globalSkills.map(\.path)
             if skills != self.globalSkills {
                 self.globalSkills = skills
+                let groups = SkillStore.deduplicatedGlobalSkills(skills)
+                self.globalSkillGroups = groups
+                self.globalSkillProviderCount = Set(
+                    groups.flatMap(\.providerIDs).map { ProviderFamily.groupID(for: $0) }
+                ).count
             }
             if pathsChanged {
                 self.globalSkillInstallCounts = [:]

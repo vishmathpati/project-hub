@@ -263,7 +263,7 @@ struct ContentView: View {
         case .projects:
             return projectStore.projects.count + projectStore.discovered.count
         case .skills:
-            return SkillStore.deduplicatedGlobalSkills(skillStore.globalSkills).count
+            return skillStore.globalSkillGroups.count
         case .plugins:
             guard let report = pluginInventoryStore.report(for: "global") else { return nil }
             return PluginInventoryGroup.groups(from: report.plugins).count

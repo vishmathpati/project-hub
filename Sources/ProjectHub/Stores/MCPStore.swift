@@ -29,7 +29,12 @@ final class MCPStore: ObservableObject {
             }
     }
 
-    var serverCount: Int { allServerNames.count }
+    /// Only the number of unique names is wanted here, so skip the ordering work:
+    /// `allServerNames` sorts with a comparator that rescans every tool and server,
+    /// and this feeds a sidebar badge that renders on every keystroke.
+    var serverCount: Int {
+        Set(detectedTools.flatMap { $0.servers.map(\.name) }).count
+    }
 
     var healthReports: [MCPHealthReport] {
         detectedTools.flatMap { tool in

@@ -29,7 +29,7 @@ struct MCPView: View {
                 emptyState
             } else {
                 ScrollView {
-                    VStack(spacing: 10) {
+                    LazyVStack(spacing: 10) {
                         ForEach(projectScopedToolIDs, id: \.self) { toolID in
                             toolSection(toolID: toolID, servers: serversByTool[toolID] ?? [])
                         }
@@ -299,7 +299,7 @@ struct MCPView: View {
 
             Divider().opacity(0.5)
 
-            VStack(spacing: 1) {
+            LazyVStack(spacing: 1) {
                 if servers.isEmpty {
                     Text("No project servers yet")
                         .font(.system(size: 11))

@@ -36,6 +36,7 @@ struct CompatibilityView: View {
     @State private var applyingScanResult = false
     @State private var fixPlanCache: [UUID: CompatibilityFixPlan?] = [:]
     @State private var fixPlanCacheKey = ""
+    @State private var verifiableServerIDs: Set<String> = []
 
     init(project: Project? = nil) {
         self.fixedProject = project
@@ -140,7 +141,7 @@ struct CompatibilityView: View {
         ) { showMatrix.toggle() }
 
         HubButton(title: verifyingMCP ? "Verifying" : "Verify", kind: .secondary, action: verifyMCPServers)
-            .disabled(verifyingMCP || report.map { verifiableServers($0).isEmpty } ?? true)
+            .disabled(verifyingMCP || report.map { cachedVerifiableServers($0).isEmpty } ?? true)
 
         HubButton(title: scanning ? "Scanning" : "Run scan", kind: .primary, action: refresh)
             .disabled(scanning)
@@ -259,7 +260,7 @@ struct CompatibilityView: View {
     private func workflowNextStepCard(_ report: CompatibilityScanResult) -> some View {
         let fixes = previewableFixes(report)
         let actions = manualActions(report)
-        let verifiable = verifiableServers(report)
+        let verifiable = cachedVerifiableServers(report)
         let servers = filteredServers(report)
         let liveFollowUp = actions.first { $0.issue == nil }
 
@@ -545,7 +546,7 @@ struct CompatibilityView: View {
 
     private func liveVerification(_ report: CompatibilityScanResult) -> some View {
         let servers = filteredServers(report)
-        let verifiable = verifiableServers(report)
+        let verifiable = cachedVerifiableServers(report)
         let visibleLiveReports = liveReports.filter { id, _ in servers.contains(where: { $0.id == id }) }
         return VStack(alignment: .leading, spacing: 8) {
             sectionHeader("Live Verification", count: visibleLiveReports.count)
@@ -586,10 +587,8 @@ struct CompatibilityView: View {
         }
     }
 
-    private func verifiableServers(_ report: CompatibilityScanResult) -> [CompatibilityServerObservation] {
-        filteredServers(report).filter {
-            CompatibilityScanner.healthEntry(for: $0, matrix: report.matrix) != nil
-        }
+    private func cachedVerifiableServers(_ report: CompatibilityScanResult) -> [CompatibilityServerObservation] {
+        filteredServers(report).filter { verifiableServerIDs.contains($0.id) }
     }
 
     private func verificationEmptyMessage(
@@ -6618,7 +6617,7 @@ struct CompatibilityView: View {
 
     private func verifyMCPServers() {
         guard !verifyingMCP, let report else { return }
-        let targets = verifiableServers(report).compactMap { server -> (observation: CompatibilityServerObservation, entry: ServerEntry, toolID: String)? in
+        let targets = cachedVerifiableServers(report).compactMap { server -> (observation: CompatibilityServerObservation, entry: ServerEntry, toolID: String)? in
             guard let entry = CompatibilityScanner.healthEntry(for: server, matrix: report.matrix) else { return nil }
             return (server, entry, healthToolID(for: server.toolID))
         }
@@ -6827,6 +6826,21 @@ struct CompatibilityView: View {
         fixPlanCacheKey = key
     }
 
+    /// Reading each server's MCP config to decide verifiability is disk work; do it
+    /// once per report instead of on every body evaluation.
+    private func rebuildVerifiableServerCache(for report: CompatibilityScanResult?) {
+        guard let report else {
+            verifiableServerIDs = []
+            return
+        }
+        var next: Set<String> = []
+        next.reserveCapacity(report.servers.count)
+        for server in report.servers where CompatibilityScanner.healthEntry(for: server, matrix: report.matrix) != nil {
+            next.insert(server.id)
+        }
+        verifiableServerIDs = next
+    }
+
     private func manualActions(_ report: CompatibilityScanResult) -> [CompatibilityManualAction] {
         var actions = postFixActions
         let lookup = matrixLookup(report)
@@ -6999,6 +7013,7 @@ struct CompatibilityView: View {
                 codexRuntimeProfileName = normalizedProfileName
                 report = scanResult
                 rebuildFixPlanCache(for: scanResult)
+                rebuildVerifiableServerCache(for: scanResult)
                 if fixedProject == nil, requestedRoot == nil {
                     compatStore.replace(scanResult)
                 }
@@ -7032,6 +7047,7 @@ struct CompatibilityView: View {
                 codexProfileNames = names
                 if replace || report == nil {
                     report = cached
+                    rebuildVerifiableServerCache(for: cached)
                     if let cached {
                         rebuildFixPlanCache(for: cached)
                     }

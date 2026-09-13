@@ -149,12 +149,13 @@ struct GlobalMCPView: View {
     // MARK: - Main content
 
     private var mainContent: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
+        let detectedToolIDs = Set(mcpStore.detectedTools.map(\.toolID))
+        return ScrollView {
+            LazyVStack(alignment: .leading, spacing: HubTheme.sectionGap) {
                 healthStrip
 
                 ForEach(mcpFamilies) { family in
-                    mcpFamilySection(family)
+                    mcpFamilySection(family, detectedToolIDs: detectedToolIDs)
                 }
             }
             .padding(HubTheme.contentPadding)
@@ -163,11 +164,12 @@ struct GlobalMCPView: View {
 
     /// One line of health counts, each a dot plus a word (§2.3).
     private var healthStrip: some View {
-        HStack(spacing: 18) {
-            ForEach(MCPHealthStatus.allCases.filter { (mcpStore.healthSummary[$0] ?? 0) > 0 }, id: \.self) { status in
+        let summary = mcpStore.healthSummary
+        return HStack(spacing: 18) {
+            ForEach(MCPHealthStatus.allCases.filter { (summary[$0] ?? 0) > 0 }, id: \.self) { status in
                 StatusLabel(
                     status: hubStatus(status),
-                    text: "\(mcpStore.healthSummary[status] ?? 0) \(status.rawValue.lowercased())"
+                    text: "\(summary[status] ?? 0) \(status.rawValue.lowercased())"
                 )
             }
             if mcpStore.isVerifyingHealth {
@@ -201,7 +203,7 @@ struct GlobalMCPView: View {
         }
     }
 
-    private func mcpFamilySection(_ family: MCPFamilySection) -> some View {
+    private func mcpFamilySection(_ family: MCPFamilySection, detectedToolIDs: Set<String>) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if family.tools.count > 1 {
                 HStack(spacing: 10) {
@@ -222,12 +224,12 @@ struct GlobalMCPView: View {
                         .foregroundStyle(HubTheme.textFaint)
                         .padding(.leading, 4)
                 }
-                toolSection(tool: tool, servers: visibleServers, showBrand: family.tools.count == 1)
+                toolSection(tool: tool, servers: visibleServers, showBrand: family.tools.count == 1, detectedToolIDs: detectedToolIDs)
             }
         }
     }
 
-    private func toolSection(tool: ToolSummary, servers: [ServerEntry], showBrand: Bool = true) -> some View {
+    private func toolSection(tool: ToolSummary, servers: [ServerEntry], showBrand: Bool = true, detectedToolIDs: Set<String>) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 if showBrand {
@@ -259,10 +261,10 @@ struct GlobalMCPView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .hubCard()
             } else {
-                VStack(spacing: 0) {
+                LazyVStack(spacing: 0) {
                     ForEach(Array(servers.enumerated()), id: \.element.id) { index, server in
                         if index > 0 { HubRowSeparator() }
-                        serverRow(server: server, tool: tool)
+                        serverRow(server: server, tool: tool, detectedToolIDs: detectedToolIDs)
                     }
                 }
                 .hubCard()
@@ -281,7 +283,7 @@ struct GlobalMCPView: View {
 
     // MARK: - Server row
 
-    private func serverRow(server: ServerEntry, tool: ToolSummary) -> some View {
+    private func serverRow(server: ServerEntry, tool: ToolSummary, detectedToolIDs: Set<String>) -> some View {
         let health = mcpStore.health(for: server, toolID: tool.toolID)
         let status = hubStatus(health.status)
         let readOnlyHelp = server.readOnlyReason ?? "This server is read-only in Global MCP."
@@ -363,7 +365,7 @@ struct GlobalMCPView: View {
 
             if !server.isReadOnly, ProviderFamily.groupID(for: tool.toolID) == "claude" {
                 let sibling = tool.toolID == "claude-code" ? "claude-desktop" : "claude-code"
-                if mcpStore.detectedTools.contains(where: { $0.toolID == sibling }) {
+                if detectedToolIDs.contains(sibling) {
                     HubButton(title: "to \(ProviderFamily.memberLabel(for: sibling))", kind: .inlineAction) {
                         let result = mcpStore.copyServer(name: server.name, from: tool.toolID, to: [sibling])
                         if let failure = result.failures.first {

@@ -53,20 +53,18 @@ struct PluginsView: View {
         scanTarget == .project ? selectedProject?.path : nil
     }
 
-    private var pluginGroups: [PluginInventoryGroup] {
-        PluginInventoryGroup.groups(from: report?.plugins ?? [])
-    }
-
     var body: some View {
-        VStack(spacing: 0) {
+        let groups = PluginInventoryGroup.groups(from: report?.plugins ?? [])
+        let buckets = Self.groupedBundles(from: groups)
+        return VStack(spacing: 0) {
             HubPageHeader(
                 title: "Plugins",
-                subtitle: summaryText,
+                subtitle: summaryText(groupCount: groups.count),
                 actions: { headerActions }
             )
             ScrollView {
-                VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
-                    content
+                LazyVStack(alignment: .leading, spacing: HubTheme.sectionGap) {
+                    content(groups: groups, buckets: buckets)
                 }
                 .padding(HubTheme.contentPadding)
             }
@@ -149,30 +147,30 @@ struct PluginsView: View {
         .disabled(scanning)
     }
 
-    private var summaryText: String {
+    private func summaryText(groupCount: Int) -> String {
         if scanning { return "Scanning plugin evidence" }
         guard report != nil else { return "Scan to inspect plugins" }
-        return "\(pluginGroups.count) bundle\(pluginGroups.count == 1 ? "" : "s") found"
+        return "\(groupCount) bundle\(groupCount == 1 ? "" : "s") found"
     }
 
     @ViewBuilder
-    private var content: some View {
+    private func content(groups: [PluginInventoryGroup], buckets: [(providerID: String, groups: [PluginInventoryGroup])]) -> some View {
         if scanning && report == nil {
             loadingState
         } else if report == nil {
             emptyScanState
-        } else if pluginGroups.isEmpty {
+        } else if groups.isEmpty {
             emptyPluginsState
         } else {
-            pluginList
+            pluginList(buckets: buckets)
         }
     }
 
     /// Bundles grouped by the provider that installs them (§3d).
-    private var groupedBundles: [(providerID: String, groups: [PluginInventoryGroup])] {
+    private static func groupedBundles(from groups: [PluginInventoryGroup]) -> [(providerID: String, groups: [PluginInventoryGroup])] {
         var buckets: [String: [PluginInventoryGroup]] = [:]
         var order: [String] = []
-        for group in pluginGroups {
+        for group in groups {
             let id = group.providerIDs.first ?? "claude-code"
             if buckets[id] == nil { order.append(id) }
             buckets[id, default: []].append(group)
@@ -180,15 +178,15 @@ struct PluginsView: View {
         return order.map { ($0, buckets[$0] ?? []) }
     }
 
-    private var pluginList: some View {
-        VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
-            ForEach(groupedBundles, id: \.providerID) { bucket in
+    private func pluginList(buckets: [(providerID: String, groups: [PluginInventoryGroup])]) -> some View {
+        LazyVStack(alignment: .leading, spacing: HubTheme.sectionGap) {
+            ForEach(buckets, id: \.providerID) { bucket in
                 VStack(alignment: .leading, spacing: 8) {
                     HubSectionHeading(
                         "\(ToolPalette.label(for: bucket.providerID)) bundles",
                         count: bucket.groups.count
                     )
-                    VStack(spacing: 0) {
+                    LazyVStack(spacing: 0) {
                         ForEach(Array(bucket.groups.enumerated()), id: \.element.id) { index, group in
                             if index > 0 { HubRowSeparator() }
                             pluginRow(group)
@@ -291,7 +289,7 @@ struct PluginsView: View {
             }
 
             detailSection(title: "Surfaces") {
-                VStack(spacing: 5) {
+                LazyVStack(spacing: 5) {
                     ForEach(group.observations) { observation in
                         pluginSurfaceRow(observation)
                     }
@@ -511,37 +509,33 @@ struct PluginInventoryGroup: Identifiable {
     let pluginID: String
     let name: String
     let observations: [CompatibilityPluginObservation]
+    let status: Status
+    let toolLabels: [String]
+    let components: [String]
+    let providerIDs: [String]
+    let requiresRestartAfterWrite: Bool
+    let componentSummary: String
 
-    var status: Status {
-        if observations.contains(where: { $0.installPath == nil && ($0.installMethod == .codexConfig || $0.installMethod == .claudeSettings) }) {
-            return .missing
-        }
-        let enabledValues = observations.compactMap(\.enabled)
-        if enabledValues.contains(true) { return .enabled }
-        if !enabledValues.isEmpty && enabledValues.allSatisfy({ !$0 }) { return .disabled }
-        return .detected
-    }
-
-    var toolLabels: [String] {
-        unique(observations.map { $0.toolID.label })
-    }
-
-    var components: [String] {
-        unique(observations.flatMap(\.components))
-    }
-
-    var requiresRestartAfterWrite: Bool {
-        observations.contains { $0.requiresRestartAfterWrite }
-    }
-
-    /// Provider ids that install this bundle — the tiles on the row (§3d).
-    var providerIDs: [String] {
+    init(pluginID: String, name: String, observations: [CompatibilityPluginObservation]) {
+        self.pluginID = pluginID
+        self.name = name
+        self.observations = observations
+        self.status = Self.makeStatus(for: observations)
+        self.toolLabels = Self.makeUnique(observations.map { $0.toolID.label })
+        let componentList = Self.makeUnique(observations.flatMap(\.components))
+        self.components = componentList
         var ids: [String] = []
         for observation in observations {
-            let id = PluginInventoryGroup.providerID(for: observation.toolID)
+            let id = Self.providerID(for: observation.toolID)
             if !ids.contains(id) { ids.append(id) }
         }
-        return ids
+        self.providerIDs = ids
+        self.requiresRestartAfterWrite = observations.contains { $0.requiresRestartAfterWrite }
+        if componentList.isEmpty {
+            self.componentSummary = "no components declared"
+        } else {
+            self.componentSummary = componentList.prefix(6).joined(separator: " · ")
+        }
     }
 
     static func providerID(for toolID: CompatibilityToolID) -> String {
@@ -552,30 +546,26 @@ struct PluginInventoryGroup: Identifiable {
         }
     }
 
-    /// What this bundle puts on disk, read before you install it.
-    var componentSummary: String {
-        let parts = components
-        if parts.isEmpty { return "no components declared" }
-        return parts.prefix(6).joined(separator: " · ")
-    }
-
     static func groups(from observations: [CompatibilityPluginObservation]) -> [PluginInventoryGroup] {
         Dictionary(grouping: observations, by: { $0.pluginID.lowercased() })
             .values
-            .compactMap { group in
-                guard let first = group.sorted(by: observationSort).first else { return nil }
+            .compactMap { group -> PluginInventoryGroup? in
+                let sorted = group.sorted(by: observationSort)
+                guard let first = sorted.first else { return nil }
                 return PluginInventoryGroup(
                     pluginID: first.pluginID,
                     name: first.name,
-                    observations: group.sorted(by: observationSort)
+                    observations: sorted
                 )
             }
+            .map { ($0, $0.status) }
             .sorted {
-                if $0.status.label != $1.status.label {
-                    return statusSortOrder($0.status) < statusSortOrder($1.status)
+                if statusSortOrder($0.1) != statusSortOrder($1.1) {
+                    return statusSortOrder($0.1) < statusSortOrder($1.1)
                 }
-                return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+                return $0.0.name.localizedCaseInsensitiveCompare($1.0.name) == .orderedAscending
             }
+            .map(\.0)
     }
 
     private static func observationSort(
@@ -600,7 +590,17 @@ struct PluginInventoryGroup: Identifiable {
         }
     }
 
-    private func unique(_ values: [String]) -> [String] {
+    private static func makeStatus(for observations: [CompatibilityPluginObservation]) -> Status {
+        if observations.contains(where: { $0.installPath == nil && ($0.installMethod == .codexConfig || $0.installMethod == .claudeSettings) }) {
+            return .missing
+        }
+        let enabledValues = observations.compactMap(\.enabled)
+        if enabledValues.contains(true) { return .enabled }
+        if !enabledValues.isEmpty && enabledValues.allSatisfy({ !$0 }) { return .disabled }
+        return .detected
+    }
+
+    private static func makeUnique(_ values: [String]) -> [String] {
         var seen = Set<String>()
         var output: [String] = []
         for value in values where seen.insert(value).inserted {

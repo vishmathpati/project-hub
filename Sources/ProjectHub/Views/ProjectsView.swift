@@ -106,7 +106,7 @@ struct ProjectsView: View {
 
     private var list: some View {
         ScrollView {
-            VStack(spacing: 6) {
+            LazyVStack(spacing: 6) {
                 ForEach(projects.projects) { project in
                     projectRow(for: project)
                 }
@@ -201,7 +201,7 @@ struct ProjectsView: View {
     private var desktopList: some View {
         let tracked = projects.projects
         return ScrollView {
-            VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
+            LazyVStack(alignment: .leading, spacing: HubTheme.sectionGap) {
                 AttentionStrip(items: attentionItems)
                     .padding(.horizontal, HubTheme.contentPadding)
                     .padding(.top, HubTheme.contentPadding)
@@ -209,7 +209,7 @@ struct ProjectsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HubSectionHeading("Tracked", count: tracked.count)
                         .padding(.horizontal, HubTheme.contentPadding)
-                    VStack(spacing: 0) {
+                    LazyVStack(spacing: 0) {
                         ForEach(Array(tracked.enumerated()), id: \.element.id) { index, project in
                             if index > 0 { HubRowSeparator() }
                             projectRow(for: project)
@@ -225,7 +225,7 @@ struct ProjectsView: View {
                             }
                         }
                         .padding(.horizontal, HubTheme.contentPadding)
-                        VStack(spacing: 0) {
+                        LazyVStack(spacing: 0) {
                             ForEach(Array(projects.discovered.enumerated()), id: \.element.id) { index, disc in
                                 if index > 0 { HubRowSeparator() }
                                 discoveredRow(for: disc)
@@ -248,7 +248,7 @@ struct ProjectsView: View {
                         .padding(.horizontal, HubTheme.contentPadding)
 
                         if showWorktrees {
-                            VStack(spacing: 0) {
+                            LazyVStack(spacing: 0) {
                                 ForEach(Array(projects.hiddenWorktrees.enumerated()), id: \.element.id) { index, disc in
                                     if index > 0 { HubRowSeparator() }
                                     worktreeRow(for: disc)
@@ -365,7 +365,7 @@ struct ProjectsView: View {
                                     Text(ToolPalette.label(for: toolID))
                                         .font(HubFont.rowPrimary)
                                         .foregroundStyle(HubTheme.text)
-                                    Text(ProjectFacts.configFiles(for: toolID, at: project.path))
+                                    Text(projects.configFileSummary(for: toolID, at: project.path))
                                         .font(HubFont.machine)
                                         .foregroundStyle(HubTheme.textDim)
                                         .lineLimit(1)
