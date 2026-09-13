@@ -166,24 +166,31 @@ struct SkillsView: View {
             .menuStyle(.borderlessButton)
             .frame(width: 22)
             .help("Copy this skill to another project")
-            Button(action: { editingSkill = skill }) {
-                Image(systemName: "pencil")
-                    .font(.system(size: 11))
+            if skill.canEdit {
+                Button(action: { editingSkill = skill }) {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Edit skill")
+            }
+            if skill.canRemove {
+                Button(action: {
+                    skillStore.remove(skill: skill, from: projectPath)
+                }) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11))
+                        .foregroundColor(.red.opacity(0.8))
+                }
+                .buttonStyle(.plain)
+                .help("Remove this skill")
+            } else if let reason = skill.readOnlyReason {
+                Image(systemName: "lock")
+                    .font(.system(size: 10))
                     .foregroundColor(.secondary)
+                    .help(reason)
             }
-            .buttonStyle(.plain)
-            .disabled(!skill.canEdit)
-            .help(skill.canEdit ? "Edit skill" : (skill.readOnlyReason ?? "This skill is read-only"))
-            Button(action: {
-                skillStore.remove(skill: skill, from: projectPath)
-            }) {
-                Image(systemName: "trash")
-                    .font(.system(size: 11))
-                    .foregroundColor(.red.opacity(0.8))
-            }
-            .buttonStyle(.plain)
-            .disabled(!skill.canRemove)
-            .help(skill.canRemove ? "Remove this skill origin" : (skill.readOnlyReason ?? "This skill is read-only"))
         }
         .padding(8)
         .background(HubTheme.raised)

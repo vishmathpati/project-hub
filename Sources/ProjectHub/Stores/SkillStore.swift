@@ -344,6 +344,20 @@ final class SkillStore: ObservableObject {
         }
     }
 
+    /// Points `destination` at `source` with a symlink, falling back to a copy.
+    /// A linked skill is stored once and every provider folder references it, which
+    /// is how `~/.claude/skills` already works here (its entries link into
+    /// `~/.agents/skills`). The inventory resolves symlinks when it dedupes, so a
+    /// linked skill reports as one skill with several origins.
+    nonisolated private static func linkOrCopy(from source: String, to destination: String) throws {
+        let fm = FileManager.default
+        do {
+            try fm.createSymbolicLink(atPath: destination, withDestinationPath: source)
+        } catch {
+            try fm.copyItem(atPath: source, toPath: destination)
+        }
+    }
+
     /// Install a global skill into the matching project skill root.
     func install(skill: Skill, to projectPath: String) {
         let fm = FileManager.default
@@ -355,7 +369,7 @@ final class SkillStore: ObservableObject {
             if fm.fileExists(atPath: destDir) { continue }   // already installed
             do {
                 try fm.createDirectory(atPath: baseDir, withIntermediateDirectories: true)
-                try fm.copyItem(atPath: skill.path, toPath: destDir)
+                try SkillStore.linkOrCopy(from: skill.path, to: destDir)
             } catch {
                 if firstError == nil { firstError = error.localizedDescription }
             }
@@ -419,7 +433,7 @@ final class SkillStore: ObservableObject {
         guard !fm.fileExists(atPath: destDir) else { return }
         do {
             try fm.createDirectory(atPath: base, withIntermediateDirectories: true)
-            try fm.copyItem(atPath: skill.path, toPath: destDir)
+            try SkillStore.linkOrCopy(from: skill.path, to: destDir)
             invalidateInstalledSkills(for: projectPath)
         } catch {
             lastError = error.localizedDescription
@@ -442,7 +456,7 @@ final class SkillStore: ObservableObject {
             if fm.fileExists(atPath: destDir) { continue }
             do {
                 try fm.createDirectory(atPath: baseDir, withIntermediateDirectories: true)
-                try fm.copyItem(atPath: skill.path, toPath: destDir)
+                try SkillStore.linkOrCopy(from: skill.path, to: destDir)
             } catch {
                 failures.append("\(baseDir): \(error.localizedDescription)")
             }
@@ -457,14 +471,23 @@ final class SkillStore: ObservableObject {
     /// Directory-traversal guard: the origin must resolve inside the project
     /// root, and the final removal path must resolve to the origin itself so a
     /// symlinked skill directory can never escape the project on delete.
+    ///
+    /// Deletion targets the origin path as written, never its symlink target.
+    /// Installs are links, so resolving first would delete the canonical skill out
+    /// of `~/.agents/skills` and break every other project pointing at it.
     func remove(skill: InstalledSkill, from projectPath: String) {
         guard skill.canRemove else { return }
-        let canonicalProject = Project.rootOwning(ProjectRootDetector.detect(from: projectPath))
-        let canonicalSkill = canonicalFilePath(skill.path)
-        guard canonicalSkill == canonicalProject || canonicalSkill.hasPrefix(canonicalProject + "/") else { return }
-        guard canonicalFilePath((skill.path as NSString).appendingPathComponent("SKILL.md")).hasPrefix(canonicalSkill + "/") else { return }
+
+        // Compare the paths as written, which is exactly how the inventory decided
+        // this origin was removable. Resolving first would follow an installed
+        // skill's link out of the project and refuse, and deleting the resolved
+        // path would erase the canonical skill instead of the link.
+        let root = literalFilePath(ProjectRootDetector.detect(from: projectPath))
+        let originPath = literalFilePath(skill.path)
+        guard originPath == root || originPath.hasPrefix(root + "/") else { return }
+
         do {
-            try FileManager.default.removeItem(atPath: canonicalSkill)
+            try FileManager.default.removeItem(atPath: originPath)
         } catch {
             lastError = "Could not remove \(skill.name). \(error.localizedDescription)"
         }
@@ -650,6 +673,14 @@ final class SkillStore: ObservableObject {
         URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
             .standardizedFileURL
             .resolvingSymlinksInPath()
+            .path
+    }
+
+    /// The path as written, tilde expanded but symlinks left alone, so an installed
+    /// skill still reads as living inside its project.
+    private func literalFilePath(_ path: String) -> String {
+        URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            .standardizedFileURL
             .path
     }
 

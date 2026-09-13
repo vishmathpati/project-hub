@@ -118,18 +118,24 @@ enum SkillInventoryReader {
 
         // Directory discovery mixes two path forms: the walk-up uses the path as
         // given, while the nested walk resolves symlinks (so /var becomes
-        // /private/var on macOS). Compare canonical paths, or the same skill
-        // reads as two origins and the nested one looks read-only.
-        let canonicalProject = canonicalPath(projectPath)
+        // /private/var on macOS). Skills are deduped on their resolved path so the
+        // same skill never reads as two origins, but ownership is judged on the
+        // path as written: an installed skill is a link that sits inside the
+        // project and points outside it.
+        let canonicalRoot = literalPath(ProjectRootDetector.detect(from: projectPath))
         // "Outside the selected project root" means outside the repository, not
         // outside the subdirectory you happen to have selected — a skill in a
         // sibling package is still yours to copy.
-        let canonicalRoot = canonicalPath(ProjectRootDetector.detect(from: projectPath))
+        let canonicalProject = literalPath(projectPath)
 
         for entry in skillDirectories(for: projectPath) {
             for skill in cachedScanSkillDir(entry.path, source: .claudeGlobal) {
-                let canonicalSkill = canonicalPath(skill.path)
-                guard seenPaths.insert(canonicalSkill).inserted else { continue }
+                // Dedupe on the resolved path so a linked skill and its target read
+                // as one entry, but judge ownership on the path as written: an
+                // installed skill is a link that sits in the project and points
+                // outside it, and removing it only deletes the link.
+                let resolvedSkill = canonicalPath(skill.path)
+                guard seenPaths.insert(resolvedSkill).inserted else { continue }
                 collected.append(
                     RawSkill(
                         skill: skill,
@@ -137,7 +143,7 @@ enum SkillInventoryReader {
                         toolLabels: entry.toolLabels,
                         claude: entry.kind == .claude,
                         codex: entry.kind == .codex,
-                        canMutate: isWithin(canonicalSkill, canonicalRoot),
+                        canMutate: isWithin(literalPath(skill.path), canonicalRoot),
                         readOnlyReason: entry.readOnlyReason,
                         nameOverride: nil
                     )
@@ -176,7 +182,7 @@ enum SkillInventoryReader {
                 path: path,
                 skillMDPath: (path as NSString).appendingPathComponent("SKILL.md"),
                 sourceLabel: raw.sourceLabel,
-                scopeLabel: isWithin(canonicalPath(path), canonicalProject) ? "Project" : "Parent",
+                scopeLabel: isWithin(literalPath(path), canonicalProject) ? "Project" : "Parent",
                 toolLabels: raw.toolLabels,
                 state: state,
                 version: versions[index],
@@ -196,6 +202,14 @@ enum SkillInventoryReader {
         URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
             .standardizedFileURL
             .resolvingSymlinksInPath()
+            .path
+    }
+
+    /// The path as written, tilde expanded but symlinks left alone. Ownership tests
+    /// use this so a link inside the project counts as belonging to the project.
+    private static func literalPath(_ path: String) -> String {
+        URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            .standardizedFileURL
             .path
     }
 
