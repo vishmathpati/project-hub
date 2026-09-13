@@ -539,7 +539,10 @@ enum UsageReader {
         if kind == .codex,
            let payload = object["payload"] as? [String: Any],
            let info = payload["info"] as? [String: Any],
-           let bag = info["last_token_usage"] as? [String: Any] ?? info["total_token_usage"] as? [String: Any] {
+           let bag = info["last_token_usage"] as? [String: Any] {
+            // Only `last_token_usage`. It is the per-turn reading; the sibling
+            // `total_token_usage` is the running sum of it, so adding that across
+            // events multiplies the true figure by roughly the event count.
             return priced(bag, model: string(object["model"]), explicitCost: nil)
         }
         if let message = object["message"] as? [String: Any],
