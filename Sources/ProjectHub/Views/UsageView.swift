@@ -187,15 +187,24 @@ struct UsageView: View {
         .frame(height: HubTheme.tableRowHeight)
     }
 
+    /// ccusage reports the four token types separately rather than one total,
+    /// because cache reads dwarf everything else: on this machine they are ~96% of
+    /// the raw sum, so a single combined number reads as far more work than was
+    /// actually done. Input and output are the real work; cache is shown beside it.
     private func spend(_ title: String, _ totals: UsageTotals) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(HubFont.mono(9))
                 .foregroundStyle(HubTheme.textFaint)
             HStack(spacing: 6) {
-                Text(tokens(totals.tokens))
+                Text(tokens(totals.input + totals.output))
                     .font(HubFont.machine)
                     .foregroundStyle(HubTheme.text)
+                if totals.cacheRead + totals.cacheWrite > 0 {
+                    Text("+\(tokens(totals.cacheRead + totals.cacheWrite)) cached")
+                        .font(HubFont.mono(9))
+                        .foregroundStyle(HubTheme.textFaint)
+                }
                 if totals.cost > 0 {
                     Text(money(totals.cost))
                         .font(HubFont.machine)

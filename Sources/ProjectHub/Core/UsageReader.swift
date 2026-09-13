@@ -416,47 +416,80 @@ enum UsageReader {
         // Session logs are append-only, so nothing inside the reporting window can
         // sit further back than the same cutoff already applied to file selection.
         let windowStart = Date().addingTimeInterval(-8 * 24 * 60 * 60)
-        for file in newestSessionFiles(under: roots, limit: 80) {
-            events.append(contentsOf: eventsInFile(
+
+        // Every in-window event counts. Keeping only the newest event per file
+        // under-reported a week of Codex usage from billions of tokens to millions.
+        // It is affordable now because UsageScanCache reuses a file's parsed records
+        // until its size or modified date changes.
+        for file in sessionFiles(under: roots) {
+            for event in eventsInFile(
                 file.path,
                 kind: kind,
                 windowStart: windowStart,
-                newestOnly: kind == .codex,
                 seen: &seen
-            ))
+            ) {
+                if event.date >= windowStart { events.append(event) }
+            }
         }
+        UsageScanCache.commit()
         return events.sorted { $0.date < $1.date }
     }
 
     /// Builds one event from a single JSONL line, or nil when the line carries no
-    /// usage. Shared by the forward and backward readers.
+    /// usage. Deduplication happens where the events are collected, not here, so the
+    /// same parse can serve both the cache and a fresh read.
     private static func event(
         fromLine line: Data,
         path: String,
-        kind: Kind,
-        seen: inout Set<String>
+        kind: Kind
     ) -> Event? {
         guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { return nil }
         guard let totals = totals(in: object, kind: kind), totals.tokens > 0 else { return nil }
         let requestID = string(object["requestId"]) ?? string(object["request_id"])
-        if let requestID, !seen.insert("\(path)|\(requestID)").inserted { return nil }
         let date = parseDate(object["timestamp"]) ?? parseDate(object["created_at"]) ?? .distantPast
         let model = string((object["message"] as? [String: Any])?["model"])
             ?? string(object["model"])
         return Event(date: date, file: path, model: model, totals: totals, requestID: requestID)
     }
 
-    /// Reads a session log backwards in chunks and stops at the first event older
-    /// than the window. The log is append-only, so everything in range is at the
-    /// end; reading whole files cost ~500 MB per refresh because codex keeps only
-    /// its newest event per file.
+    /// Reads a session log's in-window usage. When the cache already holds this
+    /// file at its current size and modified date, the records are reused and the
+    /// file is never opened. Otherwise the log is read backwards in chunks and stops
+    /// at the first event older than the window, since the log is append-only and
+    /// everything in range sits at the end.
     private static func eventsInFile(
         _ path: String,
         kind: Kind,
         windowStart: Date,
-        newestOnly: Bool,
         seen: inout Set<String>
     ) -> [Event] {
+        let fm = FileManager.default
+        let attrs = try? fm.attributesOfItem(atPath: path)
+        let size = (attrs?[.size] as? Int) ?? 0
+        let modified = ((attrs?[.modificationDate] as? Date) ?? .distantPast).timeIntervalSince1970
+
+        if let cached = UsageScanCache.entry(for: path, size: size, modified: modified) {
+            return cached.records.compactMap { record in
+                guard record.date >= windowStart else { return nil }
+                if let requestID = record.requestID, !seen.insert("\(path)|\(requestID)").inserted {
+                    return nil
+                }
+                return Event(
+                    date: record.date,
+                    file: path,
+                    model: record.model,
+                    totals: UsageTotals(
+                        input: record.input,
+                        output: record.output,
+                        cacheWrite: record.cacheWrite,
+                        cacheRead: record.cacheRead,
+                        cost: record.cost
+                    ),
+                    requestID: record.requestID
+                )
+            }
+        }
+
         guard let handle = FileHandle(forReadingAtPath: path) else { return [] }
         defer { try? handle.close() }
 
@@ -483,17 +516,39 @@ enum UsageReader {
             }
 
             for line in lines.reversed() where !line.isEmpty {
-                guard let parsed = event(fromLine: Data(line), path: path, kind: kind, seen: &seen) else { continue }
+                guard let parsed = event(fromLine: Data(line), path: path, kind: kind) else { continue }
                 if parsed.date >= windowStart {
                     collected.append(parsed)
-                    if newestOnly { return collected }
                 } else {
                     reachedOlderEvents = true
                     break
                 }
             }
         }
-        return collected
+
+        let records = collected.map {
+            UsageScanCache.Record(
+                date: $0.date,
+                model: $0.model,
+                requestID: $0.requestID,
+                input: $0.totals.input,
+                cacheWrite: $0.totals.cacheWrite,
+                cacheRead: $0.totals.cacheRead,
+                output: $0.totals.output,
+                cost: $0.totals.cost
+            )
+        }
+        UsageScanCache.store(
+            UsageScanCache.FileEntry(size: size, modified: modified, offset: size, records: records),
+            for: path
+        )
+        // `seen` still has to be applied on a miss, so re-read through it.
+        var result: [Event] = []
+        for event in collected {
+            if let requestID = event.requestID, !seen.insert("\(path)|\(requestID)").inserted { continue }
+            result.append(event)
+        }
+        return result
     }
 
     private static func snapshot(from events: [Event]) -> Snapshot {
@@ -521,18 +576,22 @@ enum UsageReader {
         return snap
     }
 
+    /// ccusage's block model, which is the one Claude Code actually bills on: the
+    /// first message opens a block, the block runs exactly five hours, and the next
+    /// message after it expires opens the following block. Nothing is rounded to
+    /// the hour — the block starts at the real first-message timestamp.
     private static func activeBlockStart(in events: [Event], now: Date) -> Date? {
-        let recent = events.filter { now.timeIntervalSince($0.date) < 5 * 60 * 60 && $0.date <= now }
-        guard let first = recent.first else { return nil }
-        return floorToHour(first.date)
-    }
-
-    private static func floorToHour(_ date: Date) -> Date {
-        var components = Calendar.current.dateComponents(in: TimeZone.current, from: date)
-        components.minute = 0
-        components.second = 0
-        components.nanosecond = 0
-        return Calendar.current.date(from: components) ?? date
+        let duration: TimeInterval = 5 * 60 * 60
+        var blockStart: Date?
+        for event in events.sorted(by: { $0.date < $1.date }) {
+            if let start = blockStart {
+                if event.date >= start.addingTimeInterval(duration) { blockStart = event.date }
+            } else {
+                blockStart = event.date
+            }
+        }
+        guard let start = blockStart, now < start.addingTimeInterval(duration) else { return nil }
+        return start
     }
 
     private static func totals(in object: [String: Any], kind: Kind) -> UsageTotals? {
@@ -559,8 +618,10 @@ enum UsageReader {
     static func priced(_ bag: [String: Any], model: String?, explicitCost: Double?) -> UsageTotals {
         let input = int(bag["input_tokens"]) ?? int(bag["input"]) ?? 0
         let output = int(bag["output_tokens"]) ?? int(bag["output"]) ?? 0
-        let cacheWrite = int(bag["cache_creation_input_tokens"]) ?? 0
-        let cacheRead = int(bag["cache_read_input_tokens"]) ?? 0
+        // Codex names the cache fields differently than Claude, so reading only the
+        // Claude spelling silently reported zero cache tokens for every Codex turn.
+        let cacheWrite = int(bag["cache_creation_input_tokens"]) ?? int(bag["cache_write_input_tokens"]) ?? 0
+        let cacheRead = int(bag["cache_read_input_tokens"]) ?? int(bag["cached_input_tokens"]) ?? 0
         let cache = bag["cache_creation"] as? [String: Any] ?? [:]
         let write1h = int(cache["ephemeral_1h_input_tokens"]) ?? 0
         let write5m = int(cache["ephemeral_5m_input_tokens"]) ?? max(0, cacheWrite - write1h)
@@ -596,7 +657,9 @@ enum UsageReader {
         let mtime: Date
     }
 
-    private static func newestSessionFiles(under roots: [String], limit: Int) -> [SessionFile] {
+    /// Every log touched inside the reporting window. No count cap: a cap silently
+    /// drops usage, and reading these is cheap once UsageScanCache has them.
+    private static func sessionFiles(under roots: [String]) -> [SessionFile] {
         let fm = FileManager.default
         let cutoff = Date().addingTimeInterval(-8 * 24 * 60 * 60)
         var files: [SessionFile] = []
@@ -604,10 +667,7 @@ enum UsageReader {
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: root, isDirectory: &isDir), isDir.boolValue else { continue }
             guard let enumerator = fm.enumerator(atPath: root) else { continue }
-            var visited = 0
             while let relative = enumerator.nextObject() as? String {
-                visited += 1
-                if visited > 4_000 { break }
                 let lowered = relative.lowercased()
                 if lowered.contains("node_modules") || lowered.contains("/.git/") || lowered.contains("/.build/") {
                     enumerator.skipDescendants()
@@ -615,12 +675,17 @@ enum UsageReader {
                 }
                 guard relative.hasSuffix(".jsonl") else { continue }
                 let path = (root as NSString).appendingPathComponent(relative)
-                let mtime = (try? fm.attributesOfItem(atPath: path)[.modificationDate] as? Date) ?? .distantPast
-                guard mtime >= cutoff else { continue }
+                guard let attrs = try? fm.attributesOfItem(atPath: path),
+                      let mtime = attrs[.modificationDate] as? Date,
+                      mtime >= cutoff else { continue }
                 files.append(SessionFile(path: path, mtime: mtime))
             }
         }
-        return files.sorted { $0.mtime > $1.mtime }.prefix(limit).map { $0 }
+        return files
+    }
+
+    private static func newestSessionFiles(under roots: [String], limit: Int) -> [SessionFile] {
+        Array(sessionFiles(under: roots).sorted { $0.mtime > $1.mtime }.prefix(limit))
     }
 
     private static func lastJSONObject(in path: String, matching: ([String: Any]) -> Bool) -> [String: Any]? {
