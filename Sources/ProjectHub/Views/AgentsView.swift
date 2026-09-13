@@ -13,8 +13,7 @@ struct AgentsView: View {
     @State private var confirmDelete: Bool = false
 
     private var agents: [Agent] {
-        let _ = reloadTick  // trigger re-eval
-        return agentStore.agents(for: project.path)
+        agentStore.agents(for: project.path)
     }
 
     var body: some View {
@@ -26,6 +25,9 @@ struct AgentsView: View {
             } else {
                 agentList
             }
+        }
+        .task(id: "\(project.path)#\(reloadTick)") {
+            await agentStore.load(for: project.path)
         }
         .sheet(isPresented: $showNewAgentSheet) {
             NewAgentSheet(projectPath: project.path) {

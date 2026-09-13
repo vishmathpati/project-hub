@@ -867,7 +867,7 @@ final class CompatibilityProjectMCPTests: XCTestCase {
         try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
         try """
         [mcp_servers.workspace]
-        command = "npx"
+        command = "/bin/echo"
         args = ["-y", "@example/workspace-mcp"]
         """.write(to: codexHome.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
 

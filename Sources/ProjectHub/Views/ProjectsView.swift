@@ -733,21 +733,26 @@ struct ProjectsView: View {
         }
         .overlay(alignment: .leading) {
             if isRenaming {
-                TextField("Name", text: $draftName, onCommit: { commitRename(project) })
+                TextField("Name", text: $draftName)
                     .textFieldStyle(.roundedBorder)
                     .font(HubFont.rowPrimary)
                     .frame(width: 200)
                     .padding(.leading, 32)
+                    .onSubmit { commitRename(project) }
             }
         }
         .onTapGesture { selection = project }
         .simultaneousGesture(TapGesture(count: 2).onEnded { open(project) })
     }
 
-    private func relativeTime(_ date: Date) -> String {
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
+        return formatter
+    }()
+
+    private func relativeTime(_ date: Date) -> String {
+        Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
     }
 
     // MARK: - States
@@ -901,7 +906,8 @@ struct ProjectsView: View {
 
     private func revealPathInFinder(_ path: String) {
         NotificationCenter.default.post(name: .projecthubClosePopover, object: nil)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+        Task {
+            try? await Task.sleep(for: .seconds(0.15))
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
         }
     }

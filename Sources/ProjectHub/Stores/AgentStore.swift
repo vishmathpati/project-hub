@@ -3,18 +3,22 @@ import Foundation
 @MainActor
 final class AgentStore: ObservableObject {
     @Published var lastError: String?
-    private var agentsByPath: [String: [Agent]] = [:]
+    @Published private(set) var agentsByPath: [String: [Agent]] = [:]
 
     func agents(for projectPath: String) -> [Agent] {
-        if let cached = agentsByPath[projectPath] { return cached }
-        let list = AgentReader.agents(for: projectPath)
+        agentsByPath[projectPath] ?? []
+    }
+
+    func load(for projectPath: String) async {
+        guard agentsByPath[projectPath] == nil else { return }
+        let list = await Task.detached(priority: .utility) {
+            AgentReader.agents(for: projectPath)
+        }.value
         agentsByPath[projectPath] = list
-        return list
     }
 
     func invalidate(projectPath: String) {
-        agentsByPath[projectPath] = AgentReader.agents(for: projectPath)
-        objectWillChange.send()
+        agentsByPath.removeValue(forKey: projectPath)
     }
 
     func create(agent: AgentTemplate, in projectPath: String) {

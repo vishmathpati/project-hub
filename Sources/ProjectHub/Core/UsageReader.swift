@@ -54,14 +54,24 @@ enum UsageReader {
 
     private static var cachedCards: [UsageCard] = []
     private static var cachedAt: Date?
+    private static let cacheLock = NSLock()
 
     static func summarize() -> [UsageCard] {
-        if let cachedAt, Date().timeIntervalSince(cachedAt) < 60, !cachedCards.isEmpty {
-            return cachedCards
+        cacheLock.lock()
+        let cached = cachedCards
+        let stamp = cachedAt
+        cacheLock.unlock()
+
+        if let stamp, Date().timeIntervalSince(stamp) < 60, !cached.isEmpty {
+            return cached
         }
+
         let cards = summarizeUncached()
+
+        cacheLock.lock()
         cachedCards = cards
         cachedAt = Date()
+        cacheLock.unlock()
         return cards
     }
 

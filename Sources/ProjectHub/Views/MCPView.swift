@@ -464,7 +464,7 @@ struct MCPView: View {
 // MARK: - Identifiable helper
 
 private struct IdentifiableMCPServer: Identifiable {
-    let id = UUID()
+    var id: String { "\(toolID)::\(name)" }
     let toolID: String
     let name: String
 }

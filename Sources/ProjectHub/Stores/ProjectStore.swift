@@ -165,18 +165,23 @@ final class ProjectStore: ObservableObject {
         let showSpinner = projects.isEmpty && discovered.isEmpty
         if showSpinner { isScanning = true }
         let existingPaths = Set(projects.map { ProjectStore.discoveryDedupKey($0.path) })
+        let tracked = projects
         Task { [weak self] in
-            let result = await Task.detached(priority: .utility) {
-                ProjectStore.findProjects(excluding: existingPaths)
+            let outcome = await Task.detached(priority: .utility) {
+                (
+                    ProjectStore.findProjects(excluding: existingPaths),
+                    ProjectStore.inspections(for: tracked)
+                )
             }.value
             guard let self else { return }
-            if discovered != result.projects {
-                discovered = result.projects
+            if discovered != outcome.0.projects {
+                discovered = outcome.0.projects
             }
-            if hiddenWorktrees != result.hiddenWorktrees {
-                hiddenWorktrees = result.hiddenWorktrees
+            if hiddenWorktrees != outcome.0.hiddenWorktrees {
+                hiddenWorktrees = outcome.0.hiddenWorktrees
             }
-            invalidateInspectionCache()
+            inspectionCache = outcome.1
+            configFileCache.removeAll()
             isScanning = false
         }
     }
@@ -668,14 +673,32 @@ final class ProjectStore: ObservableObject {
 
     private func inspection(for project: Project) -> ProjectInspection {
         if let cached = inspectionCache[project.path] { return cached }
+        let value = ProjectStore.inspect(project)
+        inspectionCache[project.path] = value
+        return value
+    }
+
+    /// Builds one inspection value. Kept nonisolated so scans can warm the cache
+    /// off the main actor and view bodies only ever read a populated dictionary.
+    nonisolated private static func inspect(_ project: Project) -> ProjectInspection {
         let exists = project.exists
-        let facts = ProjectFacts(path: project.path)
         let toolIDs = exists
             ? ProjectStore.detectedTools(at: project.path, fm: FileManager.default)
             : []
-        let value = ProjectInspection(exists: exists, facts: facts, toolIDs: toolIDs)
-        inspectionCache[project.path] = value
-        return value
+        return ProjectInspection(
+            exists: exists,
+            facts: ProjectFacts(path: project.path),
+            toolIDs: toolIDs
+        )
+    }
+
+    nonisolated private static func inspections(for projects: [Project]) -> [String: ProjectInspection] {
+        var cache: [String: ProjectInspection] = [:]
+        cache.reserveCapacity(projects.count)
+        for project in projects {
+            cache[project.path] = ProjectStore.inspect(project)
+        }
+        return cache
     }
 
     func invalidateInspectionCache(path: String? = nil) {

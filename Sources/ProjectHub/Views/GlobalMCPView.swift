@@ -562,13 +562,13 @@ private struct MCPFamilySection: Identifiable {
 }
 
 private struct IdentifiableServer: Identifiable {
-    let id = UUID()
+    var id: String { "\(toolID)::\(name)" }
     let toolID: String
     let name: String
 }
 
 private struct IdentifiableCopyServer: Identifiable {
-    let id = UUID()
+    var id: String { "\(toolID)::\(name)" }
     let toolID: String
     let toolLabel: String
     let name: String
