@@ -678,6 +678,20 @@ final class ProjectStore: ObservableObject {
         return value
     }
 
+    /// Off-main read for a view that must not stall its first frame. The
+    /// synchronous `inspection(for:)` stays for callers that need the value in the
+    /// same pass; opening a project does not.
+    func inspectionSnapshot(for project: Project) async -> (toolIDs: [String], facts: ProjectFacts?) {
+        if let cached = inspectionCache[project.path] {
+            return (cached.toolIDs, cached.exists ? cached.facts : nil)
+        }
+        let inspected = await Task.detached(priority: .utility) {
+            ProjectStore.inspect(project)
+        }.value
+        inspectionCache[project.path] = inspected
+        return (inspected.toolIDs, inspected.exists ? inspected.facts : nil)
+    }
+
     /// Builds one inspection value. Kept nonisolated so scans can warm the cache
     /// off the main actor and view bodies only ever read a populated dictionary.
     nonisolated private static func inspect(_ project: Project) -> ProjectInspection {

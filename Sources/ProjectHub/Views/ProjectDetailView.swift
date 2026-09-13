@@ -19,6 +19,8 @@ struct ProjectDetailView: View {
     @State private var subTab: Int = 0
     @State private var reloadTick: Int = 0
     @State private var showCopySheet: Bool = false
+    @State private var detailToolIDs: [String] = []
+    @State private var detailFacts: ProjectFacts?
 
     init(project: Project, onBack: @escaping () -> Void, presentation: Presentation = .compact) {
         self.project = project
@@ -33,6 +35,14 @@ struct ProjectDetailView: View {
             } else {
                 compactBody
             }
+        }
+        // Opening a project used to stat the folder inside the first body pass.
+        // The provider table renders AbsentValue for zero, so waiting one hop costs
+        // nothing visually and keeps the click responsive.
+        .task(id: "\(project.path)#\(reloadTick)") {
+            let snapshot = await projectStore.inspectionSnapshot(for: project)
+            detailToolIDs = snapshot.toolIDs
+            detailFacts = snapshot.facts
         }
         .sheet(isPresented: $showCopySheet) {
             CopyProfileSheet(
@@ -158,7 +168,7 @@ struct ProjectDetailView: View {
             backTitle: "Projects",
             back: onBack
         ) {
-            ProviderTileRow(toolIDs: projectStore.detectedToolIDs(for: project))
+            ProviderTileRow(toolIDs: detailToolIDs)
 
             HubButton(title: "Copy from…", kind: .secondary) { showCopySheet = true }
 
@@ -318,7 +328,7 @@ struct ProjectDetailView: View {
     }
 
     private var providerCoverageTable: some View {
-        let tools = projectStore.detectedToolIDs(for: project)
+        let tools = detailToolIDs
         let columns = [
             HubTableColumn("Provider", width: 150),
             HubTableColumn("Config file"),
@@ -327,7 +337,7 @@ struct ProjectDetailView: View {
             HubTableColumn("Agents", width: 56, alignment: .trailing),
             HubTableColumn("State", width: 96),
         ]
-        let facts = projectStore.facts(for: project) ?? ProjectFacts(path: project.path)
+        let facts = detailFacts
 
         return VStack(alignment: .leading, spacing: 8) {
             HubSectionHeading("What each provider sees in this folder", count: tools.count)
@@ -352,11 +362,11 @@ struct ProjectDetailView: View {
                             .truncationMode(.middle)
                             .frame(maxWidth: .infinity, alignment: .leading)
 
-                        numericCell(facts.skills, width: 52)
-                        numericCell(facts.mcpServers, width: 44)
-                        numericCell(facts.agents, width: 56)
+                        numericCell(facts?.skills ?? 0, width: 52)
+                        numericCell(facts?.mcpServers ?? 0, width: 44)
+                        numericCell(facts?.agents ?? 0, width: 56)
 
-                        let configured = ProjectFacts.configFiles(for: toolID, at: project.path) != "not configured"
+                        let configured = projectStore.configFileSummary(for: toolID, at: project.path) != "not configured"
                         Group {
                             if configured {
                                 StatusLabel(status: .ok, text: "in sync", font: HubFont.machine)

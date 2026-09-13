@@ -211,12 +211,15 @@ struct UsageView: View {
         card.week.cost > 0 ? "\(money(card.week.cost)) this week" : "included"
     }
 
+    /// Codex publishes an exact `resets_at`, so show the real moment rather than
+    /// only the weekday once the reset is more than a day out.
     private func resetNote(_ window: UsageWindow) -> String? {
         guard let reset = window.resetsAt else { return nil }
         let remaining = reset.timeIntervalSinceNow
         if remaining <= 0 { return "resetting now" }
-        if remaining < 24 * 60 * 60 { return "resets in \(hoursMinutes(remaining))" }
-        return "resets \(reset.formatted(.dateTime.weekday(.wide)))"
+        let moment = reset.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute())
+        if remaining < 24 * 60 * 60 { return "resets \(moment) · in \(hoursMinutes(remaining))" }
+        return "resets \(moment)"
     }
 
     private func money(_ value: Double) -> String {

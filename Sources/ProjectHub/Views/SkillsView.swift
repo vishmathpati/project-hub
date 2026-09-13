@@ -26,14 +26,20 @@ struct SkillsView: View {
         HStack(alignment: .top, spacing: 0) {
             // MARK: Left — Installed
             VStack(alignment: .leading, spacing: 0) {
-                sectionHeader(title: "In this project", count: ownSkills.count, color: .green)
+                sectionHeader(title: "In this project",
+                              count: installed == nil ? nil : ownSkills.count,
+                              color: .green)
                 Divider()
-                if let installed {
-                    if installed.isEmpty {
-                        emptyInstalled
-                    } else {
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 4) {
+                // One scroll container for every state. Swapping between a plain
+                // VStack while loading and a ScrollView once loaded replaced the
+                // whole subtree, which re-anchored the pane from centred to top and
+                // reset the scroll offset in a single frame.
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 4) {
+                        if let installed {
+                            if installed.isEmpty {
+                                emptyInstalled
+                            } else {
                                 ForEach(ownSkills) { skill in
                                     installedRow(skill, projectPath: project.path, copyTargets: otherProjects)
                                 }
@@ -44,11 +50,11 @@ struct SkillsView: View {
                                     }
                                 }
                             }
-                            .padding(8)
+                        } else {
+                            scanningInstalled
                         }
                     }
-                } else {
-                    scanningInstalled
+                    .padding(8)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -66,7 +72,7 @@ struct SkillsView: View {
                         LazyVStack(spacing: 4) {
                             ForEach(globals) { skill in
                                 globalRow(skill,
-                                          alreadyInstalled: installedNames.contains(skill),
+                                          alreadyInstalled: installed.map { _ in installedNames.contains(skill) },
                                           projectPath: project.path)
                             }
                         }
