@@ -1,6 +1,114 @@
 import Foundation
 
 enum SkillInventoryReader {
+
+    // MARK: - Stamped scan memo
+
+    /// A parsed skill root is a pure function of the SKILL.md files inside it.
+    /// Fingerprinting the directory's own modified date keeps the check to a single
+    /// stat per candidate root instead of one per skill, which is what made the
+    /// project-count loop cost seconds. In-place SKILL.md edits are covered by
+    /// `invalidateCaches()`, which every in-app install, edit, and removal calls.
+    private struct RootStamp: Equatable {
+        let entryCount: Int
+        let modified: Date?
+
+        init?(path: String) {
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: path) else {
+                return nil
+            }
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? []
+            entryCount = names.count
+            modified = attrs[.modificationDate] as? Date
+        }
+    }
+
+    /// Plugin bundles nest three levels deep, so the fingerprint comes from the
+    /// markets themselves; installing, removing, or updating a plugin changes one.
+    private struct PluginCacheStamp: Equatable {
+        let signature: [String]
+
+        init(cachePath: String) {
+            let fm = FileManager.default
+            var parts: [String] = []
+            for market in (try? fm.contentsOfDirectory(atPath: cachePath)) ?? [] where !market.hasPrefix(".") {
+                let marketDir = (cachePath as NSString).appendingPathComponent(market)
+                let entries = (try? fm.contentsOfDirectory(atPath: marketDir))?.count ?? 0
+                let modified = (try? fm.attributesOfItem(atPath: marketDir))?[.modificationDate] as? Date
+                parts.append("\(market)|\(entries)|\(modified?.timeIntervalSince1970 ?? 0)")
+            }
+            signature = parts.sorted()
+        }
+    }
+
+    private final class ScanMemo: @unchecked Sendable {
+        private let lock = NSLock()
+        private var roots: [String: (RootStamp, [Skill])] = [:]
+        private var plugins: (PluginCacheStamp, [RawSkill])?
+        /// `String??` distinguishes "not read yet" from "read, has no version".
+        private var versions: [String: String?] = [:]
+
+        func skills(for path: String, matching stamp: RootStamp) -> [Skill]? {
+            lock.lock(); defer { lock.unlock() }
+            guard let hit = roots[path], hit.0 == stamp else { return nil }
+            return hit.1
+        }
+
+        func store(_ skills: [Skill], for path: String, matching stamp: RootStamp) {
+            lock.lock(); defer { lock.unlock() }
+            roots[path] = (stamp, skills)
+        }
+
+        func pluginRows(matching stamp: PluginCacheStamp) -> [RawSkill]? {
+            lock.lock(); defer { lock.unlock() }
+            guard let hit = plugins, hit.0 == stamp else { return nil }
+            return hit.1
+        }
+
+        func storePluginRows(_ rows: [RawSkill], matching stamp: PluginCacheStamp) {
+            lock.lock(); defer { lock.unlock() }
+            plugins = (stamp, rows)
+        }
+
+        /// Reading a version means reading SKILL.md, and that read repeated for every
+        /// collected skill on every inventory. The value is memoized instead; the
+        /// owning root's stamp and `invalidateCaches()` cover staleness.
+        func version(for path: String) -> String?? {
+            lock.lock(); defer { lock.unlock() }
+            return versions[path]
+        }
+
+        func storeVersion(_ version: String?, for path: String) {
+            lock.lock(); defer { lock.unlock() }
+            versions[path] = version
+        }
+
+        func clear() {
+            lock.lock(); defer { lock.unlock() }
+            roots.removeAll()
+            plugins = nil
+            versions.removeAll()
+        }
+    }
+
+    private static let memo = ScanMemo()
+
+    /// Drops every parsed root. Callers must run this after a skill is installed,
+    /// edited, or removed, so an in-place SKILL.md edit is not masked by the stamp.
+    static func invalidateCaches() {
+        memo.clear()
+    }
+
+    private static func cachedScanSkillDir(_ dirPath: String, source: SkillSource) -> [Skill] {
+        guard let stamp = RootStamp(path: dirPath) else {
+            return SkillReader.scanSkillDir(dirPath, source: source)
+        }
+        if let hit = memo.skills(for: dirPath, matching: stamp) { return hit }
+        let skills = SkillReader.scanSkillDir(dirPath, source: source)
+        memo.store(skills, for: dirPath, matching: stamp)
+        return skills
+    }
+
     static func installedSkills(for projectPath: String) -> [InstalledSkill] {
         var collected: [RawSkill] = []
         var seenPaths = Set<String>()
@@ -16,7 +124,7 @@ enum SkillInventoryReader {
         let canonicalRoot = canonicalPath(ProjectRootDetector.detect(from: projectPath))
 
         for entry in skillDirectories(for: projectPath) {
-            for skill in SkillReader.scanSkillDir(entry.path, source: .claudeGlobal) {
+            for skill in cachedScanSkillDir(entry.path, source: .claudeGlobal) {
                 let canonicalSkill = canonicalPath(skill.path)
                 guard seenPaths.insert(canonicalSkill).inserted else { continue }
                 collected.append(
@@ -242,6 +350,9 @@ enum SkillInventoryReader {
 
     private static func codexPluginSkills() -> [RawSkill] {
         let cache = (ProjectHubPaths.codexHome() as NSString).appendingPathComponent("plugins/cache")
+        let stamp = PluginCacheStamp(cachePath: cache)
+        if let hit = memo.pluginRows(matching: stamp) { return hit }
+
         guard let markets = try? FileManager.default.contentsOfDirectory(atPath: cache) else { return [] }
         var rows: [RawSkill] = []
         for market in markets where !market.hasPrefix(".") {
@@ -271,19 +382,26 @@ enum SkillInventoryReader {
                 }
             }
         }
+        memo.storePluginRows(rows, matching: stamp)
         return rows
     }
 
     private static func version(at skillDirectory: String) -> String? {
+        if let cached = memo.version(for: skillDirectory) { return cached }
+
         let path = (skillDirectory as NSString).appendingPathComponent("SKILL.md")
-        guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
-        for line in content.split(whereSeparator: \.isNewline) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("version:") else { continue }
-            let value = trimmed.dropFirst("version:".count).trimmingCharacters(in: .whitespaces)
-            return value.isEmpty ? nil : value
+        var parsed: String?
+        if let content = try? String(contentsOfFile: path, encoding: .utf8) {
+            for line in content.split(whereSeparator: \.isNewline) {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                guard trimmed.hasPrefix("version:") else { continue }
+                let value = trimmed.dropFirst("version:".count).trimmingCharacters(in: .whitespaces)
+                parsed = value.isEmpty ? nil : value
+                break
+            }
         }
-        return nil
+        memo.storeVersion(parsed, for: skillDirectory)
+        return parsed
     }
 
     private static func stringArray(_ value: Any?) -> [String] {

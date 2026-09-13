@@ -192,18 +192,74 @@ final class SkillStore: ObservableObject {
 
         isRefreshingInstallCounts = true
         installCountTask = Task { [weak self] in
-            let counts = await Task.detached(priority: .utility) {
-                SkillStore.installedProjectCounts(
-                    globalSkills: skillSnapshot,
-                    projects: projectSnapshot,
-                    installedSkillsProvider: SkillStore.scanInstalledSkills(for:)
-                )
-            }.value
+            let counts = await SkillStore.installedProjectCountsConcurrently(
+                globalSkills: skillSnapshot,
+                projects: projectSnapshot,
+                installedSkillsProvider: SkillStore.scanInstalledSkills(for:)
+            )
 
             guard !Task.isCancelled else { return }
             self?.globalSkillInstallCounts = counts
             self?.isRefreshingInstallCounts = false
         }
+    }
+
+    /// Scans projects in parallel. Each one is an independent filesystem walk, but
+    /// the walk-up reaches the same global roots for every project, so the first
+    /// project is scanned alone to warm those roots before the rest fan out.
+    /// Without the warm-up every worker re-scans the shared roots concurrently and
+    /// the whole thing measures slower than running it serially.
+    nonisolated static func installedProjectCountsConcurrently(
+        globalSkills: [Skill],
+        projects: [Project],
+        home: String = NSHomeDirectory(),
+        concurrency: Int = 8,
+        installedSkillsProvider: @escaping (String) -> [InstalledSkill]
+    ) async -> [String: Int] {
+        let globalSkillNames = Set(globalSkills.map { $0.name.lowercased() })
+        guard !globalSkillNames.isEmpty else { return [:] }
+
+        let inspectable = projects.filter {
+            ProjectStore.isSafeForBackgroundInspection($0.path, home: home)
+        }
+        guard let first = inspectable.first else { return [:] }
+
+        var counts: [String: Int] = [:]
+        for name in Set(installedSkillsProvider(first.path).map { $0.name.lowercased() })
+        where globalSkillNames.contains(name) {
+            counts[name, default: 0] += 1
+        }
+
+        let remaining = Array(inspectable.dropFirst())
+        guard !remaining.isEmpty else { return counts }
+
+        let limit = max(1, concurrency)
+        let chunkSize = max(1, Int((Double(remaining.count) / Double(limit)).rounded(.up)))
+        let chunks = stride(from: 0, to: remaining.count, by: chunkSize).map {
+            Array(remaining[$0..<min($0 + chunkSize, remaining.count)])
+        }
+
+        let lock = NSLock()
+        await withTaskGroup(of: [String: Int].self) { group in
+            for chunk in chunks {
+                group.addTask(priority: .utility) {
+                    SkillStore.installedProjectCounts(
+                        globalSkills: globalSkills,
+                        projects: chunk,
+                        home: home,
+                        installedSkillsProvider: installedSkillsProvider
+                    )
+                }
+            }
+            for await partial in group {
+                lock.lock()
+                for (name, count) in partial {
+                    counts[name, default: 0] += count
+                }
+                lock.unlock()
+            }
+        }
+        return counts
     }
 
     // MARK: - Project-scoped queries
@@ -252,6 +308,7 @@ final class SkillStore: ObservableObject {
     /// Re-scans only paths already loaded or loading: a view is waiting on those
     /// and its `.task(id:)` will not re-fire on its own.
     func invalidateInstalledSkills(for projectPath: String? = nil) {
+        SkillInventoryReader.invalidateCaches()
         let watched = Set(installedSkillsByProject.keys).union(installedSkillsTasks.keys)
         let paths = projectPath.map { watched.contains($0) ? [$0] : [] } ?? Array(watched)
         for path in paths {
