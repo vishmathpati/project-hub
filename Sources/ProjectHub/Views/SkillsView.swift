@@ -17,20 +17,31 @@ struct SkillsView: View {
         let globals   = skillStore.globalSkills
         let installedNames = SkillStore.nameIndex(installed ?? [])
         let otherProjects = projectStore.projects.filter { $0.path != project.path }
+        // Split by where the skill actually sits. A skill reached by walking up to
+        // a parent folder is available here but is not installed here, and listing
+        // both together made a project with 7 skills look like it had 160.
+        let ownSkills = (installed ?? []).filter { $0.scopeLabel == "Project" || $0.scopeLabel == "Private" }
+        let inheritedSkills = (installed ?? []).filter { $0.scopeLabel != "Project" && $0.scopeLabel != "Private" }
 
         HStack(alignment: .top, spacing: 0) {
             // MARK: Left — Installed
             VStack(alignment: .leading, spacing: 0) {
-                sectionHeader(title: "Installed", count: installed?.count, color: .green)
+                sectionHeader(title: "In this project", count: ownSkills.count, color: .green)
                 Divider()
                 if let installed {
                     if installed.isEmpty {
                         emptyInstalled
                     } else {
                         ScrollView {
-                            LazyVStack(spacing: 4) {
-                                ForEach(installed) { skill in
+                            LazyVStack(alignment: .leading, spacing: 4) {
+                                ForEach(ownSkills) { skill in
                                     installedRow(skill, projectPath: project.path, copyTargets: otherProjects)
+                                }
+                                if !inheritedSkills.isEmpty {
+                                    inheritedHeading(inheritedSkills.count)
+                                    ForEach(inheritedSkills) { skill in
+                                        installedRow(skill, projectPath: project.path, copyTargets: otherProjects)
+                                    }
                                 }
                             }
                             .padding(8)
@@ -89,6 +100,22 @@ struct SkillsView: View {
     }
 
     // MARK: - Section header
+
+    /// Skills reached through a parent folder are available here but belong to
+    /// something else, so they sit below a divider the reader cannot miss.
+    private func inheritedHeading(_ count: Int) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Divider().padding(.vertical, 6)
+            Text("Also available from parent folders")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.secondary)
+            Text("\(count) skill\(count == 1 ? "" : "s") this project inherits rather than owns.")
+                .font(.system(size: 9))
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 2)
+        .padding(.bottom, 2)
+    }
 
     private func sectionHeader(title: String, count: Int?, color: Color) -> some View {
         HStack(spacing: 6) {
