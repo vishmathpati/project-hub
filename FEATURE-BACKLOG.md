@@ -39,7 +39,7 @@ Legend — **Pri**: P0 blocking value · P1 high · P2 useful · P3 polish.
 | **A8** | **settings.json deep editor**: permissions, spinner, statusline, env | CCTM | We read 36 KB but touch a fraction | P1 | done |
 | A9 | **AI-controllable**: ship our own MCP server so an agent can manage configs | CCTM, zeroone | zeroone's tool surface is smaller and cleaner | P3 | todo |
 | A10 | **Insights Viewer**: session quality + friction trends | CCTM | Needs `~/.claude/usage-data/`; detect and degrade | P3 | todo |
-| A11 | **Session Explorer**: browse sessions per project, transcript timeline, per-message tokens, tool-frequency chart | CCTM, opcode | opcode's session drilling is deeper | P1 | todo |
+| **A11** | **Session Explorer**: browse sessions per project, transcript timeline, per-message tokens, tool-frequency chart | CCTM, opcode | opcode's session drilling is deeper | P1 | done |
 
 ## B. Usage and analytics
 
@@ -64,7 +64,7 @@ Legend — **Pri**: P0 blocking value · P1 high · P2 useful · P3 polish.
 | B17 | Task-category split (13 categories) | CodeBurn | CodeBurn | P3 | todo |
 | B18 | Tool / shell / MCP usage ranking | CodeBurn, Claude `/usage` | CodeBurn | P3 | todo |
 | B19 | Plan-value tracker: API-equiv $ vs subscription price | CodeBurn | CodeBurn | P2 | todo |
-| B20 | Date filters, Today/Week/Month, asc/desc, JSON/CSV export | ccusage | ccusage | P1 | todo |
+| **B20** | Date filters, Today/Week/Month, asc/desc, JSON/CSV export | ccusage | ccusage | P1 | done |
 | B21 | Custom price overrides + model aliases + offline pricing table | ccusage | ccusage `ccusage.json` | P2 | todo |
 | B22 | Multi-currency (cached FX table) | CodeBurn | CodeBurn, cached only — no live fetch | P3 | todo |
 
