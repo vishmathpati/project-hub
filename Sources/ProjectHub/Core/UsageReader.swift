@@ -10,7 +10,7 @@ struct UsageWindow: Identifiable, Equatable {
     var remainingPercent: Double { max(0, min(100, 100 - usedPercent)) }
 }
 
-struct UsageTotals: Equatable {
+struct UsageTotals: Equatable, Codable {
     var input: Int = 0
     var output: Int = 0
     var cacheWrite: Int = 0
@@ -809,7 +809,19 @@ enum UsageReader {
 
     // MARK: - Breakdowns
 
-    struct UsageBreakdownRow: Identifiable, Equatable {
+    struct UsageDateRange: Equatable {
+        let label: String
+        let start: Date?
+        let end: Date?
+
+        func contains(_ date: Date) -> Bool {
+            if let start, date < start { return false }
+            if let end, date >= end { return false }
+            return true
+        }
+    }
+
+    struct UsageBreakdownRow: Identifiable, Equatable, Codable {
         var id: String { key }
         let key: String
         let label: String
@@ -819,12 +831,20 @@ enum UsageReader {
     }
 
     static func dailyBreakdown() -> [UsageBreakdownRow] {
+        dailyRows(from: claudeBreakdownEvents())
+    }
+
+    static func dailyBreakdown(in range: UsageDateRange, ascending: Bool = false) -> [UsageBreakdownRow] {
+        dailyRows(from: claudeBreakdownEvents(in: range), ascending: ascending)
+    }
+
+    private static func dailyRows(from events: [Event], ascending: Bool = false) -> [UsageBreakdownRow] {
         var sums: [String: UsageTotals] = [:]
         var days: [String: Date] = [:]
         let calendar = Calendar.current
         let keyFormat = DateFormatter()
         keyFormat.dateFormat = "yyyy-MM-dd"
-        for event in claudeBreakdownEvents() {
+        for event in events {
             let day = calendar.startOfDay(for: event.date)
             let key = keyFormat.string(from: day)
             days[key] = day
@@ -834,7 +854,8 @@ enum UsageReader {
         }
         let labelFormat = DateFormatter()
         labelFormat.dateFormat = "E d MMM"
-        return sums.keys.sorted(by: >).map { key in
+        let keys = ascending ? sums.keys.sorted() : sums.keys.sorted(by: >)
+        return keys.map { key in
             UsageBreakdownRow(
                 key: key,
                 label: labelFormat.string(from: days[key] ?? Date()),
@@ -846,12 +867,20 @@ enum UsageReader {
     }
 
     static func weeklyBreakdown() -> [UsageBreakdownRow] {
+        weeklyRows(from: claudeBreakdownEvents())
+    }
+
+    static func weeklyBreakdown(in range: UsageDateRange, ascending: Bool = false) -> [UsageBreakdownRow] {
+        weeklyRows(from: claudeBreakdownEvents(in: range), ascending: ascending)
+    }
+
+    private static func weeklyRows(from events: [Event], ascending: Bool = false) -> [UsageBreakdownRow] {
         var sums: [String: UsageTotals] = [:]
         var starts: [String: Date] = [:]
         let iso = Calendar(identifier: .iso8601)
         let labelFormat = DateFormatter()
         labelFormat.dateFormat = "d MMM"
-        for event in claudeBreakdownEvents() {
+        for event in events {
             let parts = iso.dateComponents([.yearForWeekOfYear, .weekOfYear], from: event.date)
             let key = String(format: "%04d-W%02d", parts.yearForWeekOfYear ?? 0, parts.weekOfYear ?? 0)
             if starts[key] == nil {
@@ -865,7 +894,8 @@ enum UsageReader {
             totals.add(event.totals)
             sums[key] = totals
         }
-        return sums.keys.sorted(by: >).map { key in
+        let keys = ascending ? sums.keys.sorted() : sums.keys.sorted(by: >)
+        return keys.map { key in
             UsageBreakdownRow(
                 key: key,
                 label: "Week of \(labelFormat.string(from: starts[key] ?? Date()))",
@@ -877,12 +907,20 @@ enum UsageReader {
     }
 
     static func monthlyBreakdown() -> [UsageBreakdownRow] {
+        monthlyRows(from: claudeBreakdownEvents())
+    }
+
+    static func monthlyBreakdown(in range: UsageDateRange, ascending: Bool = false) -> [UsageBreakdownRow] {
+        monthlyRows(from: claudeBreakdownEvents(in: range), ascending: ascending)
+    }
+
+    private static func monthlyRows(from events: [Event], ascending: Bool = false) -> [UsageBreakdownRow] {
         var sums: [String: UsageTotals] = [:]
         var months: [String: Date] = [:]
         let calendar = Calendar.current
         let keyFormat = DateFormatter()
         keyFormat.dateFormat = "yyyy-MM"
-        for event in claudeBreakdownEvents() {
+        for event in events {
             let parts = calendar.dateComponents([.year, .month], from: event.date)
             guard let month = calendar.date(from: parts) else { continue }
             let key = keyFormat.string(from: month)
@@ -893,7 +931,8 @@ enum UsageReader {
         }
         let labelFormat = DateFormatter()
         labelFormat.dateFormat = "MMM yyyy"
-        return sums.keys.sorted(by: >).map { key in
+        let keys = ascending ? sums.keys.sorted() : sums.keys.sorted(by: >)
+        return keys.map { key in
             UsageBreakdownRow(
                 key: key,
                 label: labelFormat.string(from: months[key] ?? Date()),
@@ -905,20 +944,36 @@ enum UsageReader {
     }
 
     static func modelBreakdown() -> [UsageBreakdownRow] {
+        modelRows(from: claudeBreakdownEvents())
+    }
+
+    static func modelBreakdown(in range: UsageDateRange, ascending: Bool = false) -> [UsageBreakdownRow] {
+        modelRows(from: claudeBreakdownEvents(in: range), ascending: ascending)
+    }
+
+    private static func modelRows(from events: [Event], ascending: Bool = false) -> [UsageBreakdownRow] {
         var sums: [String: UsageTotals] = [:]
-        for event in claudeBreakdownEvents() {
+        for event in events {
             let key = event.model ?? "unknown"
             var totals = sums[key] ?? UsageTotals()
             totals.add(event.totals)
             sums[key] = totals
         }
-        return ranked(sums, label: { $0 }, detail: { _ in nil })
+        return ranked(sums, label: { $0 }, detail: { _ in nil }, ascending: ascending)
     }
 
     static func projectBreakdown() -> [UsageBreakdownRow] {
+        projectRows(from: claudeBreakdownEvents())
+    }
+
+    static func projectBreakdown(in range: UsageDateRange, ascending: Bool = false) -> [UsageBreakdownRow] {
+        projectRows(from: claudeBreakdownEvents(in: range), ascending: ascending)
+    }
+
+    private static func projectRows(from events: [Event], ascending: Bool = false) -> [UsageBreakdownRow] {
         var sums: [String: UsageTotals] = [:]
         var names: [String: (label: String, detail: String?)] = [:]
-        for event in claudeBreakdownEvents() {
+        for event in events {
             let identity = projectIdentity(for: event.file)
             var totals = sums[identity.key] ?? UsageTotals()
             totals.add(event.totals)
@@ -928,13 +983,14 @@ enum UsageReader {
         return ranked(
             sums,
             label: { names[$0]?.label ?? $0 },
-            detail: { names[$0]?.detail }
+            detail: { names[$0]?.detail },
+            ascending: ascending
         )
     }
 
     // MARK: - Sessions
 
-    struct UsageSessionRow: Identifiable, Equatable {
+    struct UsageSessionRow: Identifiable, Equatable, Codable {
         var id: String { path }
         let path: String
         let label: String
@@ -949,11 +1005,15 @@ enum UsageReader {
         sessionRows(from: claudeBreakdownEvents())
     }
 
+    static func sessionBreakdown(in range: UsageDateRange, ascending: Bool = false) -> [UsageSessionRow] {
+        sessionRows(from: claudeBreakdownEvents(in: range), ascending: ascending)
+    }
+
     static func sessionRow(id: String) -> UsageSessionRow? {
         sessionRows(from: claudeBreakdownEvents().filter { $0.file == id }).first
     }
 
-    private static func sessionRows(from events: [Event]) -> [UsageSessionRow] {
+    private static func sessionRows(from events: [Event], ascending: Bool = false) -> [UsageSessionRow] {
         // The log file is the identity: the scan cache and the request dedupe both key on it.
         var grouped: [String: [Event]] = [:]
         for event in events {
@@ -987,8 +1047,10 @@ enum UsageReader {
             )
         }
         return rows.sorted { lhs, rhs in
-            if lhs.totals.cost != rhs.totals.cost { return lhs.totals.cost > rhs.totals.cost }
-            return lhs.lastAt > rhs.lastAt
+            if lhs.totals.cost != rhs.totals.cost {
+                return ascending ? lhs.totals.cost < rhs.totals.cost : lhs.totals.cost > rhs.totals.cost
+            }
+            return ascending ? lhs.lastAt < rhs.lastAt : lhs.lastAt > rhs.lastAt
         }
     }
 
@@ -1004,7 +1066,15 @@ enum UsageReader {
     }
 
     static func burnRate(now: Date = Date()) -> UsageBurnRate? {
-        let events = claudeBreakdownEvents()
+        burnRate(events: claudeBreakdownEvents(), now: now)
+    }
+
+    static func burnRate(in range: UsageDateRange, now: Date = Date()) -> UsageBurnRate? {
+        guard range.contains(now) else { return nil }
+        return burnRate(events: claudeBreakdownEvents(in: range), now: now)
+    }
+
+    private static func burnRate(events: [Event], now: Date) -> UsageBurnRate? {
         guard let start = activeBlockStart(in: events, now: now) else { return nil }
         let duration: TimeInterval = 5 * 60 * 60
         let end = start.addingTimeInterval(duration)
@@ -1030,7 +1100,8 @@ enum UsageReader {
     private static func ranked(
         _ sums: [String: UsageTotals],
         label: (String) -> String,
-        detail: (String) -> String?
+        detail: (String) -> String?,
+        ascending: Bool = false
     ) -> [UsageBreakdownRow] {
         let grand = sums.values.reduce(0) { $0 + $1.tokens }
         return sums.map { key, totals in
@@ -1041,7 +1112,7 @@ enum UsageReader {
                 totals: totals,
                 share: grand > 0 ? Double(totals.tokens) / Double(grand) : 0
             )
-        }.sorted { $0.totals.tokens > $1.totals.tokens }
+        }.sorted { ascending ? $0.totals.tokens < $1.totals.tokens : $0.totals.tokens > $1.totals.tokens }
     }
 
     private struct ProjectIdentity {
@@ -1082,5 +1153,30 @@ enum UsageReader {
             ],
             kind: .claude
         )
+    }
+
+    private static func claudeBreakdownEvents(in range: UsageDateRange) -> [Event] {
+        claudeBreakdownEvents().filter { range.contains($0.date) }
+    }
+
+    // MARK: - Export
+
+    static func jsonData<T: Encodable>(_ rows: [T]) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        return try encoder.encode(rows)
+    }
+
+    static func csvData(header: [String], rows: [[String]]) -> Data {
+        let lines = ([header] + rows).map { line in
+            line.map(csvField).joined(separator: ",")
+        }
+        return Data((lines.joined(separator: "\n") + "\n").utf8)
+    }
+
+    private static func csvField(_ value: String) -> String {
+        guard value.contains(",") || value.contains("\"") || value.contains("\n") else { return value }
+        return "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
     }
 }

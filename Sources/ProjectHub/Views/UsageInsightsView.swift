@@ -4,6 +4,15 @@ struct UsageInsightsView: View {
     @State private var sessions: [UsageReader.UsageSessionRow] = []
     @State private var burn: UsageReader.UsageBurnRate?
     @State private var loading = false
+    @State private var preset: UsageRangePreset = .all
+    @State private var customStart = Calendar.current.date(byAdding: .day, value: -6, to: Date()) ?? Date()
+    @State private var customEnd = Date()
+    @State private var ascending = false
+    @State private var exportError: String?
+
+    private var range: UsageReader.UsageDateRange {
+        preset.range(customStart: customStart, customEnd: customEnd)
+    }
 
     private var columns: [HubTableColumn] {
         [
@@ -20,6 +29,20 @@ struct UsageInsightsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
+                VStack(alignment: .leading, spacing: 8) {
+                    UsageFilterBar(
+                        preset: $preset,
+                        customStart: $customStart,
+                        customEnd: $customEnd,
+                        ascending: $ascending,
+                        onExport: { export($0) }
+                    )
+                    if let exportError {
+                        Text(exportError)
+                            .font(HubFont.caption)
+                            .foregroundStyle(HubTheme.bad)
+                    }
+                }
                 activeBlockSection
                 sessionSection
             }
@@ -27,6 +50,10 @@ struct UsageInsightsView: View {
         }
         .background(HubTheme.bg)
         .onAppear { load() }
+        .onChange(of: preset) { _, _ in load() }
+        .onChange(of: customStart) { _, _ in load() }
+        .onChange(of: customEnd) { _, _ in load() }
+        .onChange(of: ascending) { _, _ in load() }
         .onReceive(Timer.publish(every: 120, on: .main, in: .common).autoconnect()) { _ in
             load()
         }
@@ -207,14 +234,58 @@ struct UsageInsightsView: View {
     private func load() {
         guard !loading else { return }
         if sessions.isEmpty { loading = true }
+        let currentRange = range
+        let order = ascending
         Task.detached(priority: .utility) {
-            let rate = UsageReader.burnRate()
-            let rows = UsageReader.sessionBreakdown()
+            let rate = UsageReader.burnRate(in: currentRange)
+            let rows = UsageReader.sessionBreakdown(in: currentRange, ascending: order)
             await MainActor.run {
                 loading = false
-                burn = rate
-                sessions = rows
+                if currentRange == range, order == ascending {
+                    burn = rate
+                    sessions = rows
+                } else {
+                    load()
+                }
             }
+        }
+    }
+
+    private func export(_ format: UsageExporter.Format) {
+        let snapshot = sessions
+        let stamp = UsageExporter.dateStamp()
+        UsageExporter.save(
+            format: format,
+            suggestedName: "usage-sessions-\(stamp).\(format.rawValue)",
+            message: "\(snapshot.count) rows · \(range.label)",
+            failure: $exportError
+        ) {
+            switch format {
+            case .json:
+                return try UsageReader.jsonData(snapshot)
+            case .csv:
+                return UsageReader.csvData(
+                    header: ["Session", "Models", "First", "Last", "In", "Out", "Cache-Create", "Cache-Read", "Total", "$"],
+                    rows: Self.csvRows(snapshot)
+                )
+            }
+        }
+    }
+
+    private static func csvRows(_ rows: [UsageReader.UsageSessionRow]) -> [[String]] {
+        rows.map { row in
+            [
+                "\(row.label) · \(row.detail)",
+                row.models.joined(separator: " "),
+                row.firstAt.formatted(.iso8601),
+                row.lastAt.formatted(.iso8601),
+                "\(row.totals.input)",
+                "\(row.totals.output)",
+                "\(row.totals.cacheWrite)",
+                "\(row.totals.cacheRead)",
+                "\(row.totals.tokens)",
+                String(format: "%.6f", row.totals.cost),
+            ]
         }
     }
 }

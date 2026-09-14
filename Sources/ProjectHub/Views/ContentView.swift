@@ -20,6 +20,7 @@ enum HubDestination: String, CaseIterable, Identifiable, Hashable {
     case profiles
     case usageInsights
     case settingsFile
+    case sessionExplorer
     case skillBrowser
     case settings
 
@@ -38,6 +39,7 @@ enum HubDestination: String, CaseIterable, Identifiable, Hashable {
         case .profiles: return "Profiles"
         case .usageInsights: return "Sessions"
         case .settingsFile: return "Settings File"
+        case .sessionExplorer: return "Session Explorer"
         case .skillBrowser: return "Browse Skills"
         case .usage:       return "Usage"
         case .settings:    return "Settings"
@@ -58,6 +60,7 @@ enum HubDestination: String, CaseIterable, Identifiable, Hashable {
         case .profiles: return "Save and restore named configurations"
         case .usageInsights: return "Active block burn rate and per-session cost"
         case .settingsFile: return "Edit the user settings file without losing keys"
+        case .sessionExplorer: return "Read a session transcript and what tools it used"
         case .skillBrowser: return "Search every skill on this Mac and install it anywhere"
         case .usage:       return "Read from files on this Mac · quota first, cost second"
         case .settings:    return "Paths and homes shown with the provider they belong to"
@@ -77,6 +80,7 @@ enum HubDestination: String, CaseIterable, Identifiable, Hashable {
         case .profiles: return [("", "stored locally")]
         case .usageInsights: return [("", "reads local logs only")]
         case .settingsFile: return [("", "backs up before writing")]
+        case .sessionExplorer: return [("", "reads local transcripts only")]
         case .skillBrowser: return [("", "installs by symlink")]
         case .usage:       return [("⌘R", "refresh"), ("", "updated every 2 minutes")]
         case .settings:    return [("⌘,", "settings"), ("⌘Q", "quit")]
@@ -154,7 +158,7 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     railGroup("Workspace", items: [.projects])
                     railGroup("Capabilities", items: [.skillBrowser, .skills, .plugins, .mcp, .providers])
-                    railGroup("Health", items: [.checks, .diagnostics, .usage, .usageBreakdown, .usageInsights])
+                    railGroup("Health", items: [.checks, .diagnostics, .usage, .usageBreakdown, .usageInsights, .sessionExplorer])
                     railGroup("Setup", items: [.profiles, .settingsFile])
                 }
                 .padding(.horizontal, 12)
@@ -367,6 +371,7 @@ struct ContentView: View {
                     compactMenuItem(.profiles)
                     compactMenuItem(.usageInsights)
                     compactMenuItem(.settingsFile)
+                    compactMenuItem(.sessionExplorer)
                     compactMenuItem(.skillBrowser)
                     compactMenuItem(.usage)
                 }
@@ -432,6 +437,8 @@ struct ContentView: View {
             UsageInsightsView()
         case .settingsFile:
             SettingsFileView()
+        case .sessionExplorer:
+            SessionExplorerView()
         case .skillBrowser:
             SkillBrowserView()
         case .diagnostics:
