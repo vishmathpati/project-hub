@@ -435,6 +435,11 @@ enum UsageReader {
         return events.sorted { $0.date < $1.date }
     }
 
+    /// Counts each provider request once across every file. Claude copies a session
+    /// transcript into another worktree's project folder, so the same request appears
+    /// under two paths and a path-scoped key counted it twice.
+    private static func dedupeKey(_ requestID: String) -> String { requestID }
+
     /// Builds one event from a single JSONL line, or nil when the line carries no
     /// usage. Deduplication happens where the events are collected, not here, so the
     /// same parse can serve both the cache and a fresh read.
@@ -475,7 +480,7 @@ enum UsageReader {
         if let cached = UsageScanCache.entry(for: path, size: size, modified: modified) {
             return cached.records.compactMap { record in
                 guard record.date >= windowStart else { return nil }
-                if let requestID = record.requestID, !seen.insert("\(path)|\(requestID)").inserted {
+                if let requestID = record.requestID, !seen.insert(dedupeKey(requestID)).inserted {
                     return nil
                 }
                 return Event(
@@ -549,7 +554,7 @@ enum UsageReader {
         // `seen` still has to be applied on a miss, so re-read through it.
         var result: [Event] = []
         for event in collected {
-            if let requestID = event.requestID, !seen.insert("\(path)|\(requestID)").inserted { continue }
+            if let requestID = event.requestID, !seen.insert(dedupeKey(requestID)).inserted { continue }
             result.append(event)
         }
         return result
