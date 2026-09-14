@@ -932,6 +932,101 @@ enum UsageReader {
         )
     }
 
+    // MARK: - Sessions
+
+    struct UsageSessionRow: Identifiable, Equatable {
+        var id: String { path }
+        let path: String
+        let label: String
+        let detail: String
+        let totals: UsageTotals
+        let firstAt: Date
+        let lastAt: Date
+        let models: [String]
+    }
+
+    static func sessionBreakdown() -> [UsageSessionRow] {
+        sessionRows(from: claudeBreakdownEvents())
+    }
+
+    static func sessionRow(id: String) -> UsageSessionRow? {
+        sessionRows(from: claudeBreakdownEvents().filter { $0.file == id }).first
+    }
+
+    private static func sessionRows(from events: [Event]) -> [UsageSessionRow] {
+        // The log file is the identity: the scan cache and the request dedupe both key on it.
+        var grouped: [String: [Event]] = [:]
+        for event in events {
+            grouped[event.file, default: []].append(event)
+        }
+        var rows: [UsageSessionRow] = []
+        for (path, sessionEvents) in grouped {
+            var totals = UsageTotals()
+            var models: [String] = []
+            var firstAt = Date.distantFuture
+            var lastAt = Date.distantPast
+            for event in sessionEvents {
+                totals.add(event.totals)
+                if let model = event.model, !models.contains(model) {
+                    models.append(model)
+                }
+                firstAt = min(firstAt, event.date)
+                lastAt = max(lastAt, event.date)
+            }
+            let file = (path as NSString).lastPathComponent
+            rows.append(
+                UsageSessionRow(
+                    path: path,
+                    label: projectIdentity(for: path).label,
+                    detail: (file as NSString).deletingPathExtension,
+                    totals: totals,
+                    firstAt: firstAt,
+                    lastAt: lastAt,
+                    models: models
+                )
+            )
+        }
+        return rows.sorted { lhs, rhs in
+            if lhs.totals.cost != rhs.totals.cost { return lhs.totals.cost > rhs.totals.cost }
+            return lhs.lastAt > rhs.lastAt
+        }
+    }
+
+    // MARK: - Burn rate
+
+    struct UsageBurnRate: Equatable {
+        let tokensPerMinute: Double
+        let costPerHour: Double
+        let elapsed: TimeInterval
+        let remaining: TimeInterval
+        let projectedTokens: Int
+        let projectedCost: Double
+    }
+
+    static func burnRate(now: Date = Date()) -> UsageBurnRate? {
+        let events = claudeBreakdownEvents()
+        guard let start = activeBlockStart(in: events, now: now) else { return nil }
+        let duration: TimeInterval = 5 * 60 * 60
+        let end = start.addingTimeInterval(duration)
+        var totals = UsageTotals()
+        for event in events where event.date >= start && event.date < end {
+            totals.add(event.totals)
+        }
+        let elapsed = max(1, now.timeIntervalSince(start))
+        let tokensPerMinute = Double(totals.tokens) / (elapsed / 60)
+        let costPerHour = totals.cost / (elapsed / 3600)
+        // Session logs are external input; the projection must not trap the refresh.
+        let projected = min(tokensPerMinute * duration / 60, 9e18)
+        return UsageBurnRate(
+            tokensPerMinute: tokensPerMinute,
+            costPerHour: costPerHour,
+            elapsed: elapsed,
+            remaining: end.timeIntervalSince(now),
+            projectedTokens: Int(projected.rounded()),
+            projectedCost: costPerHour * duration / 3600
+        )
+    }
+
     private static func ranked(
         _ sums: [String: UsageTotals],
         label: (String) -> String,

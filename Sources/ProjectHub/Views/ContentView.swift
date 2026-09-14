@@ -18,6 +18,8 @@ enum HubDestination: String, CaseIterable, Identifiable, Hashable {
     case usage
     case usageBreakdown
     case profiles
+    case usageInsights
+    case settingsFile
     case skillBrowser
     case settings
 
@@ -34,6 +36,8 @@ enum HubDestination: String, CaseIterable, Identifiable, Hashable {
         case .diagnostics: return "Diagnostics"
         case .usageBreakdown: return "Usage Breakdown"
         case .profiles: return "Profiles"
+        case .usageInsights: return "Sessions"
+        case .settingsFile: return "Settings File"
         case .skillBrowser: return "Browse Skills"
         case .usage:       return "Usage"
         case .settings:    return "Settings"
@@ -52,6 +56,8 @@ enum HubDestination: String, CaseIterable, Identifiable, Hashable {
         case .diagnostics: return "Every path we read, probed, and what no longer resolves"
         case .usageBreakdown: return "Daily, weekly, monthly, by model and by project"
         case .profiles: return "Save and restore named configurations"
+        case .usageInsights: return "Active block burn rate and per-session cost"
+        case .settingsFile: return "Edit the user settings file without losing keys"
         case .skillBrowser: return "Search every skill on this Mac and install it anywhere"
         case .usage:       return "Read from files on this Mac · quota first, cost second"
         case .settings:    return "Paths and homes shown with the provider they belong to"
@@ -69,6 +75,8 @@ enum HubDestination: String, CaseIterable, Identifiable, Hashable {
         case .diagnostics: return [("⌘R", "rescan"), ("", "reads local files only")]
         case .usageBreakdown: return [("", "reads local logs only")]
         case .profiles: return [("", "stored locally")]
+        case .usageInsights: return [("", "reads local logs only")]
+        case .settingsFile: return [("", "backs up before writing")]
         case .skillBrowser: return [("", "installs by symlink")]
         case .usage:       return [("⌘R", "refresh"), ("", "updated every 2 minutes")]
         case .settings:    return [("⌘,", "settings"), ("⌘Q", "quit")]
@@ -146,8 +154,8 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     railGroup("Workspace", items: [.projects])
                     railGroup("Capabilities", items: [.skillBrowser, .skills, .plugins, .mcp, .providers])
-                    railGroup("Health", items: [.checks, .diagnostics, .usage, .usageBreakdown])
-                    railGroup("Setup", items: [.profiles])
+                    railGroup("Health", items: [.checks, .diagnostics, .usage, .usageBreakdown, .usageInsights])
+                    railGroup("Setup", items: [.profiles, .settingsFile])
                 }
                 .padding(.horizontal, 12)
             }
@@ -357,6 +365,8 @@ struct ContentView: View {
                     compactMenuItem(.diagnostics)
                     compactMenuItem(.usageBreakdown)
                     compactMenuItem(.profiles)
+                    compactMenuItem(.usageInsights)
+                    compactMenuItem(.settingsFile)
                     compactMenuItem(.skillBrowser)
                     compactMenuItem(.usage)
                 }
@@ -418,6 +428,10 @@ struct ContentView: View {
             UsageBreakdownView()
         case .profiles:
             ProfilesView()
+        case .usageInsights:
+            UsageInsightsView()
+        case .settingsFile:
+            SettingsFileView()
         case .skillBrowser:
             SkillBrowserView()
         case .diagnostics:
