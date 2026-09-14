@@ -30,8 +30,8 @@ Legend — **Pri**: P0 blocking value · P1 high · P2 useful · P3 polish.
 | # | Feature | Source | Best-of | Pri | Status |
 |---|---|---|---|---|---|
 | **A1** | **Commands**: read/write `.claude/commands/**/*.md`, recursive namespacing (`group:name`), frontmatter (`description`, `argument-hint`, `allowed-tools`, `model`) | CCTM | Only app that manages them | P0 | done |
-| A2 | **Profiles**: save/restore *named* config sets (skills+agents+MCP+hooks+commands), one-click switch | CCTM | CCTM's snapshot model beats our ad-hoc "Copy setup to…" | P0 | todo |
-| A3 | **Browse / Search / Install**: one search over every skill on the machine, install into any project | t3code | t3code's cross-provider search + install flow, adapted local-only | P0 | todo |
+| **A2** | **Profiles**: save/restore *named* config sets (skills+agents+MCP+hooks+commands), one-click switch | CCTM | CCTM's snapshot model beats our ad-hoc "Copy setup to…" | P0 | done |
+| **A3** | **Browse / Search / Install**: one search over every skill on the machine, install into any project | t3code | t3code's cross-provider search + install flow, adapted local-only | P0 | done |
 | A4 | **Multi-editor sync**: write one MCP/skill definition to all enabled editors at once | CCTM | CCTM covers 6 editors; we already read all of them | P1 | todo |
 | A5 | **MCP Testing**: connect to a server and execute its tools in-app to prove config | CCTM, zeroone | CCTM's inline test panel | P1 | todo |
 | A6 | **Status Line Builder**: visual builder, 25+ segment types, themes, gallery | CCTM | Only app with a builder | P2 | todo |
