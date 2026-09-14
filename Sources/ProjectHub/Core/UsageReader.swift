@@ -1122,18 +1122,30 @@ enum UsageReader {
     }
 
     private static func projectIdentity(for file: String) -> ProjectIdentity {
-        let marker = "/.claude/projects/"
-        if let range = file.range(of: marker) {
-            let encoded = file[range.upperBound...].split(separator: "/").first.map(String.init) ?? ""
-            if encoded.hasPrefix("-") {
-                let decoded = "/" + String(encoded.dropFirst()).replacingOccurrences(of: "-", with: "/")
-                if FileManager.default.fileExists(atPath: decoded) {
-                    let label = (decoded as NSString).lastPathComponent
+        // Read the project path out of the log rather than reversing the directory
+        // name. Claude's encoding maps "/", " " and "." all to "-", so the name is
+        // ambiguous: "Arel Ecosystem" and "akriti-dash" both lose information, and
+        // a filesystem search to recover it is fragile and slow. Each entry records
+        // the real working directory, which is the truth this label wants.
+        if let handle = FileHandle(forReadingAtPath: file) {
+            defer { try? handle.close() }
+            if let data = try? handle.read(upToCount: 16_384),
+               let text = String(data: data, encoding: .utf8) {
+                for line in text.split(separator: "\n").prefix(8) {
+                    guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                          let cwd = object["cwd"] as? String,
+                          cwd.hasPrefix("/"), cwd.count > 1 else { continue }
+                    let label = (cwd as NSString).lastPathComponent
                     if !label.isEmpty {
-                        return ProjectIdentity(key: decoded, label: label, detail: decoded)
+                        return ProjectIdentity(key: cwd, label: label, detail: cwd)
                     }
                 }
             }
+        }
+
+        let marker = "/.claude/projects/"
+        if let range = file.range(of: marker) {
+            let encoded = file[range.upperBound...].split(separator: "/").first.map(String.init) ?? ""
             if !encoded.isEmpty {
                 return ProjectIdentity(key: encoded, label: encoded, detail: nil)
             }
@@ -1142,6 +1154,7 @@ enum UsageReader {
         let label = parent.isEmpty ? file : parent
         return ProjectIdentity(key: label, label: label, detail: nil)
     }
+
 
     private static func claudeBreakdownEvents() -> [Event] {
         // Same roots the Claude card totals, repeated here so the bucketed rows
