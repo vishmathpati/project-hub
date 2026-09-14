@@ -806,4 +806,186 @@ enum UsageReader {
         if let string = value as? String { return Double(string) }
         return nil
     }
+
+    // MARK: - Breakdowns
+
+    struct UsageBreakdownRow: Identifiable, Equatable {
+        var id: String { key }
+        let key: String
+        let label: String
+        let detail: String?
+        var totals: UsageTotals
+        var share: Double
+    }
+
+    static func dailyBreakdown() -> [UsageBreakdownRow] {
+        var sums: [String: UsageTotals] = [:]
+        var days: [String: Date] = [:]
+        let calendar = Calendar.current
+        let keyFormat = DateFormatter()
+        keyFormat.dateFormat = "yyyy-MM-dd"
+        for event in claudeBreakdownEvents() {
+            let day = calendar.startOfDay(for: event.date)
+            let key = keyFormat.string(from: day)
+            days[key] = day
+            var totals = sums[key] ?? UsageTotals()
+            totals.add(event.totals)
+            sums[key] = totals
+        }
+        let labelFormat = DateFormatter()
+        labelFormat.dateFormat = "E d MMM"
+        return sums.keys.sorted(by: >).map { key in
+            UsageBreakdownRow(
+                key: key,
+                label: labelFormat.string(from: days[key] ?? Date()),
+                detail: nil,
+                totals: sums[key] ?? UsageTotals(),
+                share: 0
+            )
+        }
+    }
+
+    static func weeklyBreakdown() -> [UsageBreakdownRow] {
+        var sums: [String: UsageTotals] = [:]
+        var starts: [String: Date] = [:]
+        let iso = Calendar(identifier: .iso8601)
+        let labelFormat = DateFormatter()
+        labelFormat.dateFormat = "d MMM"
+        for event in claudeBreakdownEvents() {
+            let parts = iso.dateComponents([.yearForWeekOfYear, .weekOfYear], from: event.date)
+            let key = String(format: "%04d-W%02d", parts.yearForWeekOfYear ?? 0, parts.weekOfYear ?? 0)
+            if starts[key] == nil {
+                starts[key] = iso.date(from: DateComponents(
+                    weekday: 2,
+                    weekOfYear: parts.weekOfYear,
+                    yearForWeekOfYear: parts.yearForWeekOfYear
+                )) ?? event.date
+            }
+            var totals = sums[key] ?? UsageTotals()
+            totals.add(event.totals)
+            sums[key] = totals
+        }
+        return sums.keys.sorted(by: >).map { key in
+            UsageBreakdownRow(
+                key: key,
+                label: "Week of \(labelFormat.string(from: starts[key] ?? Date()))",
+                detail: key,
+                totals: sums[key] ?? UsageTotals(),
+                share: 0
+            )
+        }
+    }
+
+    static func monthlyBreakdown() -> [UsageBreakdownRow] {
+        var sums: [String: UsageTotals] = [:]
+        var months: [String: Date] = [:]
+        let calendar = Calendar.current
+        let keyFormat = DateFormatter()
+        keyFormat.dateFormat = "yyyy-MM"
+        for event in claudeBreakdownEvents() {
+            let parts = calendar.dateComponents([.year, .month], from: event.date)
+            guard let month = calendar.date(from: parts) else { continue }
+            let key = keyFormat.string(from: month)
+            months[key] = month
+            var totals = sums[key] ?? UsageTotals()
+            totals.add(event.totals)
+            sums[key] = totals
+        }
+        let labelFormat = DateFormatter()
+        labelFormat.dateFormat = "MMM yyyy"
+        return sums.keys.sorted(by: >).map { key in
+            UsageBreakdownRow(
+                key: key,
+                label: labelFormat.string(from: months[key] ?? Date()),
+                detail: nil,
+                totals: sums[key] ?? UsageTotals(),
+                share: 0
+            )
+        }
+    }
+
+    static func modelBreakdown() -> [UsageBreakdownRow] {
+        var sums: [String: UsageTotals] = [:]
+        for event in claudeBreakdownEvents() {
+            let key = event.model ?? "unknown"
+            var totals = sums[key] ?? UsageTotals()
+            totals.add(event.totals)
+            sums[key] = totals
+        }
+        return ranked(sums, label: { $0 }, detail: { _ in nil })
+    }
+
+    static func projectBreakdown() -> [UsageBreakdownRow] {
+        var sums: [String: UsageTotals] = [:]
+        var names: [String: (label: String, detail: String?)] = [:]
+        for event in claudeBreakdownEvents() {
+            let identity = projectIdentity(for: event.file)
+            var totals = sums[identity.key] ?? UsageTotals()
+            totals.add(event.totals)
+            sums[identity.key] = totals
+            names[identity.key] = (identity.label, identity.detail)
+        }
+        return ranked(
+            sums,
+            label: { names[$0]?.label ?? $0 },
+            detail: { names[$0]?.detail }
+        )
+    }
+
+    private static func ranked(
+        _ sums: [String: UsageTotals],
+        label: (String) -> String,
+        detail: (String) -> String?
+    ) -> [UsageBreakdownRow] {
+        let grand = sums.values.reduce(0) { $0 + $1.tokens }
+        return sums.map { key, totals in
+            UsageBreakdownRow(
+                key: key,
+                label: label(key),
+                detail: detail(key),
+                totals: totals,
+                share: grand > 0 ? Double(totals.tokens) / Double(grand) : 0
+            )
+        }.sorted { $0.totals.tokens > $1.totals.tokens }
+    }
+
+    private struct ProjectIdentity {
+        let key: String
+        let label: String
+        let detail: String?
+    }
+
+    private static func projectIdentity(for file: String) -> ProjectIdentity {
+        let marker = "/.claude/projects/"
+        if let range = file.range(of: marker) {
+            let encoded = file[range.upperBound...].split(separator: "/").first.map(String.init) ?? ""
+            if encoded.hasPrefix("-") {
+                let decoded = "/" + String(encoded.dropFirst()).replacingOccurrences(of: "-", with: "/")
+                if FileManager.default.fileExists(atPath: decoded) {
+                    let label = (decoded as NSString).lastPathComponent
+                    if !label.isEmpty {
+                        return ProjectIdentity(key: decoded, label: label, detail: decoded)
+                    }
+                }
+            }
+            if !encoded.isEmpty {
+                return ProjectIdentity(key: encoded, label: encoded, detail: nil)
+            }
+        }
+        let parent = ((file as NSString).deletingLastPathComponent as NSString).lastPathComponent
+        let label = parent.isEmpty ? file : parent
+        return ProjectIdentity(key: label, label: label, detail: nil)
+    }
+
+    private static func claudeBreakdownEvents() -> [Event] {
+        // Same roots the Claude card totals, repeated here so the bucketed rows
+        // always agree with it.
+        loadEvents(
+            under: [
+                (home as NSString).appendingPathComponent(".claude/projects"),
+                (home as NSString).appendingPathComponent("Library/Application Support/Claude/local-agent-mode-sessions"),
+            ],
+            kind: .claude
+        )
+    }
 }

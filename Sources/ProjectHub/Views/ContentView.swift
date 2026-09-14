@@ -14,48 +14,56 @@ enum HubDestination: String, CaseIterable, Identifiable, Hashable {
     case mcp
     case providers
     case checks
+    case diagnostics
     case usage
+    case usageBreakdown
     case settings
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .projects:  return "Projects"
-        case .skills:    return "Skills"
-        case .plugins:   return "Plugins"
-        case .mcp:       return "MCP servers"
-        case .providers: return "Providers"
-        case .checks:    return "Checks"
-        case .usage:     return "Usage"
-        case .settings:  return "Settings"
+        case .projects:    return "Projects"
+        case .skills:      return "Skills"
+        case .plugins:     return "Plugins"
+        case .mcp:         return "MCP servers"
+        case .providers:   return "Providers"
+        case .checks:      return "Checks"
+        case .diagnostics: return "Diagnostics"
+        case .usageBreakdown: return "Usage Breakdown"
+        case .usage:       return "Usage"
+        case .settings:    return "Settings"
         }
     }
 
     /// The subtitle beside each page title — what this page answers.
     var pageSubtitle: String {
         switch self {
-        case .projects:  return "The folders you work in"
-        case .skills:    return "One library, and which providers can see each skill"
-        case .plugins:   return "Bundles, expanded so you know what lands on disk"
-        case .mcp:       return "Grouped by the provider that launches them, health inline"
-        case .providers: return "Which apps read your folders"
-        case .checks:    return "What is wrong, ranked, with the fix attached to each line"
-        case .usage:     return "Read from files on this Mac · quota first, cost second"
-        case .settings:  return "Paths and homes shown with the provider they belong to"
+        case .projects:    return "The folders you work in"
+        case .skills:      return "One library, and which providers can see each skill"
+        case .plugins:     return "Bundles, expanded so you know what lands on disk"
+        case .mcp:         return "Grouped by the provider that launches them, health inline"
+        case .providers:   return "Which apps read your folders"
+        case .checks:      return "What is wrong, ranked, with the fix attached to each line"
+        case .diagnostics: return "Every path we read, probed, and what no longer resolves"
+        case .usageBreakdown: return "Daily, weekly, monthly, by model and by project"
+        case .usage:       return "Read from files on this Mac · quota first, cost second"
+        case .settings:    return "Paths and homes shown with the provider they belong to"
         }
     }
 
     var footerHints: [(key: String, label: String)] {
         switch self {
-        case .projects:  return [("↑↓", "move"), ("⏎", "open"), ("T", "track"), ("⌘K", "commands")]
-        case .skills:    return [("↑↓", "move"), ("I", "install"), ("E", "edit"), ("⌘⌫", "remove")]
-        case .plugins:   return [("↑↓", "move"), ("→", "expand"), ("I", "install")]
-        case .mcp:       return [("↑↓", "move"), ("V", "verify"), ("E", "edit"), ("C", "copy to another provider")]
-        case .providers: return [("⌘K", "commands"), ("⏎", "manage provider")]
-        case .checks:    return [("↑↓", "move"), ("F", "fix"), ("D", "diff"), ("⌘R", "rescan")]
-        case .usage:     return [("⌘R", "refresh"), ("", "updated every 2 minutes")]
-        case .settings:  return [("⌘,", "settings"), ("⌘Q", "quit")]
+        case .projects:    return [("↑↓", "move"), ("⏎", "open"), ("T", "track"), ("⌘K", "commands")]
+        case .skills:      return [("↑↓", "move"), ("I", "install"), ("E", "edit"), ("⌘⌫", "remove")]
+        case .plugins:     return [("↑↓", "move"), ("→", "expand"), ("I", "install")]
+        case .mcp:         return [("↑↓", "move"), ("V", "verify"), ("E", "edit"), ("C", "copy to another provider")]
+        case .providers:   return [("⌘K", "commands"), ("⏎", "manage provider")]
+        case .checks:      return [("↑↓", "move"), ("F", "fix"), ("D", "diff"), ("⌘R", "rescan")]
+        case .diagnostics: return [("⌘R", "rescan"), ("", "reads local files only")]
+        case .usageBreakdown: return [("", "reads local logs only")]
+        case .usage:       return [("⌘R", "refresh"), ("", "updated every 2 minutes")]
+        case .settings:    return [("⌘,", "settings"), ("⌘Q", "quit")]
         }
     }
 }
@@ -130,7 +138,7 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     railGroup("Workspace", items: [.projects])
                     railGroup("Capabilities", items: [.skills, .plugins, .mcp, .providers])
-                    railGroup("Health", items: [.checks, .usage])
+                    railGroup("Health", items: [.checks, .diagnostics, .usage, .usageBreakdown])
                 }
                 .padding(.horizontal, 12)
             }
@@ -337,6 +345,8 @@ struct ContentView: View {
                 }
                 Section("Health") {
                     compactMenuItem(.checks)
+                    compactMenuItem(.diagnostics)
+                    compactMenuItem(.usageBreakdown)
                     compactMenuItem(.usage)
                 }
                 Divider()
@@ -393,6 +403,10 @@ struct ContentView: View {
             ProvidersView()
         case .checks:
             CompatibilityView()
+        case .usageBreakdown:
+            UsageBreakdownView()
+        case .diagnostics:
+            DiagnosticsView()
         case .usage:
             UsageView()
         case .settings:
