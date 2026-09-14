@@ -36,7 +36,7 @@ Legend — **Pri**: P0 blocking value · P1 high · P2 useful · P3 polish.
 | A5 | **MCP Testing**: connect to a server and execute its tools in-app to prove config | CCTM, zeroone | CCTM's inline test panel | P1 | todo |
 | A6 | **Status Line Builder**: visual builder, 25+ segment types, themes, gallery | CCTM | Only app with a builder | P2 | todo |
 | A7 | **Spinner Verbs**: edit/reorder Claude Code's working verbs, append or replace | CCTM | Only app that does it | P2 | todo |
-| A8 | **settings.json deep editor**: permissions, spinner, statusline, env | CCTM | We read 36 KB but touch a fraction | P1 | todo |
+| **A8** | **settings.json deep editor**: permissions, spinner, statusline, env | CCTM | We read 36 KB but touch a fraction | P1 | done |
 | A9 | **AI-controllable**: ship our own MCP server so an agent can manage configs | CCTM, zeroone | zeroone's tool surface is smaller and cleaner | P3 | todo |
 | A10 | **Insights Viewer**: session quality + friction trends | CCTM | Needs `~/.claude/usage-data/`; detect and degrade | P3 | todo |
 | A11 | **Session Explorer**: browse sessions per project, transcript timeline, per-message tokens, tool-frequency chart | CCTM, opcode | opcode's session drilling is deeper | P1 | todo |
@@ -46,11 +46,11 @@ Legend — **Pri**: P0 blocking value · P1 high · P2 useful · P3 polish.
 | # | Feature | Source | Best-of | Pri | Status |
 |---|---|---|---|---|---|
 | **B1** | Daily / weekly / monthly tables — In · Out · Cache-W · Cache-R · Total · $ as separate columns | ccusage | ccusage defines the columns | P0 | done |
-| B2 | Per-session table sorted by cost + last activity; lookup by session id | ccusage | ccusage | P1 | todo |
+| **B2** | Per-session table sorted by cost + last activity; lookup by session id | ccusage | ccusage | P1 | done |
 | **B3** | **Per-model breakdown** with share | ccusage, TokenBar | ccusage's `--breakdown` sub-rows | P0 | done |
 | **B4** | **Per-project breakdown** (Claude `cwd`) | ccusage `--instances` | ccusage's alias system | P0 | done |
 | B5 | Cost modes: recorded `costUSD` vs computed vs both | ccusage | ccusage `--mode` | P1 | todo |
-| B6 | **Burn rate** (tok/min, $/hr) + projected block total | ccusage, CodeBurn | ccusage's block projection | P1 | todo |
+| **B6** | **Burn rate** (tok/min, $/hr) + projected block total | ccusage, CodeBurn | ccusage's block projection | P1 | done |
 | B7 | Token-limit gauge with green/yellow/red + ⚠️/🚨 | ccusage, ClaudeBar | ccusage's `--token-limit max` | P2 | todo |
 | B8 | Contribution heatmap, streaks, peak day | Codex `/usage`, TokenBar | TokenBar's 3D/2D toggle, minus the novelty | P2 | todo |
 | B9 | Hourly-of-day rhythm | TokenBar | TokenBar | P3 | todo |
