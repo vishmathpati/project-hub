@@ -236,6 +236,7 @@ struct ContentView: View {
             .frame(height: HubTheme.navRowHeight)
             .background(selected ? HubTheme.accentBg : .clear)
             .clipShape(RoundedRectangle(cornerRadius: HubTheme.Radius.control))
+            .help(item.pageSubtitle)
             .overlay(alignment: .leading) {
                 if selected {
                     Rectangle()
@@ -384,6 +385,7 @@ struct ContentView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
+            .help(destination.pageSubtitle)
 
             Spacer(minLength: 8)
 
