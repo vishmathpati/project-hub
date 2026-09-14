@@ -29,7 +29,7 @@ Legend — **Pri**: P0 blocking value · P1 high · P2 useful · P3 polish.
 
 | # | Feature | Source | Best-of | Pri | Status |
 |---|---|---|---|---|---|
-| A1 | **Commands**: read/write `.claude/commands/**/*.md`, recursive namespacing (`group:name`), frontmatter (`description`, `argument-hint`, `allowed-tools`, `model`) | CCTM | Only app that manages them | P0 | todo |
+| **A1** | **Commands**: read/write `.claude/commands/**/*.md`, recursive namespacing (`group:name`), frontmatter (`description`, `argument-hint`, `allowed-tools`, `model`) | CCTM | Only app that manages them | P0 | done |
 | A2 | **Profiles**: save/restore *named* config sets (skills+agents+MCP+hooks+commands), one-click switch | CCTM | CCTM's snapshot model beats our ad-hoc "Copy setup to…" | P0 | todo |
 | A3 | **Browse / Search / Install**: one search over every skill on the machine, install into any project | t3code | t3code's cross-provider search + install flow, adapted local-only | P0 | todo |
 | A4 | **Multi-editor sync**: write one MCP/skill definition to all enabled editors at once | CCTM | CCTM covers 6 editors; we already read all of them | P1 | todo |
@@ -45,10 +45,10 @@ Legend — **Pri**: P0 blocking value · P1 high · P2 useful · P3 polish.
 
 | # | Feature | Source | Best-of | Pri | Status |
 |---|---|---|---|---|---|
-| B1 | Daily / weekly / monthly tables — In · Out · Cache-W · Cache-R · Total · $ as separate columns | ccusage | ccusage defines the columns | P0 | todo |
+| **B1** | Daily / weekly / monthly tables — In · Out · Cache-W · Cache-R · Total · $ as separate columns | ccusage | ccusage defines the columns | P0 | done |
 | B2 | Per-session table sorted by cost + last activity; lookup by session id | ccusage | ccusage | P1 | todo |
-| B3 | **Per-model breakdown** with share | ccusage, TokenBar | ccusage's `--breakdown` sub-rows | P0 | todo |
-| B4 | **Per-project breakdown** (Claude `cwd`) | ccusage `--instances` | ccusage's alias system | P0 | todo |
+| **B3** | **Per-model breakdown** with share | ccusage, TokenBar | ccusage's `--breakdown` sub-rows | P0 | done |
+| **B4** | **Per-project breakdown** (Claude `cwd`) | ccusage `--instances` | ccusage's alias system | P0 | done |
 | B5 | Cost modes: recorded `costUSD` vs computed vs both | ccusage | ccusage `--mode` | P1 | todo |
 | B6 | **Burn rate** (tok/min, $/hr) + projected block total | ccusage, CodeBurn | ccusage's block projection | P1 | todo |
 | B7 | Token-limit gauge with green/yellow/red + ⚠️/🚨 | ccusage, ClaudeBar | ccusage's `--token-limit max` | P2 | todo |
@@ -58,7 +58,7 @@ Legend — **Pri**: P0 blocking value · P1 high · P2 useful · P3 polish.
 | B11 | **Budget guard**: soft warn, hard stop, stale-session nudge | CodeBurn | CodeBurn; it is the only one that acts | P2 | todo |
 | B12 | **Waste scan**: config health A–F, paste-ready fixes, undo | CodeBurn | CodeBurn | P2 | todo |
 | B13 | Yield: git-correlated Productive/Reverted/Abandoned | CodeBurn | CodeBurn | P3 | todo |
-| B14 | **Doctor**: probe every path, parse health, env overrides | CodeBurn | CodeBurn | P1 | todo |
+| **B14** | **Doctor**: probe every path, parse health, env overrides | CodeBurn | CodeBurn | P1 | done |
 | B15 | Statusline one-liner (model, effort, costs, burn, context %) | ccusage | ccusage | P2 | todo |
 | B16 | Model comparison: cost/call, cost/edit, cache-hit | CodeBurn | CodeBurn | P3 | todo |
 | B17 | Task-category split (13 categories) | CodeBurn | CodeBurn | P3 | todo |
@@ -79,7 +79,7 @@ Legend — **Pri**: P0 blocking value · P1 high · P2 useful · P3 polish.
 | C5 | Diff preview before any overwrite | CCTM | CCTM | P1 | todo |
 | C6 | Per-project health roll-up across skills/agents/MCP/hooks | CodeBurn grade | CodeBurn A–F | P2 | todo |
 | C7 | Export/import an entire project setup as one file | CCTM profiles | CCTM | P2 | todo |
-| C8 | Stale-config detection: skills with missing files, dead MCP servers | CodeBurn | CodeBurn | P2 | todo |
+| **C8** | Stale-config detection: skills with missing files, dead MCP servers | CodeBurn | CodeBurn | P2 | done |
 | C9 | Empty-state guidance everywhere | CCTM | CCTM | P2 | todo |
 | C10 | Recent-activity feed across projects | CC One | CC One | P3 | todo |
 

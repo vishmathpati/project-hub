@@ -82,7 +82,7 @@ struct ProjectDetailView: View {
                     .background(HubTheme.bg)
             }
             FooterHintBar(hints: [
-                ("⌘1–7", "sections"),
+                ("⌘1–8", "sections"),
                 ("⌘R", "rescan"),
                 ("⌘⌫", "remove project"),
             ])
@@ -186,7 +186,7 @@ struct ProjectDetailView: View {
         }
     }
 
-    // MARK: - Sub-tab bar (two rows of three)
+    // MARK: - Sub-tab bar (two rows of four)
 
     private var subTabBar: some View {
         VStack(spacing: 4) {
@@ -200,6 +200,7 @@ struct ProjectDetailView: View {
                 subTabButton(title: "Hooks",        icon: "bolt.fill",       tag: 4)
                 subTabButton(title: "Instructions", icon: "doc.text.fill",   tag: 5)
                 subTabButton(title: "Rules",        icon: "list.bullet.rectangle", tag: 6)
+                subTabButton(title: "Commands",     icon: "slash.circle.fill", tag: 7)
             }
         }
         .padding(.horizontal, 12)
@@ -266,6 +267,7 @@ struct ProjectDetailView: View {
             ("Hooks", "bolt.fill", 4),
             ("Instructions", "doc.text.fill", 5),
             ("Rules", "list.bullet.rectangle", 6),
+            ("Commands", "slash.circle.fill", 7),
         ]
     }
 
@@ -313,7 +315,8 @@ struct ProjectDetailView: View {
         case 3: MCPView(project: project)
         case 4: HooksView(project: project)
         case 5: ClaudeMdView(project: project)
-        default: CursorRulesView(project: project)
+        case 6: CursorRulesView(project: project)
+        default: CommandsView(project: project, reloadTick: $reloadTick)
         }
     }
 
