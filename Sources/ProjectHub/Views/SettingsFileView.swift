@@ -16,11 +16,19 @@ struct SettingsFileView: View {
     @State private var approveAll = false
     @State private var enabledText = ""
     @State private var disabledText = ""
-    @State private var statusText = ""
     @State private var styleText = ""
-    @State private var spinnerMode = ""
-    @State private var spinnerText = ""
+    @State private var statusSegments: Set<StatusLineSegment> = []
+    @State private var statusSeparator = SettingsReader.statusLineSeparators[0]
+    @State private var spinnerMode = "append"
+    @State private var spinnerRows: [SpinnerVerb] = []
+    @State private var newVerb = ""
     @State private var envText = ""
+
+    private struct SpinnerVerb: Identifiable {
+        let id = UUID()
+        var text: String
+        var enabled: Bool
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -125,19 +133,194 @@ struct SettingsFileView: View {
         VStack(alignment: .leading, spacing: 8) {
             HubSectionHeading(title: "UI", trailing: { HubButton(title: "save", kind: .inlineAction) { stageWrite(kind: "ui") } })
             sectionNote("How Claude Code looks while it runs. These change your terminal display only, never what the agent is allowed to do.")
-            VStack(spacing: 10) {
-                rowField("statusLine", help: "Shell command that draws the status line at the bottom. Runs after every reply, so a slow script slows every turn.",
-                         placeholder: "/path/to/statusline.sh", text: $statusText)
+            VStack(alignment: .leading, spacing: 14) {
+                statusLineBuilder
                 rowField("outputStyle", help: "Named output style, for example Explanatory or Concise. Leave empty for the default.",
                          placeholder: "Explanatory", text: $styleText)
-                rowField("spinner mode", help: "append keeps the built-in words and adds yours. replace hides the built-in words and shows only yours.",
-                         placeholder: "append", text: $spinnerMode)
-                rowField("spinner verbs", help: "The words shown while Claude is working. Comma separated.",
-                         placeholder: "Pondering, Scheming, Noodling", text: $spinnerText)
+                spinnerEditor
             }
             .padding(HubTheme.cardPadding)
             .hubCard()
         }
+    }
+
+    /// Segment toggles plus the generated one-liner, previewed before it is written.
+    private var statusLineBuilder: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("statusLine").font(HubFont.machine).foregroundStyle(HubTheme.text)
+            controlHelp("The command Claude Code runs after each reply to draw the line under the prompt. Switch a segment on to generate it; the one-liner runs with sh and needs jq on your PATH.")
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(StatusLineSegment.allCases) { segment in
+                    HStack(alignment: .top, spacing: 8) {
+                        HubToggle(isOn: segmentBinding(segment))
+                            .padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(segment.title).font(HubFont.secondary).foregroundStyle(HubTheme.text)
+                            controlHelp(segment.detail)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+            HStack(spacing: 8) {
+                Text("separator").font(HubFont.secondary).foregroundStyle(HubTheme.textMid)
+                Picker("", selection: $statusSeparator) {
+                    ForEach(SettingsReader.statusLineSeparators, id: \.self) { sep in
+                        Text(sep.trimmingCharacters(in: .whitespaces)).tag(sep)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 150)
+                controlHelp("Printed between the selected segments.")
+                Spacer(minLength: 0)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("generated command").font(HubFont.machine).foregroundStyle(HubTheme.textFaint)
+                Text(generatedStatusLine.isEmpty ? "—" : generatedStatusLine)
+                    .font(HubFont.machine)
+                    .foregroundStyle(generatedStatusLine.isEmpty ? HubTheme.textFaint : HubTheme.text)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(HubTheme.field)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(HubTheme.line.opacity(0.6), lineWidth: 0.5))
+                controlHelp(statusLineNote)
+                if let current = loaded?.model.ui.statusLine, current != generatedStatusLine {
+                    Text("current: \(current)")
+                        .font(HubFont.machine)
+                        .foregroundStyle(HubTheme.textDim)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    /// The spinner words as rows — toggle, edit, reorder, delete — with what the
+    /// working spinner will look like.
+    private var spinnerEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("spinnerVerbs").font(HubFont.machine).foregroundStyle(HubTheme.text)
+            controlHelp("The words Claude Code shows while it works. Edit a word in place, move it with the arrows, or switch it off to leave it out of the file.")
+            HStack(spacing: 8) {
+                Picker("", selection: $spinnerMode) {
+                    ForEach(SettingsReader.spinnerModes, id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 180)
+                controlHelp(spinnerMode == "replace" ? "replace: only your words are shown." : "append: the built-in words stay and yours are added.")
+                Spacer(minLength: 0)
+            }
+            LazyVStack(spacing: 5) {
+                ForEach($spinnerRows) { $verb in
+                    HStack(spacing: 6) {
+                        HubToggle(isOn: $verb.enabled)
+                        TextField("verb", text: $verb.text)
+                            .textFieldStyle(.plain)
+                            .font(HubFont.secondary)
+                            .foregroundStyle(HubTheme.text)
+                            .padding(.horizontal, 8)
+                            .frame(height: 26)
+                            .background(HubTheme.field)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(HubTheme.line.opacity(0.6), lineWidth: 0.5))
+                        HubIconButton(systemImage: "chevron.up", help: "Move up") { moveVerb(verb.id, by: -1) }
+                        HubIconButton(systemImage: "chevron.down", help: "Move down") { moveVerb(verb.id, by: 1) }
+                        HubIconButton(systemImage: "trash", help: "Remove word") { removeVerb(verb.id) }
+                    }
+                }
+            }
+            HStack(spacing: 6) {
+                TextField("new verb", text: $newVerb)
+                    .textFieldStyle(.plain)
+                    .font(HubFont.secondary)
+                    .foregroundStyle(HubTheme.text)
+                    .padding(.horizontal, 8)
+                    .frame(height: 26)
+                    .background(HubTheme.field)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(HubTheme.line.opacity(0.6), lineWidth: 0.5))
+                    .onSubmit { addVerb() }
+                HubButton(title: "add", kind: .inlineAction) { addVerb() }
+            }
+            HStack(spacing: 8) {
+                Text("preview").font(HubFont.machine).foregroundStyle(HubTheme.textFaint)
+                Text(spinnerPreview).font(HubFont.mono(12)).foregroundStyle(HubTheme.text)
+                controlHelp(spinnerNote)
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    private var generatedStatusLine: String {
+        SettingsReader.statusLineCommand(segments: statusSegments, separator: statusSeparator)
+    }
+
+    private func segmentBinding(_ segment: StatusLineSegment) -> Binding<Bool> {
+        Binding(
+            get: { statusSegments.contains(segment) },
+            set: { on in
+                if on { statusSegments.insert(segment) } else { statusSegments.remove(segment) }
+            }
+        )
+    }
+
+    /// What saving would do to statusLine, stated next to the preview.
+    private var statusLineNote: String {
+        let current = loaded?.model.ui.statusLine
+        if generatedStatusLine.isEmpty {
+            return current == nil
+                ? "No segments on. Nothing is written until one is switched on."
+                : "No segments on. The saved command is left as it is."
+        }
+        if generatedStatusLine == current { return "Matches the command already saved." }
+        return current == nil
+            ? "Save writes this command to statusLine."
+            : "Save replaces the command already saved."
+    }
+
+    private var spinnerPreview: String {
+        guard let first = spinnerRows.first(where: { $0.enabled }) else { return "✻ …" }
+        return "✻ \(first.text)…"
+    }
+
+    private var spinnerNote: String {
+        let on = spinnerRows.filter { $0.enabled }.count
+        if spinnerRows.isEmpty { return "No words yet — Claude Code's built-in words are used." }
+        if on == 0 { return "No words switched on — nothing of yours is shown." }
+        return "\(on) of \(spinnerRows.count) written, cycled in this order."
+    }
+
+    private func addVerb() {
+        let word = newVerb.trimmingCharacters(in: .whitespacesAndNewlines)
+        newVerb = ""
+        guard !word.isEmpty,
+              !spinnerRows.contains(where: { $0.text.caseInsensitiveCompare(word) == .orderedSame })
+        else { return }
+        spinnerRows.append(SpinnerVerb(text: word, enabled: true))
+    }
+
+    private func moveVerb(_ id: UUID, by offset: Int) {
+        guard let i = spinnerRows.firstIndex(where: { $0.id == id }) else { return }
+        let j = i + offset
+        guard spinnerRows.indices.contains(j) else { return }
+        spinnerRows.swapAt(i, j)
+    }
+
+    private func removeVerb(_ id: UUID) {
+        spinnerRows.removeAll { $0.id == id }
+    }
+
+    /// One line of plain language under a control.
+    private func controlHelp(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10))
+            .foregroundStyle(HubTheme.textFaint)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     /// One line of plain language per section, because a grid of key names teaches
@@ -258,10 +441,17 @@ struct SettingsFileView: View {
             approveAll = l.model.behaviour.enableAllProjectMcpServers ?? false
             enabledText = l.model.behaviour.enabledMcpjsonServers.joined(separator: ", ")
             disabledText = l.model.behaviour.disabledMcpjsonServers.joined(separator: ", ")
-            statusText = l.model.ui.statusLine ?? ""
             styleText = l.model.ui.outputStyle ?? ""
-            spinnerMode = l.model.ui.spinnerMode ?? ""
-            spinnerText = l.model.ui.spinnerVerbs.joined(separator: ", ")
+            if let cmd = l.model.ui.statusLine, let match = SettingsReader.statusLineSelection(matching: cmd) {
+                statusSegments = match.segments
+                statusSeparator = match.separator
+            } else {
+                statusSegments = []
+                statusSeparator = SettingsReader.statusLineSeparators[0]
+            }
+            spinnerMode = l.model.ui.spinnerMode ?? "append"
+            spinnerRows = l.model.ui.spinnerVerbs.map { SpinnerVerb(text: $0, enabled: true) }
+            newVerb = ""
             envText = l.model.env.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "\n")
         } catch {
             loaded = nil
@@ -282,7 +472,15 @@ struct SettingsFileView: View {
         case "behaviour":
             root = SettingsReader.rootWithBehaviour(root, BehaviourSection(model: modelText.isEmpty ? nil : modelText, cleanupPeriodDays: Int(cleanupText.trimmingCharacters(in: .whitespaces)), enableAllProjectMcpServers: approveAll, enabledMcpjsonServers: split(enabledText), disabledMcpjsonServers: split(disabledText)))
         case "ui":
-            root = SettingsReader.rootWithUI(root, UISection(statusLine: statusText.isEmpty ? nil : statusText, outputStyle: styleText.isEmpty ? nil : styleText, spinnerMode: spinnerMode.isEmpty ? nil : spinnerMode, spinnerVerbs: split(spinnerText)))
+            let loadedUI = l.model.ui
+            let verbs = spinnerRows.filter { $0.enabled }.map { $0.text }
+            let mode: String? = spinnerMode.isEmpty ? nil : spinnerMode
+            let spinnerChanged = (mode ?? "append") != (loadedUI.spinnerMode ?? "append") || verbs != loadedUI.spinnerVerbs
+            root = SettingsReader.rootWithUI(root, UISection(
+                statusLine: generatedStatusLine.isEmpty ? loadedUI.statusLine : generatedStatusLine,
+                outputStyle: styleText.isEmpty ? nil : styleText,
+                spinnerMode: spinnerChanged ? mode : loadedUI.spinnerMode,
+                spinnerVerbs: spinnerChanged ? verbs : loadedUI.spinnerVerbs))
         case "env":
             var env: [String: String] = [:]
             for line in envText.components(separatedBy: .newlines) {

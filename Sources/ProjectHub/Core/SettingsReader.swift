@@ -24,6 +24,34 @@ struct UISection {
     var spinnerVerbs: [String] = []
 }
 
+/// One piece of the status line the builder can generate, mapped to a field of
+/// the session JSON Claude Code pipes to the command on stdin.
+enum StatusLineSegment: String, CaseIterable, Identifiable {
+    case model, directory, gitBranch, contextPercent, sessionCost
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .model:          return "model"
+        case .directory:      return "current directory"
+        case .gitBranch:      return "git branch"
+        case .contextPercent: return "context used"
+        case .sessionCost:    return "session cost"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .model:          return "The model's display name, falling back to its id."
+        case .directory:      return "The session's full working path."
+        case .gitBranch:      return "Current branch, read with git; hidden outside a repository."
+        case .contextPercent: return "Percent of the 200k context window used, read from the tail of the transcript."
+        case .sessionCost:    return "Dollars spent this session, rounded to cents."
+        }
+    }
+}
+
 struct UserSettings {
     var permissions = PermissionSection()
     var behaviour = BehaviourSection()
@@ -147,6 +175,8 @@ enum SettingsReader {
         if let v = u.outputStyle, !v.isEmpty { out["outputStyle"] = v } else { out.removeValue(forKey: "outputStyle") }
         if u.spinnerVerbs.isEmpty, u.spinnerMode == nil {
             out.removeValue(forKey: "spinnerVerbs")
+        } else if u.spinnerMode == nil, out["spinnerVerbs"] as? [Any] != nil {
+            out["spinnerVerbs"] = u.spinnerVerbs
         } else {
             var dict = out["spinnerVerbs"] as? [String: Any] ?? [:]
             if let m = u.spinnerMode, !m.isEmpty { dict["mode"] = m } else { dict.removeValue(forKey: "mode") }
@@ -160,6 +190,63 @@ enum SettingsReader {
         var out = root
         if env.isEmpty { out.removeValue(forKey: "env") } else { out["env"] = env }
         return out
+    }
+
+    // MARK: - Spinner and status line editors
+
+    static let spinnerModes = ["append", "replace"]
+
+    static let statusLineSeparators = [" · ", " | ", " — "]
+
+    /// One-line sh command Claude Code can run: reads the session JSON from
+    /// stdin and prints the selected segments joined by `separator`.
+    static func statusLineCommand(segments: Set<StatusLineSegment>, separator: String) -> String {
+        guard !segments.isEmpty else { return "" }
+        var prelude = ["i=$(cat)"]
+        var args: [String] = []
+        var expressions: [String] = []
+        if segments.contains(.model) {
+            expressions.append(#"(.model.display_name // .model.id // "")"#)
+        }
+        if segments.contains(.directory) {
+            expressions.append(#"(.workspace.current_dir // .cwd // "")"#)
+        }
+        if segments.contains(.gitBranch) {
+            prelude.append(#"d=$(printf '%s' "$i" | jq -r '.workspace.current_dir // .cwd // "."')"#)
+            prelude.append(#"b=$(git -C "$d" branch --show-current 2>/dev/null)"#)
+            args.append(contentsOf: ["--arg", "b", "\"$b\""])
+            expressions.append("$b")
+        }
+        if segments.contains(.contextPercent) {
+            prelude.append(#"t=$(printf '%s' "$i" | jq -r '.transcript_path // empty')"#)
+            prelude.append(#"c=$(tail -n 300 "$t" 2>/dev/null | jq -s '[.[] | select(.isSidechain != true) | .message.usage? // empty] | last as $u | if $u == null then "" else (((($u.input_tokens // 0) + ($u.cache_read_input_tokens // 0) + ($u.cache_creation_input_tokens // 0)) * 100 / 200000) | floor | tostring) end' 2>/dev/null)"#)
+            args.append(contentsOf: ["--arg", "c", "\"$c\""])
+            expressions.append(#"(if $c != "" then "ctx " + $c + "%" else "" end)"#)
+        }
+        if segments.contains(.sessionCost) {
+            expressions.append(#"(if .cost.total_cost_usd != null then "$" + ((.cost.total_cost_usd * 100 | round) / 100 | tostring) else "" end)"#)
+        }
+        let filter = #"["# + expressions.joined(separator: ", ") + #"] | map(select(. != null and . != "")) | join("\#(separator)")"#
+        let pipeline = "printf '%s' \"$i\" | jq -r " + (args + ["'\(filter)'"]).joined(separator: " ")
+        return (prelude + [pipeline]).joined(separator: "; ")
+    }
+
+    /// Recovers the selection a previously generated command came from, so the
+    /// builder reopens showing what is already saved.
+    static func statusLineSelection(matching command: String) -> (segments: Set<StatusLineSegment>, separator: String)? {
+        guard !command.isEmpty else { return nil }
+        for separator in statusLineSeparators {
+            for mask in 1..<(1 << StatusLineSegment.allCases.count) {
+                var segments: Set<StatusLineSegment> = []
+                for (offset, segment) in StatusLineSegment.allCases.enumerated() where mask & (1 << offset) != 0 {
+                    segments.insert(segment)
+                }
+                if statusLineCommand(segments: segments, separator: separator) == command {
+                    return (segments, separator)
+                }
+            }
+        }
+        return nil
     }
 
     private static func statusLineCommand(_ value: Any?) -> String? {

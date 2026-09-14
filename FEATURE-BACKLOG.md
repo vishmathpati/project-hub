@@ -32,10 +32,10 @@ Legend — **Pri**: P0 blocking value · P1 high · P2 useful · P3 polish.
 | **A1** | **Commands**: read/write `.claude/commands/**/*.md`, recursive namespacing (`group:name`), frontmatter (`description`, `argument-hint`, `allowed-tools`, `model`) | CCTM | Only app that manages them | P0 | done |
 | **A2** | **Profiles**: save/restore *named* config sets (skills+agents+MCP+hooks+commands), one-click switch | CCTM | CCTM's snapshot model beats our ad-hoc "Copy setup to…" | P0 | done |
 | **A3** | **Browse / Search / Install**: one search over every skill on the machine, install into any project | t3code | t3code's cross-provider search + install flow, adapted local-only | P0 | done |
-| A4 | **Multi-editor sync**: write one MCP/skill definition to all enabled editors at once | CCTM | CCTM covers 6 editors; we already read all of them | P1 | todo |
+| **A4** | **Multi-editor sync**: write one MCP/skill definition to all enabled editors at once | CCTM | CCTM covers 6 editors; we already read all of them | P1 | done |
 | A5 | **MCP Testing**: connect to a server and execute its tools in-app to prove config | CCTM, zeroone | CCTM's inline test panel | P1 | todo |
-| A6 | **Status Line Builder**: visual builder, 25+ segment types, themes, gallery | CCTM | Only app with a builder | P2 | todo |
-| A7 | **Spinner Verbs**: edit/reorder Claude Code's working verbs, append or replace | CCTM | Only app that does it | P2 | todo |
+| **A6** | **Status Line Builder**: visual builder, 25+ segment types, themes, gallery | CCTM | Only app with a builder | P2 | done |
+| **A7** | **Spinner Verbs**: edit/reorder Claude Code's working verbs, append or replace | CCTM | Only app that does it | P2 | done |
 | **A8** | **settings.json deep editor**: permissions, spinner, statusline, env | CCTM | We read 36 KB but touch a fraction | P1 | done |
 | A9 | **AI-controllable**: ship our own MCP server so an agent can manage configs | CCTM, zeroone | zeroone's tool surface is smaller and cleaner | P3 | todo |
 | A10 | **Insights Viewer**: session quality + friction trends | CCTM | Needs `~/.claude/usage-data/`; detect and degrade | P3 | todo |
@@ -51,10 +51,10 @@ Legend — **Pri**: P0 blocking value · P1 high · P2 useful · P3 polish.
 | **B4** | **Per-project breakdown** (Claude `cwd`) | ccusage `--instances` | ccusage's alias system | P0 | done |
 | B5 | Cost modes: recorded `costUSD` vs computed vs both | ccusage | ccusage `--mode` | P1 | todo |
 | **B6** | **Burn rate** (tok/min, $/hr) + projected block total | ccusage, CodeBurn | ccusage's block projection | P1 | done |
-| B7 | Token-limit gauge with green/yellow/red + ⚠️/🚨 | ccusage, ClaudeBar | ccusage's `--token-limit max` | P2 | todo |
+| **B7** | Token-limit gauge with green/yellow/red + ⚠️/🚨 | ccusage, ClaudeBar | ccusage's `--token-limit max` | P2 | done |
 | B8 | Contribution heatmap, streaks, peak day | Codex `/usage`, TokenBar | TokenBar's 3D/2D toggle, minus the novelty | P2 | todo |
 | B9 | Hourly-of-day rhythm | TokenBar | TokenBar | P3 | todo |
-| B10 | **Threshold notifications** (75%/90%) + reset alerts | ClaudeMeter, ClaudeBar | ClaudeMeter's defaults + pacing flame | P2 | todo |
+| **B10** | **Threshold notifications** (75%/90%) + reset alerts | ClaudeMeter, ClaudeBar | ClaudeMeter's defaults + pacing flame | P2 | done |
 | B11 | **Budget guard**: soft warn, hard stop, stale-session nudge | CodeBurn | CodeBurn; it is the only one that acts | P2 | todo |
 | B12 | **Waste scan**: config health A–F, paste-ready fixes, undo | CodeBurn | CodeBurn | P2 | todo |
 | B13 | Yield: git-correlated Productive/Reverted/Abandoned | CodeBurn | CodeBurn | P3 | todo |

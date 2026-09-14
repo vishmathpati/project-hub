@@ -21,6 +21,8 @@ enum HubDestination: String, CaseIterable, Identifiable, Hashable {
     case usageInsights
     case settingsFile
     case sessionExplorer
+    case usageLimits
+    case editorSync
     case skillBrowser
     case settings
 
@@ -40,6 +42,8 @@ enum HubDestination: String, CaseIterable, Identifiable, Hashable {
         case .usageInsights: return "Sessions"
         case .settingsFile: return "Settings File"
         case .sessionExplorer: return "Session Explorer"
+        case .usageLimits: return "Limits"
+        case .editorSync: return "Sync to Editors"
         case .skillBrowser: return "Browse Skills"
         case .usage:       return "Usage"
         case .settings:    return "Settings"
@@ -61,6 +65,8 @@ enum HubDestination: String, CaseIterable, Identifiable, Hashable {
         case .usageInsights: return "Active block burn rate and per-session cost"
         case .settingsFile: return "Edit the user settings file without losing keys"
         case .sessionExplorer: return "Read a session transcript and what tools it used"
+        case .usageLimits: return "Set a token cap and see where you stand against it"
+        case .editorSync: return "Write one MCP server into every editor you use"
         case .skillBrowser: return "Search every skill on this Mac and install it anywhere"
         case .usage:       return "Read from files on this Mac · quota first, cost second"
         case .settings:    return "Paths and homes shown with the provider they belong to"
@@ -81,6 +87,8 @@ enum HubDestination: String, CaseIterable, Identifiable, Hashable {
         case .usageInsights: return [("", "reads local logs only")]
         case .settingsFile: return [("", "backs up before writing")]
         case .sessionExplorer: return [("", "reads local transcripts only")]
+        case .usageLimits: return [("", "in-app alerts")]
+        case .editorSync: return [("", "backs up before writing")]
         case .skillBrowser: return [("", "installs by symlink")]
         case .usage:       return [("⌘R", "refresh"), ("", "updated every 2 minutes")]
         case .settings:    return [("⌘,", "settings"), ("⌘Q", "quit")]
@@ -158,8 +166,8 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     railGroup("Workspace", items: [.projects])
                     railGroup("Capabilities", items: [.skillBrowser, .skills, .plugins, .mcp, .providers])
-                    railGroup("Health", items: [.checks, .diagnostics, .usage, .usageBreakdown, .usageInsights, .sessionExplorer])
-                    railGroup("Setup", items: [.profiles, .settingsFile])
+                    railGroup("Health", items: [.checks, .diagnostics, .usage, .usageBreakdown, .usageInsights, .sessionExplorer, .usageLimits])
+                    railGroup("Setup", items: [.profiles, .settingsFile, .editorSync])
                 }
                 .padding(.horizontal, 12)
             }
@@ -373,6 +381,8 @@ struct ContentView: View {
                     compactMenuItem(.usageInsights)
                     compactMenuItem(.settingsFile)
                     compactMenuItem(.sessionExplorer)
+                    compactMenuItem(.usageLimits)
+                    compactMenuItem(.editorSync)
                     compactMenuItem(.skillBrowser)
                     compactMenuItem(.usage)
                 }
@@ -441,6 +451,10 @@ struct ContentView: View {
             SettingsFileView()
         case .sessionExplorer:
             SessionExplorerView()
+        case .usageLimits:
+            UsageLimitsView()
+        case .editorSync:
+            EditorSyncView(onClose: {})
         case .skillBrowser:
             SkillBrowserView()
         case .diagnostics:
