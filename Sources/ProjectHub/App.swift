@@ -64,6 +64,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { [weak self] in
             self?.openDashboardWindow(refresh: false)
         }
+
+        // The first usage scan has to parse every session log to fill the cache; on
+        // this machine that is a couple of minutes. Warm it now, off the main actor
+        // and at low priority, so opening Usage later reads the cache instead of
+        // waiting for the first parse.
+        Task.detached(priority: .background) {
+            _ = UsageReader.summarize()
+        }
     }
 
     // Dock icon click → open the full desktop app.

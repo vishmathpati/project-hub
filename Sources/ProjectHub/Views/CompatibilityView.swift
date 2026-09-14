@@ -37,6 +37,11 @@ struct CompatibilityView: View {
     @State private var fixPlanCache: [UUID: CompatibilityFixPlan?] = [:]
     @State private var fixPlanCacheKey = ""
     @State private var verifiableServerIDs: Set<String> = []
+    /// Surface id to matrix entry, built once per report. Each finding row asks for
+    /// its surface while scrolling, and a linear scan of the matrix per row per
+    /// frame is what made the findings list scroll badly.
+    @State private var matrixByID: [String: CompatibilityMatrixEntry] = [:]
+    @State private var issuesBySurface: [String: [CompatibilityIssue]] = [:]
 
     init(project: Project? = nil) {
         self.fixedProject = project
@@ -995,7 +1000,9 @@ struct CompatibilityView: View {
     }
 
     private func primaryAuthIssue(for surface: CompatibilityMatrixEntry, report: CompatibilityScanResult) -> CompatibilityIssue? {
-        let issues = report.issues.filter { $0.surfaceID == surface.id }
+        // Issues are already indexed by surface once per report; filtering the whole
+        // issue list per auth row was another per-frame scan.
+        let issues = issuesBySurface[surface.id] ?? []
         return issues.first { issue in
             switch issue.code {
             case .serverAuthMissing, .serverAuthExpired, .serverOAuthNeeded,
@@ -1245,11 +1252,6 @@ struct CompatibilityView: View {
                             .clipShape(Capsule())
                     }
                 }
-
-                Text(skill.shortDescription ?? (skill.description.isEmpty ? "No description in SKILL.md frontmatter." : skill.description))
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                    .lineLimit(2)
 
                 if let summary = claudeInvocationSummary(skill) {
                     Text("Claude: \(summary)")
@@ -1694,7 +1696,7 @@ struct CompatibilityView: View {
 
     private func issueSurface(for issue: CompatibilityIssue) -> CompatibilityMatrixEntry? {
         guard let surfaceID = issue.surfaceID else { return nil }
-        return report?.matrix.first { $0.id == surfaceID }
+        return matrixByID[surfaceID]
     }
 
     private func issueSurfaceCaption(for issue: CompatibilityIssue) -> String {
@@ -6829,6 +6831,10 @@ struct CompatibilityView: View {
     /// Reading each server's MCP config to decide verifiability is disk work; do it
     /// once per report instead of on every body evaluation.
     private func rebuildVerifiableServerCache(for report: CompatibilityScanResult?) {
+        matrixByID = report.map { matrixLookup($0) } ?? [:]
+        issuesBySurface = report.map { result in
+            Dictionary(grouping: result.issues, by: { $0.surfaceID ?? "" })
+        } ?? [:]
         guard let report else {
             verifiableServerIDs = []
             return

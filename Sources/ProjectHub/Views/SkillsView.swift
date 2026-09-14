@@ -246,12 +246,6 @@ struct SkillsView: View {
                 Text(skill.name)
                     .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
-                if !skill.description.isEmpty {
-                    Text(skill.description)
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                        .lineLimit(2)
-                }
                 sourcePill(skill.source.label, color: sourceColor(skill.source))
             }
             Spacer()
@@ -619,12 +613,6 @@ struct GlobalSkillsView: View {
                                         .foregroundStyle(HubTheme.textFaint)
                                 }
                             }
-                            if !group.primaryDescription.isEmpty {
-                                Text(group.primaryDescription)
-                                    .font(HubFont.body)
-                                    .foregroundStyle(HubTheme.textDim)
-                                    .lineLimit(1)
-                            }
                         }
 
                         Spacer(minLength: 12)
@@ -881,12 +869,6 @@ struct GlobalSkillsView: View {
                                         .font(HubFont.mono(9))
                                         .foregroundStyle(HubTheme.textFaint)
                                 }
-                            }
-                            if let description = group.description, !description.isEmpty {
-                                Text(description)
-                                    .font(HubFont.body)
-                                    .foregroundStyle(HubTheme.textDim)
-                                    .lineLimit(1)
                             }
                         }
 
