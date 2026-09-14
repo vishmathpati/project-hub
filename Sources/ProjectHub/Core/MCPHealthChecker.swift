@@ -334,7 +334,11 @@ enum MCPHealthChecker {
         do {
             try process.run()
             let payload = initializePayload()
-            stdin.fileHandleForWriting.write(payload)
+            guard writeAll(payload, to: stdin.fileHandleForWriting) else {
+                stdout.fileHandleForReading.readabilityHandler = nil
+                stderr.fileHandleForReading.readabilityHandler = nil
+                return report(.broken, server, toolID, "Server closed its input", "The server exited before Project Hub could send the MCP handshake.")
+            }
         } catch {
             stdout.fileHandleForReading.readabilityHandler = nil
             stderr.fileHandleForReading.readabilityHandler = nil
@@ -347,28 +351,22 @@ enum MCPHealthChecker {
                 stdout.fileHandleForReading.readabilityHandler = nil
                 stderr.fileHandleForReading.readabilityHandler = nil
                 try? stdin.fileHandleForWriting.close()
-                if process.isRunning {
-                    process.terminate()
-                    process.waitUntilExit()
-                }
+                reap(process)
                 if let authReport = authSignalReport(error, server: server, toolID: toolID, phase: "MCP initialize") {
                     return authReport
                 }
                 return report(.broken, server, toolID, "MCP initialize error: \(error)", "Open the server logs or run the command manually.")
             }
 
-            stdin.fileHandleForWriting.write(initializedPayload())
-            stdin.fileHandleForWriting.write(toolsListPayload())
+            _ = writeAll(initializedPayload(), to: stdin.fileHandleForWriting)
+            _ = writeAll(toolsListPayload(), to: stdin.fileHandleForWriting)
         }
 
         let toolsWait = wait == .success ? toolsListed.wait(timeout: .now() + remainingTimeout(startedAt: startedAt, budget: startupTimeout)) : .timedOut
         stdout.fileHandleForReading.readabilityHandler = nil
         stderr.fileHandleForReading.readabilityHandler = nil
         try? stdin.fileHandleForWriting.close()
-        if process.isRunning {
-            process.terminate()
-            process.waitUntilExit()
-        }
+        reap(process)
 
         if wait == .success, toolsWait == .success, let line = response.responseLine(id: 2) {
             if let error = jsonRPCErrorMessage(line) {
@@ -700,6 +698,42 @@ enum MCPHealthChecker {
             return min(max(milliseconds / 1_000, minProbeTimeout), maxProbeTimeout)
         }
         return defaultProbeTimeout
+    }
+
+    /// Writes to a child's pipe without raising. `FileHandle.write(_:)` raises an
+    /// Objective-C exception on a broken pipe, which Swift cannot catch and which a
+    /// server exiting early produces routinely. Returns false when the pipe is gone.
+    @discardableResult
+    private static func writeAll(_ data: Data, to handle: FileHandle) -> Bool {
+        let descriptor = handle.fileDescriptor
+        return data.withUnsafeBytes { buffer -> Bool in
+            guard let base = buffer.baseAddress else { return true }
+            var offset = 0
+            while offset < buffer.count {
+                let written = write(descriptor, base.advanced(by: offset), buffer.count - offset)
+                if written < 0 {
+                    if errno == EINTR { continue }
+                    return false
+                }
+                if written == 0 { return false }
+                offset += written
+            }
+            return true
+        }
+    }
+
+    /// Ends the probe. Bounded wait first, then SIGKILL: a server that ignores
+    /// SIGTERM would otherwise block this call forever.
+    private static func reap(_ process: Process) {
+        guard process.isRunning else { return }
+        process.terminate()
+        let deadline = Date().addingTimeInterval(2)
+        while process.isRunning && Date() < deadline {
+            usleep(20_000)
+        }
+        if process.isRunning {
+            kill(process.processIdentifier, SIGKILL)
+        }
     }
 
     private static func remainingTimeout(startedAt: Date, budget: TimeInterval) -> TimeInterval {

@@ -51,7 +51,16 @@ enum ProviderCatalog {
         let extraProjectDirs: [String]
     }
 
+    /// Built once for the real home. The catalog is eleven specs with roughly sixty
+    /// interpolated paths, and view bodies read it per row and per render, so it is
+    /// cached for the home directory and only rebuilt for an explicit override.
+    private static let defaultSpecs = build(home: NSHomeDirectory())
+
     static func specs(home: String = NSHomeDirectory()) -> [Spec] {
+        home == NSHomeDirectory() ? defaultSpecs : build(home: home)
+    }
+
+    private static func build(home: String) -> [Spec] {
         [
             Spec(
                 id: "claude-code",

@@ -36,6 +36,7 @@ enum UsageScanCache {
 
     private static let lock = NSLock()
     private static var loaded: Document?
+    private static var dirty = false
 
     /// True when the cached entry still describes the file on disk, so its records
     /// can be reused without opening it.
@@ -51,15 +52,17 @@ enum UsageScanCache {
     static func store(_ entry: FileEntry, for path: String) {
         lock.lock()
         loaded?.files[path] = entry
+        dirty = true
         lock.unlock()
     }
 
-    /// Persists. Deliberately does not prune: `loadEvents` runs once per provider
-    /// root, so pruning to the current call's file list would erase the other
-    /// provider's entries on every refresh. An entry for a deleted file is never
-    /// read, because the file is no longer enumerated.
+    /// Persists, but only when something changed. `loadEvents` runs once per
+    /// provider root, so without the dirty check the whole cache was re-encoded and
+    /// rewritten four times per refresh.
     static func commit() {
         lock.lock()
+        guard dirty else { lock.unlock(); return }
+        dirty = false
         let document = current()
         lock.unlock()
 

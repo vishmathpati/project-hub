@@ -1639,15 +1639,32 @@ enum ConfigWriter {
     static func restoreLatestBackup(forPath path: String) -> Bool {
         let fm = FileManager.default
         guard let latest = backups(forPath: path).first else { return false }
+
+        // Stage the restore beside the target and swap it in. Removing the live file
+        // first left a window where a failed copy destroyed the config with undo
+        // already reporting failure.
+        let staged = path + ".restore.tmp"
+        try? fm.removeItem(atPath: staged)
         do {
-            if fm.fileExists(atPath: path) { try fm.removeItem(atPath: path) }
-            try fm.copyItem(atPath: latest, toPath: path)
-            // Consume the backup so Undo is a one-shot (prevents ping-pong).
-            try? fm.removeItem(atPath: latest)
-            return true
+            try fm.copyItem(atPath: latest, toPath: staged)
         } catch {
             return false
         }
+
+        do {
+            if fm.fileExists(atPath: path) {
+                _ = try fm.replaceItemAt(URL(fileURLWithPath: path), withItemAt: URL(fileURLWithPath: staged))
+            } else {
+                try fm.moveItem(atPath: staged, toPath: path)
+            }
+        } catch {
+            try? fm.removeItem(atPath: staged)
+            return false
+        }
+
+        // Consume the backup so Undo is a one-shot (prevents ping-pong).
+        try? fm.removeItem(atPath: latest)
+        return true
     }
 
     private static func ensureParent(of path: String) {

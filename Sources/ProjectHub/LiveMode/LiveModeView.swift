@@ -207,10 +207,13 @@ struct LiveModeView: View {
     // MARK: - Skills section
 
     private func skillsSection(_ snap: ContextSnapshot) -> some View {
-        let projectSkills = snap.skills.filter { $0.source == "project" }
-        let globalSkills  = snap.skills.filter { $0.source == "global" }
-        let pluginSkills  = snap.skills.filter { $0.source == "plugin" }
-        let enabledCount  = snap.skills.filter { $0.enabled }.count
+        // One partition instead of three filtered copies; the section re-renders on
+        // every watcher tick.
+        let bySource = Dictionary(grouping: snap.skills, by: { $0.source })
+        let projectSkills = bySource["project"] ?? []
+        let globalSkills  = bySource["global"] ?? []
+        let pluginSkills  = bySource["plugin"] ?? []
+        let enabledCount  = snap.skills.count(where: { $0.enabled })
 
         return VStack(alignment: .leading, spacing: 8) {
             HStack {

@@ -446,7 +446,11 @@ enum UsageReader {
         guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { return nil }
         guard let totals = totals(in: object, kind: kind), totals.tokens > 0 else { return nil }
         let requestID = string(object["requestId"]) ?? string(object["request_id"])
-        let date = parseDate(object["timestamp"]) ?? parseDate(object["created_at"]) ?? .distantPast
+        // A line with usage but no parseable timestamp must be skipped, not dated to
+        // `.distantPast`: the backward scan stops at the first event older than the
+        // window, so one undated line would abort the scan and silently drop every
+        // older in-window event in that file.
+        guard let date = parseDate(object["timestamp"]) ?? parseDate(object["created_at"]) else { return nil }
         let model = string((object["message"] as? [String: Any])?["model"])
             ?? string(object["model"])
         return Event(date: date, file: path, model: model, totals: totals, requestID: requestID)
@@ -786,7 +790,12 @@ enum UsageReader {
 
     private static func int(_ value: Any?) -> Int? {
         if let number = value as? Int { return number }
-        if let number = value as? Double { return Int(number) }
+        if let number = value as? Double {
+            // Session logs are external input. `Int(1e30)` traps, and one malformed
+            // token count would take the whole app down during a refresh.
+            guard number.isFinite, number >= -9.2e18, number <= 9.2e18 else { return nil }
+            return Int(number)
+        }
         if let string = value as? String { return Int(string) }
         return nil
     }

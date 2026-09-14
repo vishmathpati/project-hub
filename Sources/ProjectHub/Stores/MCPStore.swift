@@ -17,16 +17,20 @@ final class MCPStore: ObservableObject {
         tools.filter { PRIMARY_TOOL_IDS.contains($0.toolID) }
     }
 
-    // Unique server names across all detected tools
+    // Unique server names across all detected tools, most widely shared first.
+    // Counts are tallied once: the previous comparator rescanned every tool and
+    // server for both sides of every comparison.
     var allServerNames: [String] {
-        let detected = detectedTools
-        return Array(Set(detected.flatMap { $0.servers.map { $0.name } }))
-            .sorted { a, b in
-                let ac = detected.filter { t in t.servers.contains { $0.name == a } }.count
-                let bc = detected.filter { t in t.servers.contains { $0.name == b } }.count
-                if ac != bc { return ac > bc }
-                return a.lowercased() < b.lowercased()
-            }
+        var counts: [String: Int] = [:]
+        for tool in detectedTools {
+            for server in tool.servers { counts[server.name, default: 0] += 1 }
+        }
+        return counts.keys.sorted { lhs, rhs in
+            let left = counts[lhs] ?? 0
+            let right = counts[rhs] ?? 0
+            if left != right { return left > right }
+            return lhs.lowercased() < rhs.lowercased()
+        }
     }
 
     /// Only the number of unique names is wanted here, so skip the ordering work:
@@ -36,14 +40,21 @@ final class MCPStore: ObservableObject {
         Set(detectedTools.flatMap { $0.servers.map(\.name) }).count
     }
 
+    /// Cached because building it stats the filesystem per server, and the sidebar
+    /// and MCP page read it on every render.
+    private var cachedHealthReports: [MCPHealthReport]?
+
     var healthReports: [MCPHealthReport] {
-        detectedTools.flatMap { tool in
+        if let cachedHealthReports { return cachedHealthReports }
+        let reports = detectedTools.flatMap { tool in
             tool.servers.map { health(for: $0, toolID: tool.toolID) }
         }
+        cachedHealthReports = reports
+        return reports
     }
 
     var healthSummary: [MCPHealthStatus: Int] {
-        MCPHealthChecker.summarize(healthReports)
+        Dictionary(grouping: healthReports, by: { $0.status }).mapValues(\.count)
     }
 
     func health(for server: ServerEntry, toolID: String) -> MCPHealthReport {
@@ -73,6 +84,7 @@ final class MCPStore: ObservableObject {
         guard !snapshot.isEmpty else { return }
         isVerifyingHealth = true
         verifiedHealthReports = [:]
+        cachedHealthReports = nil
 
         Task {
             for tool in snapshot {
@@ -122,6 +134,7 @@ final class MCPStore: ObservableObject {
                     self.tools = result
                     self.verifiedHealthReports = [:]
                     self.evaluatedHealthReports = [:]
+                    self.cachedHealthReports = nil
                 }
                 self.isLoading = false
             }

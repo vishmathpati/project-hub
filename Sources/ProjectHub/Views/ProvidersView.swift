@@ -24,34 +24,41 @@ struct ProvidersView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        // Grouped once here. Each of these was a computed property reading the other,
+        // so the family grouping was rebuilt around six times per render.
+        let cards = familyCards
+        let installed = cards.filter(\.detected)
+        let notInstalled = cards.filter { !$0.detected }
+        let totals = assetTotals
+
+        return VStack(spacing: 0) {
             HubPageHeader(
                 title: "Providers",
-                subtitle: "\(installedFamilies.count) of \(familyCards.count) installed on this Mac",
+                subtitle: "\(installed.count) of \(cards.count) installed on this Mac",
                 actions: { headerActions }
             )
             ScrollView {
-                VStack(alignment: .leading, spacing: HubTheme.sectionGap) {
+                LazyVStack(alignment: .leading, spacing: HubTheme.sectionGap) {
                     HStack(spacing: 10) {
-                        MetricTile(value: "\(totalAssets(.skill))", label: "skills")
-                        MetricTile(value: "\(totalAssets(.mcp))",   label: "servers")
-                        MetricTile(value: "\(totalAssets(.plugin))", label: "plugins")
+                        MetricTile(value: "\(totals[.skill] ?? 0)", label: "skills")
+                        MetricTile(value: "\(totals[.mcp] ?? 0)",   label: "servers")
+                        MetricTile(value: "\(totals[.plugin] ?? 0)", label: "plugins")
                     }
 
-                    if !installedFamilies.isEmpty {
+                    if !installed.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
-                            HubSectionHeading("Installed", count: installedFamilies.count)
-                            VStack(spacing: 8) {
-                                ForEach(installedFamilies) { card in familyCard(card) }
+                            HubSectionHeading("Installed", count: installed.count)
+                            LazyVStack(spacing: 8) {
+                                ForEach(installed) { card in familyCard(card) }
                             }
                         }
                     }
 
-                    if !notInstalledFamilies.isEmpty {
+                    if !notInstalled.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
-                            HubSectionHeading("Not installed", count: notInstalledFamilies.count)
-                            VStack(spacing: 8) {
-                                ForEach(notInstalledFamilies) { card in familyCard(card) }
+                            HubSectionHeading("Not installed", count: notInstalled.count)
+                            LazyVStack(spacing: 8) {
+                                ForEach(notInstalled) { card in familyCard(card) }
                             }
                         }
                     }
@@ -119,14 +126,19 @@ struct ProvidersView: View {
         familyCards.filter { !$0.detected }
     }
 
-    private func totalAssets(_ kind: ProviderAsset.Kind) -> Int {
-        var seen = Set<String>()
+    /// Every kind's unique-name count in one pass over the rows.
+    private var assetTotals: [ProviderAsset.Kind: Int] {
+        var seen: [ProviderAsset.Kind: Set<String>] = [:]
         for row in rows {
-            for asset in row.assets where asset.kind == kind {
-                seen.insert(asset.name.lowercased())
+            for asset in row.assets {
+                seen[asset.kind, default: []].insert(asset.name.lowercased())
             }
         }
-        return seen.count
+        return seen.mapValues(\.count)
+    }
+
+    private func totalAssets(_ kind: ProviderAsset.Kind) -> Int {
+        assetTotals[kind] ?? 0
     }
 
     private func assetCount(_ row: ProviderSnapshot, _ kind: ProviderAsset.Kind) -> Int {
