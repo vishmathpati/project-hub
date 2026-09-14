@@ -320,6 +320,20 @@ final class SkillStore: ObservableObject {
         return skills
     }
 
+    /// Warms every tracked project so the browser searches disk state rather
+    /// than only already-opened projects, then recounts per-skill installs.
+    func loadInstalledSkillsForBrowser(projects: [Project]) async {
+        await withTaskGroup(of: Void.self) { group in
+            for project in projects {
+                let path = project.path
+                group.addTask { [weak self] in
+                    await self?.loadInstalledSkills(for: path)
+                }
+            }
+        }
+        refreshGlobalSkillInstallCounts(for: projects)
+    }
+
     func skillMarkdownExists(_ skill: Skill) -> Bool {
         if !skill.description.isEmpty { return true }
         if let cached = skillMarkdownCache[skill.path] { return cached }
@@ -627,6 +641,37 @@ final class SkillStore: ObservableObject {
             .sorted {
                 $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
             }
+    }
+
+    /// Union of the global catalogue and every tracked project's installed
+    /// skills, filtered by name or description and grouped by name. Installed
+    /// skills already covered by a global entry add no new row; project-only
+    /// skills borrow the tool source of their origin so their tiles still read.
+    nonisolated static func browserGroups(
+        globalSkills: [Skill],
+        installedByProject: [String: [InstalledSkill]],
+        query: String
+    ) -> [GlobalSkillGroup] {
+        var combined = globalSkills
+        var knownNames = Set(globalSkills.map { $0.name.lowercased() })
+        for installed in installedByProject.values {
+            for skill in installed where knownNames.insert(skill.name.lowercased()).inserted {
+                combined.append(Skill(
+                    name: skill.name,
+                    description: skill.description,
+                    triggers: [],
+                    source: skill.claudePath != nil ? .claudeGlobal
+                        : skill.codexPath != nil ? .codexGlobal : .cursorGlobal,
+                    path: skill.path
+                ))
+            }
+        }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return deduplicatedGlobalSkills(combined) }
+        return deduplicatedGlobalSkills(combined.filter {
+            $0.name.localizedCaseInsensitiveContains(trimmed)
+                || $0.description.localizedCaseInsensitiveContains(trimmed)
+        })
     }
 
     nonisolated static func projectUsages(

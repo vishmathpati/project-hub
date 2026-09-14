@@ -17,6 +17,8 @@ enum HubDestination: String, CaseIterable, Identifiable, Hashable {
     case diagnostics
     case usage
     case usageBreakdown
+    case profiles
+    case skillBrowser
     case settings
 
     var id: String { rawValue }
@@ -31,6 +33,8 @@ enum HubDestination: String, CaseIterable, Identifiable, Hashable {
         case .checks:      return "Checks"
         case .diagnostics: return "Diagnostics"
         case .usageBreakdown: return "Usage Breakdown"
+        case .profiles: return "Profiles"
+        case .skillBrowser: return "Browse Skills"
         case .usage:       return "Usage"
         case .settings:    return "Settings"
         }
@@ -47,6 +51,8 @@ enum HubDestination: String, CaseIterable, Identifiable, Hashable {
         case .checks:      return "What is wrong, ranked, with the fix attached to each line"
         case .diagnostics: return "Every path we read, probed, and what no longer resolves"
         case .usageBreakdown: return "Daily, weekly, monthly, by model and by project"
+        case .profiles: return "Save and restore named configurations"
+        case .skillBrowser: return "Search every skill on this Mac and install it anywhere"
         case .usage:       return "Read from files on this Mac · quota first, cost second"
         case .settings:    return "Paths and homes shown with the provider they belong to"
         }
@@ -62,6 +68,8 @@ enum HubDestination: String, CaseIterable, Identifiable, Hashable {
         case .checks:      return [("↑↓", "move"), ("F", "fix"), ("D", "diff"), ("⌘R", "rescan")]
         case .diagnostics: return [("⌘R", "rescan"), ("", "reads local files only")]
         case .usageBreakdown: return [("", "reads local logs only")]
+        case .profiles: return [("", "stored locally")]
+        case .skillBrowser: return [("", "installs by symlink")]
         case .usage:       return [("⌘R", "refresh"), ("", "updated every 2 minutes")]
         case .settings:    return [("⌘,", "settings"), ("⌘Q", "quit")]
         }
@@ -137,8 +145,9 @@ struct ContentView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     railGroup("Workspace", items: [.projects])
-                    railGroup("Capabilities", items: [.skills, .plugins, .mcp, .providers])
+                    railGroup("Capabilities", items: [.skillBrowser, .skills, .plugins, .mcp, .providers])
                     railGroup("Health", items: [.checks, .diagnostics, .usage, .usageBreakdown])
+                    railGroup("Setup", items: [.profiles])
                 }
                 .padding(.horizontal, 12)
             }
@@ -347,6 +356,8 @@ struct ContentView: View {
                     compactMenuItem(.checks)
                     compactMenuItem(.diagnostics)
                     compactMenuItem(.usageBreakdown)
+                    compactMenuItem(.profiles)
+                    compactMenuItem(.skillBrowser)
                     compactMenuItem(.usage)
                 }
                 Divider()
@@ -405,6 +416,10 @@ struct ContentView: View {
             CompatibilityView()
         case .usageBreakdown:
             UsageBreakdownView()
+        case .profiles:
+            ProfilesView()
+        case .skillBrowser:
+            SkillBrowserView()
         case .diagnostics:
             DiagnosticsView()
         case .usage:
