@@ -13,6 +13,9 @@ struct ClaudeMdView: View {
     @State private var isDirty: Bool = false
     @State private var showTemplatePicker: Bool = false
     @State private var saveError: String? = nil
+    @State private var showingPreview: Bool = false
+    @State private var previewBefore: String = ""
+    @State private var previewAfter: String = ""
 
     private var wordCount: Int {
         content.split { $0.isWhitespace }.count
@@ -84,11 +87,11 @@ struct ClaudeMdView: View {
             }
 
             // Save button
-            Button(action: saveFile) {
+            Button(action: stagePreview) {
                 HStack(spacing: 4) {
                     Image(systemName: "square.and.arrow.down")
                         .font(.system(size: 11, weight: .semibold))
-                    Text("Save")
+                    Text(isDirty ? "Review & Save" : "Save")
                         .font(.system(size: 11, weight: .semibold))
                 }
                 .foregroundColor(isDirty ? .white : .secondary)
@@ -104,6 +107,18 @@ struct ClaudeMdView: View {
             .buttonStyle(.plain)
             .disabled(!isDirty)
             .keyboardShortcut("s", modifiers: .command)
+            .sheet(isPresented: $showingPreview) {
+                MarkdownDiffSheet(
+                    title: "Review changes to \(selected.title)",
+                    filePath: selected.absolutePath(in: project.path),
+                    before: previewBefore,
+                    after: previewAfter,
+                    onConfirm: {
+                        showingPreview = false
+                        saveFile(expectedBefore: previewBefore)
+                    }
+                )
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
@@ -245,8 +260,24 @@ struct ClaudeMdView: View {
     }
 
     private func saveFile() {
+        saveFile(expectedBefore: nil)
+    }
+
+    private func stagePreview() {
+        saveError = nil
+        let onDisk = InstructionFileReader.read(selected, from: project.path) ?? ""
+        guard content != onDisk else {
+            saveError = "No changes to review."
+            return
+        }
+        previewBefore = onDisk
+        previewAfter = content
+        showingPreview = true
+    }
+
+    private func saveFile(expectedBefore: String?) {
         do {
-            try InstructionFileReader.write(content, selected, to: project.path)
+            try InstructionFileReader.write(content, selected, to: project.path, expectedBefore: expectedBefore)
             savedContent = content
             hasFile = true
             isDirty = false

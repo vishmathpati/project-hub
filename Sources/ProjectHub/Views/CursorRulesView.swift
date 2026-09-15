@@ -312,6 +312,9 @@ struct CursorRuleEditorSheet: View {
     @State private var alwaysApply: Bool = false
     @State private var bodyText: String = ""
     @State private var saveError: String? = nil
+    @State private var showingPreview: Bool = false
+    @State private var previewBefore: String = ""
+    @State private var previewAfter: String = ""
 
     var bodyView: some View {
         VStack(spacing: 0) {
@@ -373,7 +376,8 @@ struct CursorRuleEditorSheet: View {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.escape, modifiers: [])
                 Spacer()
-                Button("Save") { save() }
+                Button("Review diff") { stagePreview() }
+                Button("Save") { save(expectedBefore: nil) }
                     .keyboardShortcut(.return, modifiers: .command)
                     .buttonStyle(.borderedProminent)
             }
@@ -381,6 +385,18 @@ struct CursorRuleEditorSheet: View {
             .padding(.vertical, 12)
         }
         .frame(width: 500, height: 520)
+        .sheet(isPresented: $showingPreview) {
+            MarkdownDiffSheet(
+                title: "Review changes to \(rule.filename)",
+                filePath: rule.filePath,
+                before: previewBefore,
+                after: previewAfter,
+                onConfirm: {
+                    showingPreview = false
+                    save(expectedBefore: previewBefore)
+                }
+            )
+        }
     }
 
     var body: some View {
@@ -405,6 +421,32 @@ struct CursorRuleEditorSheet: View {
     }
 
     private func save() {
+        save(expectedBefore: nil)
+    }
+
+    private func stagePreview() {
+        saveError = nil
+        guard let current = CursorRulesReader.currentText(at: rule.filePath) else {
+            saveError = "Could not read \(rule.filePath). It may have been moved or deleted."
+            return
+        }
+        let after = CursorRulesReader.renderedDocument(
+            description: description.trimmingCharacters(in: .whitespaces),
+            globs: globs.trimmingCharacters(in: .whitespaces),
+            alwaysApply: alwaysApply,
+            body: bodyText,
+            currentFileContent: current
+        )
+        guard after != current else {
+            saveError = "No changes to review."
+            return
+        }
+        previewBefore = current
+        previewAfter = after
+        showingPreview = true
+    }
+
+    private func save(expectedBefore: String?) {
         saveError = nil
         do {
             try CursorRulesReader.update(
@@ -412,7 +454,8 @@ struct CursorRuleEditorSheet: View {
                 description: description.trimmingCharacters(in: .whitespaces),
                 globs: globs.trimmingCharacters(in: .whitespaces),
                 alwaysApply: alwaysApply,
-                body: bodyText
+                body: bodyText,
+                expectedBefore: expectedBefore
             )
             onSaved()
             dismiss()

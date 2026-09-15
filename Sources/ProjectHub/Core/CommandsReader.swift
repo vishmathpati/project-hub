@@ -41,6 +41,7 @@ enum CommandsReader {
         case invalidName(String)
         case duplicateName(String)
         case outsideProject(String)
+        case stalePreview(String)
 
         var errorDescription: String? {
             switch self {
@@ -50,6 +51,8 @@ enum CommandsReader {
                 return "A command named \(name) already exists in this project."
             case .outsideProject(let name):
                 return "\(name) is not inside this project's .claude/commands folder."
+            case .stalePreview(let name):
+                return "\"\(name)\" changed on disk after the preview. Review the new text before saving again."
             }
         }
     }
@@ -91,22 +94,19 @@ enum CommandsReader {
     }
 
     /// Rewrite an existing command, carrying through frontmatter keys this app
-    /// does not model.
-    static func update(_ command: SlashCommand, in projectPath: String) throws {
+    /// does not model. Refuses when the file changed since the previewed text.
+    static func update(_ command: SlashCommand, in projectPath: String, expectedBefore: String? = nil) throws {
         guard command.scope == .project,
               isInsideCommandsTree(command.filePath, projectPath: projectPath) else {
             throw WriteError.outsideProject(command.name)
         }
 
-        let existing = (try? String(contentsOfFile: command.filePath, encoding: .utf8)) ?? ""
-        let content = document(
-            description: command.description,
-            argumentHint: command.argumentHint,
-            allowedTools: command.allowedTools,
-            model: command.model,
-            body: command.body,
-            preserved: SkillReader.preservedFrontmatterLines(in: existing, excluding: editedKeys)
-        )
+        let existing = currentText(at: command.filePath) ?? ""
+        if let expectedBefore, existing != expectedBefore {
+            throw WriteError.stalePreview(command.name)
+        }
+        let content = renderedDocument(for: command, currentFileContent: existing)
+        guard content != existing else { return }
         try content.write(toFile: command.filePath, atomically: true, encoding: .utf8)
     }
 
@@ -135,6 +135,24 @@ enum CommandsReader {
     // MARK: - Helpers
 
     private static let editedKeys: Set<String> = ["description", "argument-hint", "allowed-tools", "model"]
+
+    /// The full file content an update would write, built without touching disk.
+    static func renderedDocument(for command: SlashCommand, currentFileContent: String) -> String {
+        document(
+            description: command.description,
+            argumentHint: command.argumentHint,
+            allowedTools: command.allowedTools,
+            model: command.model,
+            body: command.body,
+            preserved: SkillReader.preservedFrontmatterLines(in: currentFileContent, excluding: editedKeys)
+        )
+    }
+
+    /// The text currently on disk. Enables a before/after preview plus a
+    /// confirm-against-truth write instead of a blind overwrite.
+    static func currentText(at filePath: String) -> String? {
+        try? String(contentsOfFile: filePath, encoding: .utf8)
+    }
 
     private static func commandsDirectory(for projectPath: String) -> String {
         (projectPath as NSString).appendingPathComponent(".claude/commands")
@@ -192,6 +210,17 @@ enum CommandsReader {
     }
 
     private static func document(
+        description: String,
+        argumentHint: String,
+        allowedTools: [String],
+        model: String,
+        body: String,
+        preserved: [String] = []
+    ) -> String {
+        renderedDescription(description: description, argumentHint: argumentHint, allowedTools: allowedTools, model: model, body: body, preserved: preserved)
+    }
+
+    static func renderedDescription(
         description: String,
         argumentHint: String,
         allowedTools: [String],

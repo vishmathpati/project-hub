@@ -40,9 +40,26 @@ enum InstructionFileReader {
     }
 
     static func write(_ content: String, _ document: InstructionDocument, to projectPath: String) throws {
+        try write(content, document, to: projectPath, expectedBefore: nil)
+    }
+
+    /// Write an instruction file, refusing when it changed since the previewed
+    /// text. Pass the text shown in the preview as `expectedBefore`.
+    static func write(_ content: String, _ document: InstructionDocument, to projectPath: String, expectedBefore: String?) throws {
         let path = document.absolutePath(in: projectPath)
         let folder = (path as NSString).deletingLastPathComponent
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        if let expectedBefore {
+            let existing = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+            guard existing == expectedBefore else {
+                throw NSError(
+                    domain: "InstructionFileReader",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "\"\(document.title)\" changed on disk after the preview. Review the new text before saving again."]
+                )
+            }
+            guard content != existing else { return }
+        }
         try content.write(toFile: path, atomically: true, encoding: .utf8)
     }
 }

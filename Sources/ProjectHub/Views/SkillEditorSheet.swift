@@ -17,6 +17,9 @@ struct SkillEditorSheet: View {
     @State private var loadError: String? = nil
     @State private var saveError: String? = nil
     @State private var preservedFrontmatter: [String] = []
+    @State private var showingPreview: Bool = false
+    @State private var previewBefore: String = ""
+    @State private var previewAfter: String = ""
 
     private static let editedKeys: Set<String> = ["name", "description", "triggers"]
 
@@ -120,8 +123,12 @@ struct SkillEditorSheet: View {
 
                 Spacer()
 
+                Button("Review diff") {
+                    stagePreview()
+                }
+                .disabled(loadError != nil)
                 Button("Save") {
-                    save()
+                    save(expectedBefore: nil)
                 }
                 .keyboardShortcut(.return, modifiers: .command)
                 .buttonStyle(.borderedProminent)
@@ -132,6 +139,18 @@ struct SkillEditorSheet: View {
         }
         .frame(width: 520, height: 560)
         .onAppear { loadSkill() }
+        .sheet(isPresented: $showingPreview) {
+            MarkdownDiffSheet(
+                title: "Review changes to \((skillPath as NSString).lastPathComponent)",
+                filePath: skillMdPath,
+                before: previewBefore,
+                after: previewAfter,
+                onConfirm: {
+                    showingPreview = false
+                    save(expectedBefore: previewBefore)
+                }
+            )
+        }
     }
 
     // MARK: - Helpers
@@ -170,9 +189,7 @@ struct SkillEditorSheet: View {
 
     // MARK: - Save
 
-    private func save() {
-        saveError = nil
-
+    private func editedContent() -> String {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedDesc = description.trimmingCharacters(in: .whitespacesAndNewlines)
         let triggers    = triggersCSV
@@ -208,7 +225,34 @@ struct SkillEditorSheet: View {
         fm += "---"
 
         let trimmedBody = bodyText.trimmingCharacters(in: .newlines)
-        let fullContent = trimmedBody.isEmpty ? fm : "\(fm)\n\n\(trimmedBody)"
+        return trimmedBody.isEmpty ? fm : "\(fm)\n\n\(trimmedBody)"
+    }
+
+    private func stagePreview() {
+        saveError = nil
+        guard let current = try? String(contentsOfFile: skillMdPath, encoding: .utf8) else {
+            saveError = "Could not read \(skillMdPath). It may have been moved or deleted."
+            return
+        }
+        let after = editedContent()
+        guard after != current else {
+            saveError = "No changes to review."
+            return
+        }
+        previewBefore = current
+        previewAfter = after
+        showingPreview = true
+    }
+
+    private func save(expectedBefore: String?) {
+        saveError = nil
+        let onDisk = (try? String(contentsOfFile: skillMdPath, encoding: .utf8)) ?? ""
+        if let expectedBefore, onDisk != expectedBefore {
+            saveError = "SKILL.md changed on disk after the preview. Review the new text before saving again."
+            return
+        }
+        let fullContent = editedContent()
+        guard fullContent != onDisk else { return }
 
         do {
             try fullContent.write(toFile: skillMdPath, atomically: true, encoding: .utf8)
