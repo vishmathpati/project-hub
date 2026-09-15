@@ -75,8 +75,8 @@ Legend — **Pri**: P0 blocking value · P1 high · P2 useful · P3 polish.
 | C1 | Bulk operations: multi-select install/remove/enable across projects | CCTM, CC One | CCTM project-assign grid | P1 | todo |
 | C2 | Undo for every destructive action (today only MCP configs) | CodeBurn `act undo` | CodeBurn's journaled undo | P1 | todo |
 | C3 | Server-side of the app: keyboard shortcuts + command palette | opcode, CCTM | opcode | P2 | todo |
-| C4 | Search/filter on every list (only Skills and MCP have it) | all | CCTM | P1 | todo |
-| C5 | Diff preview before any overwrite | CCTM | CCTM | P1 | todo |
+| **C4** | Search/filter on every list (only Skills and MCP have it) | all | CCTM | P1 | done |
+| **C5** | Diff preview before any overwrite | CCTM | CCTM | P1 | done |
 | C6 | Per-project health roll-up across skills/agents/MCP/hooks | CodeBurn grade | CodeBurn A–F | P2 | todo |
 | C7 | Export/import an entire project setup as one file | CCTM profiles | CCTM | P2 | todo |
 | **C8** | Stale-config detection: skills with missing files, dead MCP servers | CodeBurn | CodeBurn | P2 | done |

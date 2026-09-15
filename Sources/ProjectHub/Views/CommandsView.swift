@@ -14,6 +14,19 @@ struct CommandsView: View {
     @State private var deletingCommand: SlashCommand? = nil
     @State private var confirmDelete: Bool = false
     @State private var lastError: String? = nil
+    @State private var searchText: String = ""
+
+    private var isFiltering: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var visibleProjectCommands: [SlashCommand] {
+        Self.matches(commands: projectCommands, query: searchText)
+    }
+
+    private var visibleGlobalCommands: [SlashCommand] {
+        Self.matches(commands: globalCommands, query: searchText)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -21,6 +34,8 @@ struct CommandsView: View {
             Divider()
             if projectCommands.isEmpty && globalCommands.isEmpty {
                 emptyState
+            } else if visibleProjectCommands.isEmpty && visibleGlobalCommands.isEmpty {
+                noMatchState
             } else {
                 commandList
             }
@@ -76,10 +91,14 @@ struct CommandsView: View {
 
     private var commandBar: some View {
         HStack(spacing: 8) {
-            Text("\(projectCommands.count) command\(projectCommands.count == 1 ? "" : "s")")
+            Text(isFiltering
+                ? "\(visibleProjectCommands.count) of \(projectCommands.count) command\(projectCommands.count == 1 ? "" : "s")"
+                : "\(projectCommands.count) command\(projectCommands.count == 1 ? "" : "s")")
                 .font(HubFont.machine)
                 .foregroundStyle(HubTheme.textDim)
             Spacer()
+            HubSearchField(text: $searchText, placeholder: "Filter commands", shortcut: nil)
+                .frame(width: 200)
             HubButton(title: "New Command", kind: .primary, systemImage: "plus.circle.fill") {
                 showNewCommandSheet = true
             }
@@ -88,15 +107,26 @@ struct CommandsView: View {
         .padding(.vertical, 10)
     }
 
+    private static func matches(commands: [SlashCommand], query: String) -> [SlashCommand] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return commands }
+        return commands.filter {
+            $0.name.lowercased().contains(q)
+            || $0.description.lowercased().contains(q)
+            || $0.argumentHint.lowercased().contains(q)
+            || $0.allowedTools.contains { $0.lowercased().contains(q) }
+        }
+    }
+
     // MARK: - Command list
 
     private var commandList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
-                ForEach(projectCommands) { command in
+                ForEach(visibleProjectCommands) { command in
                     commandRow(command)
                 }
-                if !globalCommands.isEmpty {
+                if !visibleGlobalCommands.isEmpty {
                     globalSection
                 }
             }
@@ -177,9 +207,9 @@ struct CommandsView: View {
 
     private var globalSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HubSectionHeading("Global commands", count: globalCommands.count)
+            HubSectionHeading("Global commands", count: visibleGlobalCommands.count)
                 .padding(.top, 8)
-            ForEach(globalCommands) { command in
+            ForEach(visibleGlobalCommands) { command in
                 globalCommandRow(command)
             }
         }
@@ -238,6 +268,26 @@ struct CommandsView: View {
                 .multilineTextAlignment(.center)
             HubButton(title: "New Command", kind: .primary, systemImage: "plus.circle.fill") {
                 showNewCommandSheet = true
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(30)
+    }
+
+    private var noMatchState: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 26))
+                .foregroundStyle(HubTheme.textFaint)
+            Text("No commands match your filter")
+                .font(HubFont.sectionTitle)
+                .foregroundStyle(HubTheme.text)
+            Text("Try a different search, or clear the filter.")
+                .font(HubFont.caption)
+                .foregroundStyle(HubTheme.textDim)
+                .multilineTextAlignment(.center)
+            HubButton(title: "Clear filter", kind: .primary, systemImage: "xmark.circle") {
+                searchText = ""
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -352,6 +402,9 @@ struct CommandDetailSheet: View {
     @State private var modelText:        String = ""
     @State private var bodyText:         String = ""
     @State private var saveError:        String? = nil
+    @State private var showingPreview:   Bool = false
+    @State private var previewBefore:    String = ""
+    @State private var previewAfter:     String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -449,12 +502,24 @@ struct CommandDetailSheet: View {
             }
             Spacer()
             if isEditing {
-                HubButton(title: "Cancel", kind: .secondary) { cancelEditing() }
-                HubButton(title: "Save", kind: .primary) { save() }
+                HubButton(title: "Review diff", kind: .secondary) { stagePreview() }
+                HubButton(title: "Save", kind: .primary) { save(expectedBefore: nil) }
             } else {
                 HubButton(title: "Edit", kind: .secondary) { isEditing = true }
                 HubButton(title: "Done", kind: .primary) { dismiss() }
             }
+        }
+        .sheet(isPresented: $showingPreview) {
+            MarkdownDiffSheet(
+                title: "Review changes to /\(command.name)",
+                filePath: command.filePath,
+                before: previewBefore,
+                after: previewAfter,
+                onConfirm: {
+                    showingPreview = false
+                    save(expectedBefore: previewBefore)
+                }
+            )
         }
     }
 
@@ -481,11 +546,12 @@ struct CommandDetailSheet: View {
 
     private func cancelEditing() {
         loadFields()
+        showingPreview = false
         isEditing = false
     }
 
-    private func save() {
-        let edited = SlashCommand(
+    private func editedCommand() -> SlashCommand {
+        SlashCommand(
             name:         command.name,
             description:  descriptionText.trimmingCharacters(in: .whitespacesAndNewlines),
             argumentHint: argumentHintText.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -495,8 +561,27 @@ struct CommandDetailSheet: View {
             filePath:     command.filePath,
             scope:        command.scope
         )
+    }
+
+    private func stagePreview() {
+        saveError = nil
+        guard let current = CommandsReader.currentText(at: command.filePath) else {
+            saveError = "Could not read \(command.filePath). It may have been moved or deleted."
+            return
+        }
+        let after = CommandsReader.renderedDocument(for: editedCommand(), currentFileContent: current)
+        guard after != current else {
+            saveError = "No changes to review."
+            return
+        }
+        previewBefore = current
+        previewAfter = after
+        showingPreview = true
+    }
+
+    private func save(expectedBefore: String?) {
         do {
-            try CommandsReader.update(edited, in: projectPath)
+            try CommandsReader.update(editedCommand(), in: projectPath, expectedBefore: expectedBefore)
             onSaved()
             dismiss()
         } catch {

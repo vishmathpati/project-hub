@@ -11,9 +11,22 @@ struct AgentsView: View {
     @State private var selectedAgent: Agent? = nil
     @State private var deletingAgentName: String? = nil
     @State private var confirmDelete: Bool = false
+    @State private var searchText: String = ""
+
+    private var isFiltering: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     private var agents: [Agent] {
-        agentStore.agents(for: project.path)
+        let all = agentStore.agents(for: project.path)
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return all }
+        return all.filter {
+            $0.name.lowercased().contains(query)
+            || $0.description.lowercased().contains(query)
+            || $0.model.lowercased().contains(query)
+            || $0.tools.contains { $0.lowercased().contains(query) }
+        }
     }
 
     var body: some View {
@@ -62,11 +75,16 @@ struct AgentsView: View {
     // MARK: - Agent bar
 
     private var agentBar: some View {
-        HStack {
-            Text("\(agents.count) agent\(agents.count == 1 ? "" : "s")")
+        let total = agentStore.agents(for: project.path).count
+        return HStack {
+            Text(isFiltering
+                ? "\(agents.count) of \(total) agent\(total == 1 ? "" : "s")"
+                : "\(agents.count) agent\(agents.count == 1 ? "" : "s")")
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
             Spacer()
+            HubSearchField(text: $searchText, placeholder: "Filter agents", shortcut: nil)
+                .frame(width: 200)
             Button(action: { showNewAgentSheet = true }) {
                 HStack(spacing: 4) {
                     Image(systemName: "plus.circle.fill")
@@ -90,7 +108,7 @@ struct AgentsView: View {
 
     private var agentList: some View {
         ScrollView {
-            VStack(spacing: 6) {
+            LazyVStack(spacing: 6) {
                 ForEach(agents) { agent in
                     agentRow(agent)
                 }
@@ -172,27 +190,56 @@ struct AgentsView: View {
             Image(systemName: "person.fill.viewfinder")
                 .font(.system(size: 26))
                 .foregroundColor(.secondary)
-            Text("No agents yet")
-                .font(.system(size: 14, weight: .semibold))
-            Text("Create a Claude sub-agent for this project.")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            Button(action: { showNewAgentSheet = true }) {
-                HStack(spacing: 5) {
-                    Image(systemName: "plus.circle.fill")
-                    Text("New Agent")
-                }
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(HubTheme.onAccent)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(HubTheme.accent)
-                .clipShape(Capsule())
+            if agentStore.agents(for: project.path).isEmpty {
+                Text("No agents yet")
+                    .font(.system(size: 14, weight: .semibold))
+                Text("Create a Claude sub-agent for this project.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                newAgentCTA
+            } else {
+                Text("No agents match your filter")
+                    .font(.system(size: 14, weight: .semibold))
+                Text("Try a different search, or clear the filter.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                clearFilterCTA
             }
-            .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(30)
+    }
+
+    private var newAgentCTA: some View {
+        Button(action: { showNewAgentSheet = true }) {
+            HStack(spacing: 5) {
+                Image(systemName: "plus.circle.fill")
+                Text("New Agent")
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundColor(HubTheme.onAccent)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(HubTheme.accent)
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var clearFilterCTA: some View {
+        Button(action: { searchText = "" }) {
+            HStack(spacing: 5) {
+                Image(systemName: "xmark.circle")
+                Text("Clear filter")
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundColor(HubTheme.onAccent)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(HubTheme.accent)
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Helpers
@@ -338,6 +385,16 @@ struct AgentDetailSheet: View {
     let agent: Agent
     @Environment(\.dismiss) var dismiss
 
+    @State private var isEditing: Bool = false
+    @State private var descriptionText: String = ""
+    @State private var modelText: String = ""
+    @State private var toolsText: String = ""
+    @State private var bodyText: String = ""
+    @State private var saveError: String? = nil
+    @State private var showingPreview: Bool = false
+    @State private var previewBefore: String = ""
+    @State private var previewAfter: String = ""
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -363,7 +420,9 @@ struct AgentDetailSheet: View {
                     .foregroundColor(.secondary)
             }
 
-            if !agent.tools.isEmpty {
+            if isEditing {
+                editForm
+            } else if !agent.tools.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Tools").font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
                     Text(agent.tools.joined(separator: ", "))
@@ -374,18 +433,26 @@ struct AgentDetailSheet: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("System Prompt").font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
-                ScrollView {
-                    Text(agent.body.isEmpty ? "(empty)" : agent.body)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
+            if isEditing {
+                TextEditor(text: $bodyText)
+                    .font(.system(size: 12, design: .monospaced))
+                    .frame(minHeight: 140)
+                    .overlay(RoundedRectangle(cornerRadius: 6)
+                        .stroke(HubTheme.line.opacity(0.5), lineWidth: 0.5))
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("System Prompt").font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
+                    ScrollView {
+                        Text(agent.body.isEmpty ? "(empty)" : agent.body)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    .frame(maxHeight: 200)
+                    .background(HubTheme.field)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
-                .frame(maxHeight: 200)
-                .background(HubTheme.field)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
             }
 
             HStack {
@@ -395,12 +462,117 @@ struct AgentDetailSheet: View {
                         [URL(fileURLWithPath: agent.filePath)]
                     )
                 }
-                Button("Done") { dismiss() }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.return, modifiers: .command)
+                if isEditing {
+                    Button("Cancel") { cancelEditing() }
+                    Button("Review diff") { stagePreview() }
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    Button("Edit") { beginEditing() }
+                    Button("Done") { dismiss() }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.return, modifiers: .command)
+                }
             }
         }
         .padding(20)
-        .frame(width: 440, height: 420)
+        .frame(width: 440, height: 520)
+        .sheet(isPresented: $showingPreview) {
+            MarkdownDiffSheet(
+                title: "Review changes to \(agent.name)",
+                filePath: agent.filePath,
+                before: previewBefore,
+                after: previewAfter,
+                onConfirm: {
+                    showingPreview = false
+                    save(expectedBefore: previewBefore)
+                }
+            )
+        }
+        .alert("Couldn't save agent", isPresented: Binding(
+            get: { saveError != nil },
+            set: { if !$0 { saveError = nil } }
+        )) {
+            Button("OK", role: .cancel) { saveError = nil }
+        } message: {
+            Text(saveError ?? "")
+        }
+    }
+
+    private var editForm: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Description").font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
+                TextField("When should Claude use this agent?", text: $descriptionText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12))
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Model").font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
+                TextField("sonnet", text: $modelText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12))
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Tools, comma-separated").font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
+                TextField("Bash, Read, Edit", text: $toolsText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12))
+            }
+        }
+    }
+
+    private func beginEditing() {
+        descriptionText = agent.description
+        modelText = agent.model
+        toolsText = agent.tools.joined(separator: ", ")
+        bodyText = agent.body
+        saveError = nil
+        isEditing = true
+    }
+
+    private func cancelEditing() {
+        showingPreview = false
+        isEditing = false
+    }
+
+    private func editedAgent() -> Agent {
+        Agent(
+            name: agent.name,
+            description: descriptionText.trimmingCharacters(in: .whitespacesAndNewlines),
+            model: modelText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? "sonnet" : modelText.trimmingCharacters(in: .whitespacesAndNewlines),
+            tools: toolsText.components(separatedBy: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty },
+            filePath: agent.filePath,
+            body: bodyText
+        )
+    }
+
+    private func stagePreview() {
+        saveError = nil
+        guard let current = AgentReader.currentText(at: agent.filePath) else {
+            saveError = "Could not read \(agent.filePath). It may have been moved or deleted."
+            return
+        }
+        let after = AgentReader.renderedDocument(for: editedAgent())
+        guard after != current else {
+            saveError = "No changes to review."
+            return
+        }
+        previewBefore = current
+        previewAfter = after
+        showingPreview = true
+    }
+
+    private func save(expectedBefore: String?) {
+        do {
+            let projectPath = ((agent.filePath as NSString).deletingLastPathComponent as NSString).deletingLastPathComponent
+            try AgentReader.update(editedAgent(), in: projectPath, expectedBefore: expectedBefore)
+            dismiss()
+        } catch {
+            saveError = error.localizedDescription
+        }
     }
 }

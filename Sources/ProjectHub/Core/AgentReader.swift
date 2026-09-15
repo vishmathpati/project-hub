@@ -50,11 +50,17 @@ enum AgentReader {
 
     enum WriteError: LocalizedError {
         case duplicateName(String)
+        case outsideProject(String)
+        case stalePreview(String)
 
         var errorDescription: String? {
             switch self {
             case .duplicateName(let name):
                 return "An agent named \(name) already exists in this project."
+            case .outsideProject(let name):
+                return "\(name) is not inside this project's .claude/agents folder."
+            case .stalePreview(let name):
+                return "\"\(name)\" changed on disk after the preview. Review the new text before saving again."
             }
         }
     }
@@ -116,6 +122,55 @@ enum AgentReader {
                 return
             }
         }
+    }
+
+    /// The full file content an update would write, built without touching disk.
+    static func renderedDocument(for agent: Agent) -> String {
+        let toolsLine = agent.tools.isEmpty ? "" : agent.tools.joined(separator: ", ")
+        let frontmatter = """
+        ---
+        name: \(agent.name)
+        description: \(agent.description)
+        model: \(agent.model)
+        tools: \(toolsLine)
+        ---
+        """
+        let trimmedBody = agent.body.trimmingCharacters(in: .newlines)
+        return trimmedBody.isEmpty ? frontmatter : "\(frontmatter)\n\n\(trimmedBody)"
+    }
+
+    /// The text currently on disk. Enables a before/after preview plus a
+    /// confirm-against-truth write instead of a blind overwrite.
+    static func currentText(at filePath: String) -> String? {
+        try? String(contentsOfFile: filePath, encoding: .utf8)
+    }
+
+    /// Rewrite an agent from the detail sheet. Refuses when the file changed
+    /// since the previewed text, or when the file sits outside the project's
+    /// `.claude/agents/` tree.
+    static func update(_ agent: Agent, in projectPath: String, expectedBefore: String? = nil) throws {
+        guard isInsideAgentsTree(agent.filePath, projectPath: projectPath) else {
+            throw WriteError.outsideProject(agent.name)
+        }
+        let existing = currentText(at: agent.filePath) ?? ""
+        if let expectedBefore, existing != expectedBefore {
+            throw WriteError.stalePreview(agent.name)
+        }
+        let content = renderedDocument(for: agent)
+        guard content != existing else { return }
+        try content.write(toFile: agent.filePath, atomically: true, encoding: .utf8)
+    }
+
+    private static func isInsideAgentsTree(_ filePath: String, projectPath: String) -> Bool {
+        let root = URL(fileURLWithPath: (projectPath as NSString).appendingPathComponent(".claude/agents"))
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
+        let target = URL(fileURLWithPath: filePath)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+            .path
+        return target.hasPrefix(root + "/")
     }
 
     // MARK: - Helpers

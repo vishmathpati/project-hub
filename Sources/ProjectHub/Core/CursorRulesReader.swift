@@ -16,6 +16,17 @@ struct CursorRule: Identifiable {
 
 enum CursorRulesReader {
 
+    enum WriteError: LocalizedError {
+        case stalePreview(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .stalePreview(let filename):
+                return "\"\(filename)\" changed on disk after the preview. Review the new text before saving again."
+            }
+        }
+    }
+
     // MARK: - Read
 
     /// Return all rules from `<projectPath>/.cursor/rules/*.mdc`.
@@ -77,6 +88,29 @@ enum CursorRulesReader {
         try FileManager.default.removeItem(atPath: path)
     }
 
+    /// The full file content an update would write, built without touching disk.
+    static func renderedDocument(
+        description: String,
+        globs: String,
+        alwaysApply: Bool,
+        body: String,
+        currentFileContent: String
+    ) -> String {
+        buildContent(
+            description: description,
+            globs: globs,
+            alwaysApply: alwaysApply,
+            body: body,
+            preserved: SkillReader.preservedFrontmatterLines(in: currentFileContent, excluding: editedKeys)
+        )
+    }
+
+    /// The text currently on disk. Enables a before/after preview plus a
+    /// confirm-against-truth write instead of a blind overwrite.
+    static func currentText(at filePath: String) -> String? {
+        try? String(contentsOfFile: filePath, encoding: .utf8)
+    }
+
     /// Overwrite an existing .mdc file with updated content.
     static func update(
         rule: CursorRule,
@@ -85,14 +119,31 @@ enum CursorRulesReader {
         alwaysApply: Bool,
         body: String
     ) throws {
-        let existing = (try? String(contentsOfFile: rule.filePath, encoding: .utf8)) ?? ""
-        let content = buildContent(
+        try update(rule: rule, description: description, globs: globs, alwaysApply: alwaysApply, body: body, expectedBefore: nil)
+    }
+
+    /// Overwrite an existing .mdc file with updated content. Refuses when the
+    /// file changed since the previewed text.
+    static func update(
+        rule: CursorRule,
+        description: String,
+        globs: String,
+        alwaysApply: Bool,
+        body: String,
+        expectedBefore: String?
+    ) throws {
+        let existing = currentText(at: rule.filePath) ?? ""
+        if let expectedBefore, existing != expectedBefore {
+            throw WriteError.stalePreview(rule.filename)
+        }
+        let content = renderedDocument(
             description: description,
             globs: globs,
             alwaysApply: alwaysApply,
             body: body,
-            preserved: SkillReader.preservedFrontmatterLines(in: existing, excluding: editedKeys)
+            currentFileContent: existing
         )
+        guard content != existing else { return }
         try content.write(toFile: rule.filePath, atomically: true, encoding: .utf8)
     }
 
