@@ -4,6 +4,68 @@ import AppKit
 // MARK: - Project detail: Claude/Codex sub-tabs across compact rows
 
 struct ProjectDetailView: View {
+    enum ProjectSection: Int, CaseIterable, Identifiable {
+        case health = 0
+        case skills = 1
+        case agents = 2
+        case mcp = 3
+        case hooks = 4
+        case instructions = 5
+        case rules = 6
+        case commands = 7
+        case overview = 8
+
+        var id: Int { rawValue }
+
+        var title: String {
+            switch self {
+            case .health: "Health"
+            case .skills: "Skills"
+            case .agents: "Agents"
+            case .mcp: "MCP"
+            case .hooks: "Hooks"
+            case .instructions: "Instructions"
+            case .rules: "Rules"
+            case .commands: "Commands"
+            case .overview: "Overview"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .health: "stethoscope"
+            case .skills: "book.closed.fill"
+            case .agents: "person.fill.viewfinder"
+            case .mcp: "server.rack"
+            case .hooks: "bolt.fill"
+            case .instructions: "doc.text.fill"
+            case .rules: "list.bullet.rectangle"
+            case .commands: "slash.circle.fill"
+            case .overview: "chart.bar.doc.horizontal"
+            }
+        }
+
+        var shortcutNumber: Int { rawValue + 1 }
+
+        static let displayOrder: [ProjectSection] = [
+            .overview, .skills, .mcp, .health, .agents, .hooks, .instructions, .rules, .commands,
+        ]
+
+        static let primary: [ProjectSection] = [.overview, .skills, .mcp]
+        static let configuration: [ProjectSection] = [.health, .agents, .hooks, .instructions, .rules, .commands]
+
+        static func shortcutSection(for characters: String) -> ProjectSection? {
+            guard characters.count == 1,
+                  let number = Int(characters),
+                  (1...9).contains(number) else { return nil }
+            return ProjectSection(rawValue: number - 1)
+        }
+
+        static func acceptsShortcut(modifierFlags: NSEvent.ModifierFlags) -> Bool {
+            modifierFlags.intersection([.command, .option, .control, .shift]) == .command
+        }
+    }
+
     enum Presentation {
         case compact
         case desktop
@@ -16,7 +78,7 @@ struct ProjectDetailView: View {
     @EnvironmentObject var projectStore: ProjectStore
     @EnvironmentObject var skillStore:   SkillStore
     @EnvironmentObject var agentStore:   AgentStore
-    @State private var subTab: Int = 0
+    @State private var section: ProjectSection = .overview
     @State private var reloadTick: Int = 0
     @State private var showCopySheet: Bool = false
     @State private var detailToolIDs: [String] = []
@@ -35,6 +97,11 @@ struct ProjectDetailView: View {
             } else {
                 compactBody
             }
+        }
+        .background {
+            ProjectSectionShortcutBridge(selection: $section)
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
         }
         // Opening a project used to stat the folder inside the first body pass.
         // The provider table renders AbsentValue for zero, so waiting one hop costs
@@ -65,7 +132,7 @@ struct ProjectDetailView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            subTabBar
+            projectSectionBar
             Divider()
             content
         }
@@ -74,15 +141,14 @@ struct ProjectDetailView: View {
     private var desktopBody: some View {
         VStack(spacing: 0) {
             desktopHeader
-            HStack(spacing: 0) {
-                desktopSubTabSidebar
-                Rectangle().fill(HubTheme.line).frame(width: 1)
-                content
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(HubTheme.bg)
-            }
+            Rectangle().fill(HubTheme.line).frame(height: 1)
+            projectSectionBar
+            Rectangle().fill(HubTheme.line).frame(height: 1)
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(HubTheme.bg)
             FooterHintBar(hints: [
-                ("⌘1–8", "sections"),
+                ("⌘1–9", "sections"),
                 ("⌘R", "rescan"),
                 ("⌘⌫", "remove project"),
             ])
@@ -186,137 +252,120 @@ struct ProjectDetailView: View {
         }
     }
 
-    // MARK: - Sub-tab bar (two rows of four)
-
-    private var subTabBar: some View {
-        VStack(spacing: 4) {
-            HStack(spacing: 4) {
-                subTabButton(title: "Health",   icon: "stethoscope",             tag: 0)
-                subTabButton(title: "Skills",   icon: "book.closed.fill",        tag: 1)
-                subTabButton(title: "Agents",   icon: "person.fill.viewfinder",   tag: 2)
-                subTabButton(title: "MCP",      icon: "server.rack",              tag: 3)
-            }
-            HStack(spacing: 4) {
-                subTabButton(title: "Hooks",        icon: "bolt.fill",       tag: 4)
-                subTabButton(title: "Instructions", icon: "doc.text.fill",   tag: 5)
-                subTabButton(title: "Rules",        icon: "list.bullet.rectangle", tag: 6)
-                subTabButton(title: "Commands",     icon: "slash.circle.fill", tag: 7)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-    }
-
-    private func subTabButton(title: String, icon: String, tag: Int) -> some View {
-        let active = subTab == tag
-        return Button(action: { withAnimation(.spring(response: 0.22, dampingFraction: 0.8)) { subTab = tag } }) {
-            HStack(spacing: 3) {
-                Image(systemName: icon).font(.system(size: 9, weight: .semibold))
-                Text(title).font(.system(size: 10, weight: .semibold))
-            }
-            .foregroundColor(active ? HubTheme.onAccent : HubTheme.textMid)
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 6)
-            .background(
-                Group {
-                    if active {
-                        AnyView(HubTheme.accent)
-                    } else {
-                        AnyView(HubTheme.raised)
-                    }
+    private var projectSectionBar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                ForEach(ProjectSection.primary) { item in
+                    projectSectionButton(item)
                 }
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7)
-                .stroke(active ? Color.clear : HubTheme.line.opacity(0.5), lineWidth: 0.5))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var desktopSubTabSidebar: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("This folder").groupHeadingStyle(HubTheme.headingText)
-                Text("Everything here writes to files in this folder.")
-                    .font(HubFont.railCaption)
+                configurationMenu
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 8) {
+                Text("Section")
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(HubTheme.textDim)
-                    .fixedSize(horizontal: false, vertical: true)
+                Menu {
+                    ForEach(ProjectSection.displayOrder) { item in
+                        Button {
+                            section = item
+                        } label: {
+                            Label(item.title, systemImage: item.icon)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: section.icon)
+                        Text(section.title)
+                        Spacer(minLength: 8)
+                        Text("⌘\(section.shortcutNumber)")
+                            .font(HubFont.mono(10))
+                            .foregroundStyle(HubTheme.textFaint)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(width: 230, height: HubTheme.navRowHeight)
+                    .background(HubTheme.raised.opacity(0.55))
+                    .clipShape(RoundedRectangle(cornerRadius: HubTheme.Radius.control))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .accessibilityLabel("Project section, \(section.title)")
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 8)
-            .padding(.bottom, 4)
-
-            ForEach(projectSections, id: \.tag) { item in
-                desktopSubTabButton(title: item.title, tag: item.tag)
-            }
-
-            Spacer()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 14)
-        .frame(width: HubTheme.subRailWidth)
+        .padding(.horizontal, HubTheme.contentPadding)
+        .padding(.vertical, 8)
         .background(HubTheme.panelBg)
     }
 
-    private var projectSections: [(title: String, icon: String, tag: Int)] {
-        [
-            ("Health", "stethoscope", 0),
-            ("Skills", "book.closed.fill", 1),
-            ("Agents", "person.fill.viewfinder", 2),
-            ("MCP", "server.rack", 3),
-            ("Hooks", "bolt.fill", 4),
-            ("Instructions", "doc.text.fill", 5),
-            ("Rules", "list.bullet.rectangle", 6),
-            ("Commands", "slash.circle.fill", 7),
-        ]
-    }
-
-    private func desktopSubTabButton(title: String, tag: Int) -> some View {
-        let active = subTab == tag
+    private func projectSectionButton(_ item: ProjectSection) -> some View {
+        let active = section == item
         return Button {
-            subTab = tag
+            section = item
         } label: {
-            HStack(spacing: 8) {
-                Text(title)
-                    .font(active ? HubFont.navItemSel : HubFont.navItem)
-                    .foregroundStyle(active ? HubTheme.accent : HubTheme.textMid)
-                Spacer(minLength: 4)
-                Text("⌘\(tag + 1)")
-                    .font(HubFont.mono(10))
-                    .foregroundStyle(HubTheme.textFaint)
-            }
-            .padding(.horizontal, 8)
-            .frame(height: HubTheme.navRowHeight)
-            .background(active ? HubTheme.accentBg : .clear)
-            .clipShape(RoundedRectangle(cornerRadius: HubTheme.Radius.control))
-            .overlay(alignment: .leading) {
-                if active {
-                    Rectangle()
-                        .fill(HubTheme.accent)
-                        .frame(width: 2)
-                        .padding(.vertical, 6)
-                }
-            }
-            .contentShape(Rectangle())
+            Label(item.title, systemImage: item.icon)
+                .font(.system(size: 12, weight: active ? .semibold : .medium))
+                .foregroundStyle(active ? HubTheme.accent : HubTheme.textMid)
+                .padding(.horizontal, 11)
+                .frame(height: HubTheme.navRowHeight)
+                .background(active ? HubTheme.accentBg : HubTheme.raised.opacity(0.45))
+                .clipShape(RoundedRectangle(cornerRadius: HubTheme.Radius.control))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .keyboardShortcut(KeyEquivalent(Character("\(tag + 1)")), modifiers: .command)
         .animation(HubTheme.selectionAnimation, value: active)
+    }
+
+    private var configurationMenu: some View {
+        let active = ProjectSection.configuration.contains(section)
+        return Menu {
+            ForEach(ProjectSection.configuration) { item in
+                Button {
+                    section = item
+                } label: {
+                    Label(item.title, systemImage: item.icon)
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: active ? section.icon : "slider.horizontal.3")
+                Text(active ? section.title : "Configuration")
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .font(.system(size: 12, weight: active ? .semibold : .medium))
+            .foregroundStyle(active ? HubTheme.accent : HubTheme.textMid)
+            .padding(.horizontal, 11)
+            .frame(height: HubTheme.navRowHeight)
+            .background(active ? HubTheme.accentBg : HubTheme.raised.opacity(0.45))
+            .clipShape(RoundedRectangle(cornerRadius: HubTheme.Radius.control))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
     }
 
     // MARK: - Content
 
     @ViewBuilder
     private var content: some View {
-        switch subTab {
-        case 0: healthLanding
-        case 1: SkillsView(project: project, reloadTick: reloadTick)
-        case 2: AgentsView(project: project, reloadTick: $reloadTick)
-        case 3: MCPView(project: project)
-        case 4: HooksView(project: project)
-        case 5: ClaudeMdView(project: project)
-        case 6: CursorRulesView(project: project)
-        default: CommandsView(project: project, reloadTick: $reloadTick)
+        switch section {
+        case .health: healthLanding
+        case .skills: SkillsView(project: project, reloadTick: reloadTick)
+        case .agents: AgentsView(project: project, reloadTick: $reloadTick)
+        case .mcp: MCPView(project: project)
+        case .hooks: HooksView(project: project)
+        case .instructions: ClaudeMdView(project: project)
+        case .rules: CursorRulesView(project: project)
+        case .commands: CommandsView(project: project, reloadTick: $reloadTick)
+        case .overview:
+            ContextView(project: project, reloadTick: reloadTick) { destination in
+                section = destination
+            }
+            .id(project.path)
         }
     }
 
@@ -406,5 +455,82 @@ struct ProjectDetailView: View {
         let home = NSHomeDirectory()
         if path.hasPrefix(home) { return "~" + path.dropFirst(home.count) }
         return path
+    }
+}
+
+/// SwiftUI registers shortcuts inside unopened `Menu` content lazily. This tiny
+/// AppKit bridge owns one exact Command+digit route for the window containing the
+/// active project detail, while SwiftUI remains the only owner of selection.
+private struct ProjectSectionShortcutBridge: NSViewRepresentable {
+    @Binding var selection: ProjectDetailView.ProjectSection
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(selection: $selection)
+    }
+
+    func makeNSView(context: Context) -> ProjectSectionShortcutHostView {
+        let view = ProjectSectionShortcutHostView(frame: .zero)
+        view.onWindowChange = { [weak coordinator = context.coordinator] window in
+            coordinator?.setWindow(window)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: ProjectSectionShortcutHostView, context: Context) {
+        context.coordinator.selection = $selection
+        context.coordinator.setWindow(nsView.window)
+    }
+
+    static func dismantleNSView(_ nsView: ProjectSectionShortcutHostView, coordinator: Coordinator) {
+        nsView.onWindowChange = nil
+        coordinator.stop()
+    }
+
+    final class Coordinator {
+        var selection: Binding<ProjectDetailView.ProjectSection>
+        private weak var window: NSWindow?
+        private var monitor: Any?
+
+        init(selection: Binding<ProjectDetailView.ProjectSection>) {
+            self.selection = selection
+        }
+
+        func setWindow(_ window: NSWindow?) {
+            self.window = window
+            guard window != nil, monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self else { return event }
+                return self.handle(event)
+            }
+        }
+
+        func stop() {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+            }
+            monitor = nil
+            window = nil
+        }
+
+        private func handle(_ event: NSEvent) -> NSEvent? {
+            guard let window,
+                  event.window === window,
+                  ProjectDetailView.ProjectSection.acceptsShortcut(modifierFlags: event.modifierFlags),
+                  let characters = event.charactersIgnoringModifiers,
+                  let destination = ProjectDetailView.ProjectSection.shortcutSection(for: characters)
+            else { return event }
+
+            selection.wrappedValue = destination
+            return nil
+        }
+    }
+}
+
+private final class ProjectSectionShortcutHostView: NSView {
+    var onWindowChange: ((NSWindow?) -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        onWindowChange?(window)
     }
 }

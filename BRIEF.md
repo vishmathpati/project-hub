@@ -95,3 +95,25 @@ Rejected expanding product scope during the visual redesign. This change keeps t
 Skills and plugins are separate inventory concepts. The Skills page is the capability index: one row per unique skill, expandable into origins and project availability. The Plugins page is the bundle index: one row per plugin bundle, expandable into components, install evidence, state, and paths.
 
 Rejected keeping plugin evidence inside Compatibility only because users need a normal navigation surface for plugin bundles, not just diagnostics. Rejected showing long skill descriptions in the Skills list because the page's primary job is inventory and location, not documentation reading.
+
+---
+
+## v1.4 · 2026-10-15 · Codex
+
+Context is a project section for recent Claude and Codex sessions. It separates provider-reported session traffic and last input from reconstructed item estimates and current configuration projections. Missing evidence stays unknown. Captured skill, agent, tool, and instruction text retains source scope and observation time. Plugin or server groups do not add a second parent total.
+
+Current defaults is a separate inventory of candidates. Full skill-file size is an invocation estimate, not its startup catalog cost. Supported reductions write only the selected project's Claude settings after an exact preview. Tool deferral requires compatible model and proxy support. Standalone skills can become manual-only. Apply and undo reject stale files and unsafe targets. No numeric savings are promised.
+
+The reader uses passive local files and read-only Codex SQLite. It does not launch CLIs, MCP connections, hooks, or model requests. Scan limits remain visible and Scan more increases the selected-session budget. Large files and incomplete counters must not silently become complete totals. See `docs/context.md` for the user flow.
+
+---
+
+## v1.5 · 2026-10-15 16:18 · Codex
+
+Opening a project should answer where its context goes and what to review next. Overview becomes the default section. A compact horizontal section bar replaces the desktop project rail. Configuration retains the existing destinations and keyboard shortcuts.
+
+Project Skills becomes one expandable row per skill name. Each origin retains its exact provider, scope, path, and permitted actions. The install library moves behind Add skill. Global availability must not be confused with a project installation.
+
+Reduction copy leads with the useful action and the captured text estimate when available. This estimate identifies setup to review, not measured savings. Current inventory and cache reuse cannot prove wasted context. A unified cross-kind catalog and a permanent inspector were rejected because they add structure beyond this correction.
+
+The project Skills presentation also includes standalone global sources that the repository-bounded scanner does not return. Global availability stays read-only in this project surface. The default This project filter keeps local installations in view, while the scope filter exposes global and managed sources. A window-scoped AppKit bridge owns section shortcuts because SwiftUI does not register unopened Menu contents immediately.
