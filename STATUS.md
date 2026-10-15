@@ -48,4 +48,4 @@ The Context project section is implemented and installed at `/Applications/Proje
 
 ## Last saved session
 
-2026-10-15 · Solo Codex · `codex/context-audit`. Context implementation is verified locally and installed. Passive Codex logs can lack component snapshots; the UI keeps this gap explicit. Private research and user-owned untracked config stay local.
+2026-10-15 · Solo Codex · `codex/context-audit`. Context implementation is verified locally and installed. Passive Codex logs can lack component snapshots; the UI keeps this gap explicit. Private research and user-owned untracked config stay local. Source review is [PR #17](https://github.com/vishmathpati/project-hub/pull/17) on the pushed branch.
