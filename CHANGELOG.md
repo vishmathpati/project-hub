@@ -7,6 +7,20 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [2026-10-15] · Codex
 
+### Changed
+
+- Projects open on Overview with session token charts, plain captured-text estimates and direct reduction previews.
+- Replaced the project rail and permanent skill library pane with compact navigation, grouped skill origins and Add skill.
+- Project Skills opens on local installations and includes read-only global availability with explicit scope and provider paths.
+
+### Fixed
+
+- Preserved section shortcuts before any menu is opened and isolated them from modal sheets.
+- Corrected skill editor directory routing, global versus inherited source labels, external additional-directory scope and captured-evidence dates.
+- Passed the final 685-test suite and verified the installed native build. Editor contents remain visually unverified because their inspection disconnects native automation.
+
+## [2026-10-15] · Codex
+
 ### Added
 
 - Added a project Context section with Claude and Codex session token charts, captured item estimates, source scope, search filters, and separate current defaults.

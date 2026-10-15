@@ -10,12 +10,13 @@ Project Hub is desktop-first: launch, Dock reopen, and menu-bar left click open 
 The top-level Skills page is now a deduped capability index with expandable global/project skill evidence, and Plugins has its own sidebar destination for bundle/component inventory.
 Plugin scan results now stay visible when navigating away from Plugins and returning within the active window.
 
-The Context project section is implemented and installed at `/Applications/ProjectHub.app`. It shows recent Claude and Codex sessions, disjoint token traffic, captured item estimates, source scope and provenance, search filters, current defaults, and previewed project-local reductions with exact undo. Open a project and select Context or press ⌘9. See `docs/context.md`. Raw session research remains local and outside the source review.
+Projects now open on Overview with Claude/Codex session usage, captured setup estimates and concrete reduction previews. Compact section navigation replaces the project rail. Skills opens on This project, groups each name once, expands exact project/global/managed origins and moves the library behind Add skill. Shared global sources are read-only and marked Available. The verified build is installed at `/Applications/ProjectHub.app`. See `docs/context.md`.
 
 ## Health
 
-- ✅ Working: desktop app shell, menu bar companion, redesigned Projects workspace, deduped Skills, Plugins inventory, MCP, Compatibility, Agents, Hooks, CLAUDE.md editor, Cursor Rules, Profile copy, per-project Context
-- ✅ Verified: Context full-suite run passed 667 tests; the final 28 focused reader/action tests passed after the last corrections. Three actual Claude controls matched recorded counters exactly. Native Claude/Codex charts and both apply/undo actions were exercised. The installed bundle passed signature, executable-path, and single-bundle checks. Existing unrelated compiler warnings remain.
+- ✅ Working: desktop app shell, menu bar companion, redesigned Projects workspace, deduped Skills, Plugins inventory, MCP, Compatibility, Agents, Hooks, CLAUDE.md editor, Cursor Rules, Profile copy, project Overview and grouped Skills
+- ✅ Verified: final full Swift suite passed 685 tests. Native checks passed Overview/token charts, grouped origins, global availability, Add skill search/provider choices, tool-search preview/cancel, first-open section shortcuts and sheet isolation. Installed signature, executable path and single-bundle checks passed. Existing unrelated compiler warnings remain.
+- ⚠️ Verification limit: native automation disconnects when inspecting the skill editor sheet; editor contents remain visually unverified.
 - ⚠️ Unknown: Live Mode (BeaconView, ContextEstimator, ProjectWatcher) — in source, needs verification
 - 🔧 In progress: Live Mode still needs a manual pass. Current-build roadmap except secondary providers is in `/Applications/ProjectHub.app`.
 - 🔴 Broken: (none known)
@@ -31,11 +32,11 @@ The Context project section is implemented and installed at `/Applications/Proje
 
 ## Recent Sessions (rolling — keep last 5)
 
+- 2026-10-15 · Codex: redesigned the project workspace into Overview-first navigation and grouped source-aware Skills, with a separate Add skill sheet, plain token/reduction copy and immediate section shortcuts. Final 685-test suite and installed native checks passed.
 - 2026-10-15 · Codex: implemented and installed Context with Claude/Codex session charts, qualified per-item estimates, global/project sources, filters, project-local action previews and exact undo. Full suite and final focused tests passed; native action writes were verified in a disposable project and undone.
 - 2026-08-18 · Claude Code: imported the approved Claude Design project and implemented every page in it (2a, 3a–3h). Builds clean against the Xcode Beta toolchain.
 - 2026-08-18 · Grok: finished current-build roadmap except secondary providers. Providers create/edit/enable, Usage remaining bars, MCP/Settings no longer run CompatibilityScanner on tab open. Reinstalled `/Applications/ProjectHub.app`.
 - 2026-06-19 · Codex: redesigned Skills into a deduped expandable capability index and added a separate Plugins inventory tab.
-- 2026-06-19 · Codex: fixed Plugins scan results resetting after navigation and rebuilt `/Applications/ProjectHub.app`.
 
 ## Next Actions
 
@@ -48,4 +49,4 @@ The Context project section is implemented and installed at `/Applications/Proje
 
 ## Last saved session
 
-2026-10-15 · Solo Codex · `codex/context-audit`. Context implementation is verified locally and installed. Passive Codex logs can lack component snapshots; the UI keeps this gap explicit. Private research and user-owned untracked config stay local. Source review is [PR #17](https://github.com/vishmathpati/project-hub/pull/17) on the pushed branch.
+2026-10-15 · Codex · `codex/context-audit`. Project workspace redesign and context copy are installed and verified. Editor-sheet visual inspection is limited by the native automation connection. Private research and user-owned configuration stay local. Source review is [PR #17](https://github.com/vishmathpati/project-hub/pull/17); source and session records are pushed on the feature branch.

@@ -24,7 +24,7 @@
 | Compat tab | MCP/plugins/skills/settings/auth/project compatibility diagnostics | Explicit single-flight scan, last result persisted to Application Support, plugin inventory, filters, MCP verify, safe-fix previews |
 | Usage tab | Remaining plan limits and last session | Claude 5-hour/weekly bars, Codex rate-limit bars, honest empty cards for Cursor/VS Code/Antigravity/OpenCode/Zed, Pi/Command Code last session |
 | Settings tab | App preferences | Launch at login, primary provider homes, skill search paths |
-| Project Detail | Per-project sections (9) | Health, Skills, Agents, MCP, Hooks, Instructions, Rules, Commands, Context |
+| Project Detail | Overview-first project workspace with compact section navigation | Overview, grouped Skills, MCP, and Configuration for Health, Agents, Hooks, Instructions, Rules, and Commands |
 | Live Mode panel | Floating always-on-top context monitor | Token usage ring, skill/MCP toggles, active project detection |
 
 **Features:**
@@ -36,13 +36,13 @@
 | Profile copy across projects | CopyProfileSheet | live |
 | Deduped skill availability browser | Skills tab | live |
 | Plugin bundle inventory | Plugins tab | live |
-| Per-project skill install / remove / edit | ProjectDetail › Skills | live |
+| Per-project skill install / remove / edit | ProjectDetail › Skills, with expandable origins and an Add skill library | live |
 | Per-project Claude sub-agent create / delete | ProjectDetail › Agents | live |
 | Global MCP server manager (10 primary tools) | MCP tab | live |
 | Providers page with per-provider controls | Providers tab | live |
 | Local usage bars (Claude/Codex) and last session | Usage tab | live |
 | Per-project MCP config view / edit | ProjectDetail › MCP | live |
-| Per-session token evidence and scoped context reductions | ProjectDetail › Context | live |
+| Per-session token evidence and scoped context reductions | ProjectDetail › Overview | live |
 | Per-project Cursor rules CRUD | ProjectDetail › Rules | live |
 | Per-project hooks viewer (read-only) | ProjectDetail › Hooks | live |
 | Per-project CLAUDE.md editor with templates | ProjectDetail › CLAUDE.md | live |
@@ -71,7 +71,10 @@
 | `CursorRule` | CursorRulesView.swift | .mdc rule: description, globs, alwaysApply, filename, body |
 | `ContextSnapshot` | ContextEstimator.swift | Live Mode: full token estimate — ephemeral, never persisted |
 | `ContextPage` | Core/ContextReader.swift | Recent Claude/Codex sessions, selected report, current defaults, coverage |
+| `ContextOpportunity` | Core/ContextOpportunity.swift | Evidence-based next action for the project Overview, with qualified captured-text estimates |
 | `ContextChangePreview` | Core/ContextActions.swift | Exact project-local settings preview and guarded undo receipt |
+| `ProjectSkillGroup` | Views/SkillsView.swift | One skill name with exact typed origins, provider support, and source scope |
+| `ProjectSkillOrigin` | Views/SkillsView.swift | Installed source or read-only global availability, with exact path, provider, and action eligibility |
 
 **Persistence:** Only `[Project]` persists — `UserDefaults` key `projecthub.projects.v1`. Everything else reads live from filesystem.
 Saved project rows are sanitized on load so old false positives such as tool homes, workspace containers, and top-level generic storage folders do not remain in the primary project list.
@@ -94,8 +97,10 @@ Claude usage bars optionally read `https://api.anthropic.com/api/oauth/usage` wi
 |------|---------------|
 | `Core/ConfigWriter.swift` | ALL MCP writes go through here — handles all 12 tools, both scopes, backup rotation |
 | `Core/ContextReader.swift` | Passive session discovery, normalized usage counters, captured text estimates and source scope |
+| `Core/ContextOpportunity.swift` | Choose a review or reduction action from recorded session evidence, without treating inventory as savings |
 | `Core/ContextActions.swift` | Project-local Claude tool search and standalone skill visibility previews, apply and exact undo |
-| `Views/ContextView.swift` | Session charts, scope and search filters, current defaults and reduction controls |
+| `Views/ContextView.swift` | Default project Overview, suggested context reductions, session charts, scope and search filters, and current defaults |
+| `Views/ProjectDetailView.swift` | Compact project navigation and a lifecycle-managed AppKit handler for window-specific section shortcuts |
 | `Stores/ProjectStore.swift` | Project persistence + 3-source discovery — all project-aware features depend on this |
 | `LiveMode/ContextEstimator.swift` | Token counting for Live Mode — reads JSONL + skill dirs |
 | `LiveMode/ProjectWatcher.swift` | Active Claude Code project detection — 2s poll, `lsof` cache |
