@@ -82,7 +82,7 @@ struct ProjectDetailView: View {
                     .background(HubTheme.bg)
             }
             FooterHintBar(hints: [
-                ("⌘1–8", "sections"),
+                ("⌘1–9", "sections"),
                 ("⌘R", "rescan"),
                 ("⌘⌫", "remove project"),
             ])
@@ -186,8 +186,6 @@ struct ProjectDetailView: View {
         }
     }
 
-    // MARK: - Sub-tab bar (two rows of four)
-
     private var subTabBar: some View {
         VStack(spacing: 4) {
             HStack(spacing: 4) {
@@ -201,6 +199,9 @@ struct ProjectDetailView: View {
                 subTabButton(title: "Instructions", icon: "doc.text.fill",   tag: 5)
                 subTabButton(title: "Rules",        icon: "list.bullet.rectangle", tag: 6)
                 subTabButton(title: "Commands",     icon: "slash.circle.fill", tag: 7)
+            }
+            HStack(spacing: 4) {
+                subTabButton(title: "Context", icon: "chart.bar.doc.horizontal", tag: 8)
             }
         }
         .padding(.horizontal, 12)
@@ -238,7 +239,7 @@ struct ProjectDetailView: View {
         VStack(alignment: .leading, spacing: 6) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("This folder").groupHeadingStyle(HubTheme.headingText)
-                Text("Everything here writes to files in this folder.")
+                Text("Project files and inherited configuration.")
                     .font(HubFont.railCaption)
                     .foregroundStyle(HubTheme.textDim)
                     .fixedSize(horizontal: false, vertical: true)
@@ -268,6 +269,7 @@ struct ProjectDetailView: View {
             ("Instructions", "doc.text.fill", 5),
             ("Rules", "list.bullet.rectangle", 6),
             ("Commands", "slash.circle.fill", 7),
+            ("Context", "chart.bar.doc.horizontal", 8),
         ]
     }
 
@@ -316,7 +318,9 @@ struct ProjectDetailView: View {
         case 4: HooksView(project: project)
         case 5: ClaudeMdView(project: project)
         case 6: CursorRulesView(project: project)
-        default: CommandsView(project: project, reloadTick: $reloadTick)
+        case 7: CommandsView(project: project, reloadTick: $reloadTick)
+        default: ContextView(project: project, reloadTick: reloadTick)
+            .id(project.path)
         }
     }
 

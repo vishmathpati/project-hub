@@ -5,6 +5,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ---
 
+## [2026-10-15] · Codex
+
+### Added
+
+- Added a project Context section with Claude and Codex session token charts, captured item estimates, source scope, search filters, and separate current defaults.
+- Added project-local Claude tool search and manual-only standalone skill previews with guarded apply and exact undo.
+- Added the native Run action and installed the verified Context build.
+
 ## [2026-06-19] · Codex
 
 ### Fixed

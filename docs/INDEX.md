@@ -24,7 +24,7 @@
 | Compat tab | MCP/plugins/skills/settings/auth/project compatibility diagnostics | Explicit single-flight scan, last result persisted to Application Support, plugin inventory, filters, MCP verify, safe-fix previews |
 | Usage tab | Remaining plan limits and last session | Claude 5-hour/weekly bars, Codex rate-limit bars, honest empty cards for Cursor/VS Code/Antigravity/OpenCode/Zed, Pi/Command Code last session |
 | Settings tab | App preferences | Launch at login, primary provider homes, skill search paths |
-| Project Detail | Per-project sub-tabs (7) | Health, Skills, Agents, MCP, Hooks, Instructions, Rules |
+| Project Detail | Per-project sections (9) | Health, Skills, Agents, MCP, Hooks, Instructions, Rules, Commands, Context |
 | Live Mode panel | Floating always-on-top context monitor | Token usage ring, skill/MCP toggles, active project detection |
 
 **Features:**
@@ -42,6 +42,7 @@
 | Providers page with per-provider controls | Providers tab | live |
 | Local usage bars (Claude/Codex) and last session | Usage tab | live |
 | Per-project MCP config view / edit | ProjectDetail › MCP | live |
+| Per-session token evidence and scoped context reductions | ProjectDetail › Context | live |
 | Per-project Cursor rules CRUD | ProjectDetail › Rules | live |
 | Per-project hooks viewer (read-only) | ProjectDetail › Hooks | live |
 | Per-project CLAUDE.md editor with templates | ProjectDetail › CLAUDE.md | live |
@@ -69,6 +70,8 @@
 | `HookEntry` | HooksView.swift | Hook: tool, event, command, matcher, scope — read-only |
 | `CursorRule` | CursorRulesView.swift | .mdc rule: description, globs, alwaysApply, filename, body |
 | `ContextSnapshot` | ContextEstimator.swift | Live Mode: full token estimate — ephemeral, never persisted |
+| `ContextPage` | Core/ContextReader.swift | Recent Claude/Codex sessions, selected report, current defaults, coverage |
+| `ContextChangePreview` | Core/ContextActions.swift | Exact project-local settings preview and guarded undo receipt |
 
 **Persistence:** Only `[Project]` persists — `UserDefaults` key `projecthub.projects.v1`. Everything else reads live from filesystem.
 Saved project rows are sanitized on load so old false positives such as tool homes, workspace containers, and top-level generic storage folders do not remain in the primary project list.
@@ -90,6 +93,9 @@ Claude usage bars optionally read `https://api.anthropic.com/api/oauth/usage` wi
 | File | Why it matters |
 |------|---------------|
 | `Core/ConfigWriter.swift` | ALL MCP writes go through here — handles all 12 tools, both scopes, backup rotation |
+| `Core/ContextReader.swift` | Passive session discovery, normalized usage counters, captured text estimates and source scope |
+| `Core/ContextActions.swift` | Project-local Claude tool search and standalone skill visibility previews, apply and exact undo |
+| `Views/ContextView.swift` | Session charts, scope and search filters, current defaults and reduction controls |
 | `Stores/ProjectStore.swift` | Project persistence + 3-source discovery — all project-aware features depend on this |
 | `LiveMode/ContextEstimator.swift` | Token counting for Live Mode — reads JSONL + skill dirs |
 | `LiveMode/ProjectWatcher.swift` | Active Claude Code project detection — 2s poll, `lsof` cache |
@@ -169,6 +175,13 @@ cursor-rules-per-project:
   flow: CursorRulesView → CursorRulesReader → <project>/.cursor/rules/*.mdc
   shared with: profile-copy (ProfileCopier)
 
+context-audit:
+  flow: ProjectDetailView → ContextView → ContextReader.read(projectPath:homes:selected:budget:)
+  data: ContextPage, selected ContextSessionReport, ContextCurrentDefaults, coverage
+  reads: Claude JSONL, read-only Codex SQLite and rollout files, current local configuration
+  writes: explicit preview → ContextActions → ConfigWriter.applyTextPreview, exact guarded undo
+  guards: no CLI/MCP/model startup; no inferred historical costs from current files; visible scan limits and Scan more
+
 live-mode:
   flow: LiveModeView → ProjectWatcher (2s poll) + lsof → ContextEstimator.estimate() → [~/.claude/projects/<enc>/*.jsonl, skill dirs, ~/.claude.json]
   data: ContextSnapshot (ephemeral)
@@ -178,6 +191,8 @@ live-mode:
 ```
 
 ### Guardrails
+
+The [Context guide](context.md) describes session traffic, captured text estimates, current source candidates, and reduction actions. Keep these quantities and their observation times distinct. Context scans must remain passive and local.
 
 1. **ConfigWriter is the only thing that writes MCP configs.** Never write config files directly from a view.
 2. **ProjectStore is the source of truth for the project list.** Never read UserDefaults for projects directly.

@@ -1,5 +1,5 @@
 # Status — Project Hub
-> Last updated: 2026-08-18 · Claude Code
+> Last updated: 2026-10-15 · Codex
 
 ## Current State
 
@@ -10,10 +10,12 @@ Project Hub is desktop-first: launch, Dock reopen, and menu-bar left click open 
 The top-level Skills page is now a deduped capability index with expandable global/project skill evidence, and Plugins has its own sidebar destination for bundle/component inventory.
 Plugin scan results now stay visible when navigating away from Plugins and returning within the active window.
 
+The Context project section is implemented and installed at `/Applications/ProjectHub.app`. It shows recent Claude and Codex sessions, disjoint token traffic, captured item estimates, source scope and provenance, search filters, current defaults, and previewed project-local reductions with exact undo. Open a project and select Context or press ⌘9. See `docs/context.md`. Raw session research remains local and outside the source review.
+
 ## Health
 
-- ✅ Working: desktop app shell, menu bar companion, redesigned Projects workspace, deduped Skills, Plugins inventory, MCP, Compatibility, Agents, Hooks, CLAUDE.md editor, Cursor Rules, Profile copy
-- ✅ Verified: full `swift test` is green (598 tests, 0 failures) and the redesigned release build is installed at `/Applications/ProjectHub.app`; main is pushed at the Skills/Plugins merge commit; installed `/Applications/ProjectHub.app` includes the plugin-scan persistence fix; current checkout passes `swift build`, focused plugin tests, full `swift test` baseline (586 tests), `git diff --check`, clean release build, code signing, and `/Applications` single-bundle check
+- ✅ Working: desktop app shell, menu bar companion, redesigned Projects workspace, deduped Skills, Plugins inventory, MCP, Compatibility, Agents, Hooks, CLAUDE.md editor, Cursor Rules, Profile copy, per-project Context
+- ✅ Verified: Context full-suite run passed 667 tests; the final 28 focused reader/action tests passed after the last corrections. Three actual Claude controls matched recorded counters exactly. Native Claude/Codex charts and both apply/undo actions were exercised. The installed bundle passed signature, executable-path, and single-bundle checks. Existing unrelated compiler warnings remain.
 - ⚠️ Unknown: Live Mode (BeaconView, ContextEstimator, ProjectWatcher) — in source, needs verification
 - 🔧 In progress: Live Mode still needs a manual pass. Current-build roadmap except secondary providers is in `/Applications/ProjectHub.app`.
 - 🔴 Broken: (none known)
@@ -29,13 +31,11 @@ Plugin scan results now stay visible when navigating away from Plugins and retur
 
 ## Recent Sessions (rolling — keep last 5)
 
+- 2026-10-15 · Codex: implemented and installed Context with Claude/Codex session charts, qualified per-item estimates, global/project sources, filters, project-local action previews and exact undo. Full suite and final focused tests passed; native action writes were verified in a disposable project and undone.
 - 2026-08-18 · Claude Code: imported the approved Claude Design project and implemented every page in it (2a, 3a–3h). Builds clean against the Xcode Beta toolchain.
 - 2026-08-18 · Grok: finished current-build roadmap except secondary providers. Providers create/edit/enable, Usage remaining bars, MCP/Settings no longer run CompatibilityScanner on tab open. Reinstalled `/Applications/ProjectHub.app`.
 - 2026-06-19 · Codex: redesigned Skills into a deduped expandable capability index and added a separate Plugins inventory tab.
 - 2026-06-19 · Codex: fixed Plugins scan results resetting after navigation and rebuilt `/Applications/ProjectHub.app`.
-- 2026-06-19 · Codex: committed, pushed, merged, and rebuilt the Skills/Plugins redesign into `/Applications/ProjectHub.app` with no duplicate installed bundles.
-- 2026-06-19 · Codex: redesigned the full desktop UI so it no longer looks like a stretched menu-bar panel; installed and verified `/Applications/ProjectHub.app`.
-- 2026-06-18 · Codex: promoted Project Hub from menu-bar-first to desktop-first app shell with compact menu-bar panel retained.
 
 ## Next Actions
 
@@ -45,3 +45,7 @@ Plugin scan results now stay visible when navigating away from Plugins and retur
 2. Confirm Usage remaining bars for Claude/Codex
 3. Live Mode still needs a manual pass
 4. Decide the Project Hub version number and landing page timing
+
+## Last saved session
+
+2026-10-15 · Solo Codex · `codex/context-audit`. Context implementation is verified locally and installed. Passive Codex logs can lack component snapshots; the UI keeps this gap explicit. Private research and user-owned untracked config stay local.

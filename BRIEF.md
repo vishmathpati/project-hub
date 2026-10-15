@@ -95,3 +95,13 @@ Rejected expanding product scope during the visual redesign. This change keeps t
 Skills and plugins are separate inventory concepts. The Skills page is the capability index: one row per unique skill, expandable into origins and project availability. The Plugins page is the bundle index: one row per plugin bundle, expandable into components, install evidence, state, and paths.
 
 Rejected keeping plugin evidence inside Compatibility only because users need a normal navigation surface for plugin bundles, not just diagnostics. Rejected showing long skill descriptions in the Skills list because the page's primary job is inventory and location, not documentation reading.
+
+---
+
+## v1.4 · 2026-10-15 · Codex
+
+Context is a project section for recent Claude and Codex sessions. It separates provider-reported session traffic and last input from reconstructed item estimates and current configuration projections. Missing evidence stays unknown. Captured skill, agent, tool, and instruction text retains source scope and observation time. Plugin or server groups do not add a second parent total.
+
+Current defaults is a separate inventory of candidates. Full skill-file size is an invocation estimate, not its startup catalog cost. Supported reductions write only the selected project's Claude settings after an exact preview. Tool deferral requires compatible model and proxy support. Standalone skills can become manual-only. Apply and undo reject stale files and unsafe targets. No numeric savings are promised.
+
+The reader uses passive local files and read-only Codex SQLite. It does not launch CLIs, MCP connections, hooks, or model requests. Scan limits remain visible and Scan more increases the selected-session budget. Large files and incomplete counters must not silently become complete totals. See `docs/context.md` for the user flow.
