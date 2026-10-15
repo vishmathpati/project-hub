@@ -4,6 +4,7 @@ import AppKit
 struct ContextView: View {
     let project: Project
     let reloadTick: Int
+    let navigate: (ProjectDetailView.ProjectSection) -> Void
 
     private enum Mode: String, CaseIterable {
         case session = "Session"
@@ -34,6 +35,8 @@ struct ContextView: View {
     @State private var searchText = ""
     @State private var scopeFilter: ScopeFilter = .all
     @State private var scanLevel = 1
+    @State private var showCoverageDetails = false
+    @State private var showCapturedDetails = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,6 +55,7 @@ struct ContextView: View {
                                     .background(HubTheme.badBg)
                                     .clipShape(RoundedRectangle(cornerRadius: HubTheme.Radius.control))
                             }
+                            opportunityHero(ContextOpportunity.choose(from: page))
                             coverageBanner(page.coverage)
                             if mode == .session {
                                 sessionContent(page)
@@ -63,7 +67,7 @@ struct ContextView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 } else if isLoading {
-                    ProgressView("Reading local session records…")
+                    ProgressView("Reading this project’s sessions…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ContentUnavailableView(
@@ -115,9 +119,9 @@ struct ContextView: View {
 
     private var toolbarTitle: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("Context")
+            Text("Overview")
                 .font(.system(size: 15, weight: .bold))
-            Text("Local evidence from Claude and Codex sessions")
+            Text("Local session evidence and project setup")
                 .font(HubFont.caption)
                 .foregroundStyle(HubTheme.textDim)
         }
@@ -155,33 +159,171 @@ struct ContextView: View {
         .help("Refresh context evidence")
     }
 
+    private func opportunityHero(_ opportunity: ContextOpportunity) -> some View {
+        HStack(alignment: .center, spacing: 14) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(HubTheme.accent)
+                .frame(width: 4, height: 66)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(opportunityTitle(opportunity))
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(HubTheme.textStrong)
+                    .lineLimit(2)
+                Text(opportunityEvidence(opportunity))
+                    .font(.system(size: 12))
+                    .foregroundStyle(HubTheme.textMid)
+                    .lineLimit(2)
+                Text(opportunityQualification(opportunity))
+                    .font(.system(size: 12))
+                    .foregroundStyle(HubTheme.textDim)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 16)
+
+            VStack(alignment: .trailing, spacing: 7) {
+                Button(opportunityActionTitle(opportunity)) {
+                    perform(opportunity)
+                }
+                .buttonStyle(.borderedProminent)
+                if case .reviewCapturedSetup = opportunity {
+                    Button("See captured sources") {
+                        mode = .session
+                        showCapturedDetails = true
+                    }
+                    .buttonStyle(.link)
+                    .font(.system(size: 12, weight: .medium))
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, minHeight: 96, alignment: .leading)
+        .background(HubTheme.accentBg.opacity(0.65))
+        .clipShape(RoundedRectangle(cornerRadius: HubTheme.Radius.card))
+        .overlay(
+            RoundedRectangle(cornerRadius: HubTheme.Radius.card)
+                .stroke(HubTheme.accent.opacity(0.22), lineWidth: 1)
+        )
+    }
+
+    private func opportunityTitle(_ opportunity: ContextOpportunity) -> String {
+        switch opportunity {
+        case .finishScan: "Finish reviewing session evidence"
+        case .reviewCapturedTools:
+            page?.selected?.session.key.provider == .claude
+                ? "Load tools only when needed"
+                : "Review tools adding context"
+        case .reviewCapturedSetup: "Choose what this project really needs"
+        case .reviewDefaults: "Choose the skills this project needs"
+        case .inspectSession:
+            page?.sessions.isEmpty == true ? "Review what this project can load" : "Find a lighter starting setup"
+        }
+    }
+
+    private func opportunityEvidence(_ opportunity: ContextOpportunity) -> String {
+        switch opportunity {
+        case .finishScan(let reason): reason
+        case .reviewCapturedTools(let count, let estimatedTokens, let observedAt):
+            "\(estimatedTokens.map { "About \(tokenText($0)) in captured MCP tool definitions" } ?? "\(count) captured MCP tool definition\(count == 1 ? "" : "s")") · Observed \(observedAt.formatted(date: .abbreviated, time: .shortened))."
+        case .reviewCapturedSetup(let count, let estimatedTokens, let observedAt):
+            "\(estimatedTokens.map { "About \(tokenText($0)) of captured setup text" } ?? "\(count) captured setup item\(count == 1 ? "" : "s")") · Observed \(observedAt.formatted(date: .abbreviated, time: .shortened))."
+        case .reviewDefaults(let count):
+            "\(count) global skill\(count == 1 ? " is" : "s are") available to this project."
+        case .inspectSession:
+            page?.sessions.isEmpty == true
+                ? "No matching local Claude or Codex session was found."
+                : "Compare equivalent future requests after a configuration change."
+        }
+    }
+
+    private func opportunityQualification(_ opportunity: ContextOpportunity) -> String {
+        switch opportunity {
+        case .finishScan:
+            "Open the coverage notes before drawing conclusions from this session."
+        case .reviewCapturedTools:
+            page?.selected?.session.key.provider == .claude
+                ? "Tool search can defer supported definitions from startup context. The reduction depends on your model."
+                : "The figure is captured text size. Review exact tool sources before changing the project."
+        case .reviewCapturedSetup:
+            "Review unrelated skills and instructions before your next session. The figure is captured text size, not guaranteed savings."
+        case .reviewDefaults:
+            "Review the exact sources before changing this project's defaults."
+        case .inspectSession:
+            page?.sessions.isEmpty == true
+                ? "Project skills and defaults can still be reviewed without a transcript."
+                : "Current file sizes cannot predict a context reduction."
+        }
+    }
+
+    private func opportunityActionTitle(_ opportunity: ContextOpportunity) -> String {
+        switch opportunity {
+        case .finishScan: "Review coverage"
+        case .reviewCapturedTools:
+            page?.selected?.session.key.provider == .claude ? "Preview tool search" : "Review MCP"
+        case .reviewCapturedSetup: "Review defaults"
+        case .reviewDefaults: "Review skills"
+        case .inspectSession: page?.sessions.isEmpty == true ? "Review skills" : "Review defaults"
+        }
+    }
+
+    private func perform(_ opportunity: ContextOpportunity) {
+        switch opportunity {
+        case .finishScan:
+            showCoverageDetails = true
+        case .reviewCapturedTools:
+            if page?.selected?.session.key.provider == .claude {
+                mode = .defaults
+                prepare(.enableClaudeToolSearch(projectPath: project.path))
+            } else {
+                navigate(.mcp)
+            }
+        case .reviewCapturedSetup:
+            mode = .defaults
+        case .reviewDefaults:
+            navigate(.skills)
+        case .inspectSession:
+            if page?.sessions.isEmpty == true {
+                navigate(.skills)
+            } else {
+                mode = .defaults
+            }
+        }
+    }
+
     @ViewBuilder
     private func coverageBanner(_ coverage: ContextCoverage) -> some View {
         if !coverage.issues.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Label("Partial coverage", systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(HubTheme.warn)
-                ForEach(coverage.issues.prefix(4)) { issue in
-                    Text("\(issue.kind.rawValue): \(issue.detail)")
+            DisclosureGroup(isExpanded: $showCoverageDetails) {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(coverage.issues) { issue in
+                        Text("\(issue.kind.rawValue): \(issue.detail)")
+                            .font(HubFont.caption)
+                            .foregroundStyle(HubTheme.textDim)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if coverage.issues.contains(where: { $0.kind == .byteBudget || $0.kind == .recordBudget }) {
+                        Button("Scan more") {
+                            scanLevel &+= 1
+                            localReload &+= 1
+                        }
+                        .help("Increase the selected-session byte and retained-record budgets, then scan again")
+                    }
+                }
+                .padding(.top, 7)
+            } label: {
+                HStack {
+                    Label("Partial coverage", systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(HubTheme.warn)
+                    Spacer()
+                    Text("\(coverage.issues.count) note\(coverage.issues.count == 1 ? "" : "s")")
                         .font(HubFont.caption)
                         .foregroundStyle(HubTheme.textDim)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if coverage.issues.count > 4 {
-                    Text("+ \(coverage.issues.count - 4) more coverage notes")
-                        .font(HubFont.caption)
-                        .foregroundStyle(HubTheme.textFaint)
-                }
-                if coverage.issues.contains(where: { $0.kind == .byteBudget || $0.kind == .recordBudget }) {
-                    Button("Scan more") {
-                        scanLevel &+= 1
-                        localReload &+= 1
-                    }
-                    .help("Increase the selected-session byte and retained-record budgets, then scan again")
                 }
             }
-            .padding(12)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(HubTheme.warn.opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: HubTheme.Radius.card))
@@ -193,7 +335,7 @@ struct ContextView: View {
         if page.sessions.isEmpty {
             emptySessions
         } else {
-            sessionPicker(page.sessions)
+            sessionPicker(page)
             if let report = page.selected {
                 usageSummary(report)
                 usageBar(report.usage.cumulative)
@@ -218,18 +360,21 @@ struct ContextView: View {
         .hubCard()
     }
 
-    private func sessionPicker(_ sessions: [ContextSessionSummary]) -> some View {
+    private func sessionPicker(_ page: ContextPage) -> some View {
         HStack(spacing: 10) {
             Text("Recent session")
                 .font(.system(size: 12, weight: .semibold))
             Picker("Recent session", selection: $selectedSession) {
-                ForEach(sessions) { session in
+                ForEach(page.sessions) { session in
                     Text(sessionLabel(session)).tag(Optional(session.key))
                 }
             }
             .labelsHidden()
             .frame(maxWidth: 520)
             Spacer()
+            Text("Scanned \(page.scannedAt.formatted(date: .omitted, time: .shortened))")
+                .font(HubFont.caption)
+                .foregroundStyle(HubTheme.textDim)
             if isLoading { ProgressView().controlSize(.small) }
         }
     }
@@ -246,12 +391,12 @@ struct ContextView: View {
         metricCard(
             title: report.coverage.isComplete ? "Last request input" : "Last scanned input",
             value: report.usage.lastRequest.map { tokenText($0.inputTotal) } ?? "Unknown",
-            detail: "Fresh + cache write + cache read"
+            detail: "Includes fresh and reused input"
         )
         metricCard(
             title: report.coverage.isComplete ? "Session traffic" : "Scanned session traffic",
             value: report.usage.cumulative.map { tokenText($0.total) } ?? "Unknown",
-            detail: "Deduplicated provider counters"
+            detail: "Input and output across recorded requests"
         )
     }
 
@@ -321,7 +466,7 @@ struct ContextView: View {
     private func usageLegend(_ usage: ContextUsageSegments) -> some View {
         legend("Fresh", usage.freshInput, color: HubTheme.accent)
         legend("Cache write", usage.cacheWrite, color: .orange)
-        legend("Cache read", usage.cacheRead, color: .purple)
+        legend("Reused from cache", usage.cacheRead, color: .purple)
         legend("Output", usage.output, color: .green)
     }
 
@@ -335,42 +480,55 @@ struct ContextView: View {
             if rhs.isEmpty { return false }
             return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
         }
-        return VStack(alignment: .leading, spacing: 10) {
-            HubSectionHeading("Latest captured items", count: filtered.count)
-            Text("These are reconstructed from text captured in the selected session. They are estimates at the shown observation time, not a measured current context window.")
-                .font(HubFont.caption)
-                .foregroundStyle(HubTheme.textDim)
-                .fixedSize(horizontal: false, vertical: true)
+        return DisclosureGroup(isExpanded: $showCapturedDetails) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("These rows reconstruct text captured in the selected session. They are estimates at the shown observation time, not a measured current context window.")
+                    .font(HubFont.caption)
+                    .foregroundStyle(HubTheme.textDim)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            if filtered.isEmpty {
-                Text(report.contributions.isEmpty
-                     ? "This session did not record supported prompt catalogs or instruction snapshots."
-                     : "No captured items match the current search and scope filter.")
-                    .font(HubFont.body)
-                    .foregroundStyle(HubTheme.textFaint)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .hubCard()
-            } else {
-                LazyVStack(spacing: 0) {
-                    ForEach(Array(owners.enumerated()), id: \.element) { ownerIndex, owner in
-                        if ownerIndex > 0 { Divider() }
-                        if !owner.isEmpty {
-                            Text("Plugin or server · \(owner)")
-                                .font(HubFont.groupHeading)
-                                .foregroundStyle(HubTheme.textDim)
-                                .padding(.horizontal, 12)
-                                .padding(.top, 10)
-                        }
-                        ForEach(groups[owner] ?? []) { contribution in
-                            contributionRow(contribution)
-                            if contribution.id != groups[owner]?.last?.id { Divider().padding(.leading, 12) }
+                if filtered.isEmpty {
+                    Text(report.contributions.isEmpty
+                         ? "This session did not record supported prompt catalogs or instruction snapshots."
+                         : "No captured items match the current search and scope filter.")
+                        .font(HubFont.body)
+                        .foregroundStyle(HubTheme.textFaint)
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .hubCard()
+                } else {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(owners.enumerated()), id: \.element) { ownerIndex, owner in
+                            if ownerIndex > 0 { Divider() }
+                            if !owner.isEmpty {
+                                Text("Plugin or server · \(owner)")
+                                    .font(HubFont.groupHeading)
+                                    .foregroundStyle(HubTheme.textDim)
+                                    .padding(.horizontal, 12)
+                                    .padding(.top, 10)
+                            }
+                            ForEach(groups[owner] ?? []) { contribution in
+                                contributionRow(contribution)
+                                if contribution.id != groups[owner]?.last?.id { Divider().padding(.leading, 12) }
+                            }
                         }
                     }
+                    .hubCard()
                 }
-                .hubCard()
+            }
+            .padding(.top, 8)
+        } label: {
+            HStack {
+                Text("Captured source details")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Text("\(filtered.count) item\(filtered.count == 1 ? "" : "s")")
+                    .font(HubFont.caption)
+                    .foregroundStyle(HubTheme.textDim)
             }
         }
+        .padding(12)
+        .hubCard()
     }
 
     private func contributionRow(_ contribution: ContextContribution) -> some View {
@@ -679,10 +837,10 @@ struct ContextView: View {
         let maximum = ranked.first?.value ?? 0
         return VStack(alignment: .leading, spacing: 9) {
             HStack {
-                Text("Approximate captured text by kind")
+                Text("Captured text estimates")
                     .font(.system(size: 12, weight: .semibold))
                 Spacer()
-                Text("Reconstructed · partial")
+                Text("Estimates · recorded sources only")
                     .font(HubFont.caption)
                     .foregroundStyle(HubTheme.textDim)
             }
@@ -693,7 +851,7 @@ struct ContextView: View {
             } else {
                 ForEach(ranked, id: \.key) { kind, amount in
                     HStack(spacing: 10) {
-                        Text(kind.rawValue)
+                        Text(chartKindTitle(kind))
                             .font(HubFont.caption)
                             .foregroundStyle(HubTheme.textMid)
                             .frame(width: 92, alignment: .leading)
@@ -710,7 +868,7 @@ struct ContextView: View {
                     }
                 }
             }
-            Text("Bars compare only captured reconstructed text. They do not represent total context or window utilization.")
+            Text("Estimated sizes of setup text recorded in this session. Some sources may be missing.")
                 .font(HubFont.caption)
                 .foregroundStyle(HubTheme.textFaint)
         }
@@ -723,6 +881,17 @@ struct ContextView: View {
         guard !query.isEmpty else { return true }
         return name.localizedCaseInsensitiveContains(query)
             || (path?.localizedCaseInsensitiveContains(query) ?? false)
+    }
+
+    private func chartKindTitle(_ kind: ContextContributionKind) -> String {
+        switch kind {
+        case .skill: "Skills"
+        case .agent: "Agents"
+        case .mcpSchema: "MCP tools"
+        case .mcpInstructions: "MCP server notes"
+        case .instruction: "Instructions"
+        case .toolSchema: "Tool definitions"
+        }
     }
 
     private func valueText(_ value: ContextTokenValue) -> String {

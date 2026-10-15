@@ -1,7 +1,7 @@
 import SwiftUI
+import AppKit
 
 // MARK: - Skills sub-tab (inside ProjectDetailView)
-// Left: installed skills in this project. Right: global library.
 
 struct SkillsView: View {
     let project: Project
@@ -10,81 +10,85 @@ struct SkillsView: View {
     @EnvironmentObject var skillStore: SkillStore
     @EnvironmentObject var projectStore: ProjectStore
 
-    @State private var editingSkill: InstalledSkill? = nil
+    private enum ScopeFilter: String, CaseIterable {
+        case all = "All"
+        case project = "This project"
+        case inherited = "Inherited"
+        case global = "Global"
+        case managed = "Providers"
+
+        func includes(_ group: ProjectSkillGroup) -> Bool {
+            switch self {
+            case .all:
+                true
+            case .project:
+                group.originDetails.contains { $0.scope == .project || $0.scope == .projectPrivate }
+            case .inherited:
+                group.originDetails.contains { $0.scope == .ancestor }
+            case .global:
+                group.originDetails.contains { $0.scope == .global }
+            case .managed:
+                group.originDetails.contains { $0.scope == .managed }
+            }
+        }
+    }
+
+    @State private var searchText = ""
+    @State private var scopeFilter: ScopeFilter = .project
+    @State private var expandedSkillID: String?
+    @State private var editingSkill: InstalledSkill?
+    @State private var showLibrary = false
 
     var body: some View {
         let installed = skillStore.cachedInstalledSkills(for: project.path)
-        let globals   = skillStore.globalSkills
-        let installedNames = SkillStore.nameIndex(installed ?? [])
-        let otherProjects = projectStore.projects.filter { $0.path != project.path }
-        // Split by where the skill actually sits. A skill reached by walking up to
-        // a parent folder is available here but is not installed here, and listing
-        // both together made a project with 7 skills look like it had 160.
-        let ownSkills = (installed ?? []).filter { $0.scopeLabel == "Project" || $0.scopeLabel == "Private" }
-        let inheritedSkills = (installed ?? []).filter { $0.scopeLabel != "Project" && $0.scopeLabel != "Private" }
-
-        HStack(alignment: .top, spacing: 0) {
-            // MARK: Left — Installed
-            VStack(alignment: .leading, spacing: 0) {
-                sectionHeader(title: "In this project",
-                              count: installed == nil ? nil : ownSkills.count,
-                              color: .green)
-                Divider()
-                // One scroll container for every state. Swapping between a plain
-                // VStack while loading and a ScrollView once loaded replaced the
-                // whole subtree, which re-anchored the pane from centred to top and
-                // reset the scroll offset in a single frame.
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 4) {
-                        if let installed {
-                            if installed.isEmpty {
-                                emptyInstalled
-                            } else {
-                                ForEach(ownSkills) { skill in
-                                    installedRow(skill, projectPath: project.path, copyTargets: otherProjects)
-                                }
-                                if !inheritedSkills.isEmpty {
-                                    inheritedHeading(inheritedSkills.count)
-                                    ForEach(inheritedSkills) { skill in
-                                        installedRow(skill, projectPath: project.path, copyTargets: otherProjects)
-                                    }
-                                }
-                            }
-                        } else {
-                            scanningInstalled
-                        }
-                    }
-                    .padding(8)
-                }
-            }
-            .frame(maxWidth: .infinity)
-
-            Divider()
-
-            // MARK: Right — Global library
-            VStack(alignment: .leading, spacing: 0) {
-                sectionHeader(title: "Library", count: globals.count, color: .cyan)
-                Divider()
-                if globals.isEmpty {
-                    emptyLibrary
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 4) {
-                            ForEach(globals) { skill in
-                                globalRow(skill,
-                                          alreadyInstalled: installed.map { _ in installedNames.contains(skill) },
-                                          projectPath: project.path)
-                            }
-                        }
-                        .padding(8)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity)
+        let groups = installed.map {
+            ProjectSkillGroup.mergedGroups(
+                installed: $0,
+                globalSkills: skillStore.globalSkills,
+                projectPath: project.path
+            )
+        } ?? []
+        let visible = groups.filter { group in
+            scopeFilter.includes(group) && matchesSearch(group)
         }
-        .frame(maxHeight: .infinity)
-        .task(id: project.path) {
+
+        VStack(spacing: 0) {
+            toolbar(groups: groups, visibleCount: visible.count)
+            Rectangle().fill(HubTheme.line).frame(height: 1)
+
+            if installed == nil {
+                loadingState
+            } else if visible.isEmpty {
+                emptyState(hasSkills: !groups.isEmpty)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(visible.enumerated()), id: \.element.id) { index, group in
+                            if index > 0 { HubRowSeparator() }
+                            skillRow(group)
+                        }
+                    }
+                    .hubCard()
+                    .padding(HubTheme.contentPadding)
+                }
+            }
+        }
+        .background(HubTheme.bg)
+        .task(id: "\(project.path)#\(reloadTick)") {
             await skillStore.loadInstalledSkills(for: project.path)
+        }
+        .sheet(isPresented: $showLibrary) {
+            ProjectSkillLibrarySheet(project: project)
+                .environmentObject(skillStore)
+        }
+        .sheet(item: $editingSkill) { skill in
+            SkillEditorSheet(
+                skillPath: skill.path,
+                onSaved: {
+                    skillStore.invalidateInstalledSkills(for: project.path)
+                    skillStore.refresh()
+                }
+            )
         }
         .alert("Couldn't update skill", isPresented: Binding(
             get: { skillStore.lastError != nil },
@@ -94,280 +98,414 @@ struct SkillsView: View {
         } message: {
             Text(skillStore.lastError ?? "")
         }
-        .sheet(item: $editingSkill) { skill in
-            SkillEditorSheet(
-                skillPath: skill.claudePath ?? skill.codexPath ?? "",
-                onSaved: {
-                    skillStore.invalidateInstalledSkills(for: project.path)
-                    skillStore.refresh()
+    }
+
+    private func toolbar(groups: [ProjectSkillGroup], visibleCount: Int) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                skillHeading(groups: groups, visibleCount: visibleCount)
+                Spacer(minLength: 12)
+                searchField
+                scopePicker
+                addSkillButton
+            }
+            VStack(alignment: .leading, spacing: 9) {
+                HStack {
+                    skillHeading(groups: groups, visibleCount: visibleCount)
+                    Spacer(minLength: 8)
+                    addSkillButton
                 }
-            )
-        }
-    }
-
-    // MARK: - Section header
-
-    /// Skills reached through a parent folder are available here but belong to
-    /// something else, so they sit below a divider the reader cannot miss.
-    private func inheritedHeading(_ count: Int) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Divider().padding(.vertical, 6)
-            Text("Also available from parent folders")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.secondary)
-            Text("\(count) skill\(count == 1 ? "" : "s") this project inherits rather than owns.")
-                .font(.system(size: 9))
-                .foregroundColor(.secondary)
-        }
-        .padding(.horizontal, 2)
-        .padding(.bottom, 2)
-    }
-
-    private func sectionHeader(title: String, count: Int?, color: Color) -> some View {
-        HStack(spacing: 6) {
-            Text(title)
-                .font(.system(size: 11, weight: .bold))
-                .foregroundColor(.primary)
-            Text(count.map(String.init) ?? "—")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundColor(color)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 1)
-                .background(color.opacity(0.15))
-                .clipShape(Capsule())
-            Spacer()
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-    }
-
-    // MARK: - Installed row
-
-    private func installedRow(_ skill: InstalledSkill, projectPath: String, copyTargets: [Project]) -> some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(skill.name)
-                    .font(.system(size: 12, weight: .semibold))
-                    .lineLimit(1)
-                HStack(spacing: 4) {
-                    ForEach(skill.toolLabels, id: \.self) { label in
-                        sourcePill(label, color: toolColor(label))
-                    }
-                    sourcePill(skill.scopeLabel, color: .secondary)
-                    sourcePill(skill.state.label, color: stateColor(skill.state))
-                    ForEach(skill.diagnostics, id: \.self) { diagnostic in
-                        sourcePill(diagnostic, color: .orange)
-                    }
-                }
-                if !skill.sourceLabel.isEmpty {
-                    Text(skill.sourceLabel)
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
+                HStack(spacing: 8) {
+                    searchField
+                    scopePicker
                 }
             }
-            Spacer()
-            Button(action: {
-                skillStore.copyAcrossProviders(
-                    Skill(
-                        name: skill.name,
-                        description: skill.description,
-                        triggers: [],
-                        source: .claudeGlobal,
-                        path: skill.path
-                    ),
-                    in: projectPath
-                )
-            }) {
-                Image(systemName: "square.on.square")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, HubTheme.contentPadding)
+        .padding(.vertical, 10)
+        .background(HubTheme.panelBg)
+    }
+
+    private func skillHeading(groups: [ProjectSkillGroup], visibleCount: Int) -> some View {
+        let projectCount = groups.filter { group in
+            group.originDetails.contains { $0.scope == .project || $0.scope == .projectPrivate }
+        }.count
+        let globalCount = groups.filter { group in
+            group.originDetails.contains { $0.scope == .global }
+        }.count
+        let managedCount = groups.filter { group in
+            group.originDetails.contains { $0.scope == .managed }
+        }.count
+        return VStack(alignment: .leading, spacing: 2) {
+            Text("Skills")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(HubTheme.textStrong)
+            Text("\(visibleCount) shown · \(projectCount) project · \(globalCount) global · \(managedCount) managed · \(groups.count) unique")
+                .font(.system(size: 12))
+                .foregroundStyle(HubTheme.textDim)
+        }
+    }
+
+    private var searchField: some View {
+        TextField("Search skills", text: $searchText)
+            .textFieldStyle(.roundedBorder)
+            .frame(minWidth: 150, idealWidth: 210, maxWidth: 240)
+    }
+
+    private var scopePicker: some View {
+        Picker("Skill scope", selection: $scopeFilter) {
+            ForEach(ScopeFilter.allCases, id: \.self) { filter in
+                Text(filter.rawValue).tag(filter)
             }
-            .buttonStyle(.plain)
-            .help("Copy this skill into Claude, Codex, and Cursor folders")
-            Menu {
-                ForEach(copyTargets) { target in
-                    Button(target.displayName) {
-                        skillStore.copyInstalled(skill, to: target.path)
-                    }
+        }
+        .labelsHidden()
+        .frame(width: 138)
+    }
+
+    private var addSkillButton: some View {
+        Button {
+            showLibrary = true
+        } label: {
+            Label("Add skill", systemImage: "plus")
+                .font(.system(size: 12, weight: .semibold))
+        }
+        .buttonStyle(.borderedProminent)
+        .accessibilityLabel("Add skill to \(project.displayName)")
+    }
+
+    private func skillRow(_ group: ProjectSkillGroup) -> some View {
+        let expanded = expandedSkillID == group.id
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(HubTheme.disclosureAnimation) {
+                    expandedSkillID = expanded ? nil : group.id
                 }
             } label: {
-                Image(systemName: "folder.badge.plus")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-            }
-            .menuStyle(.borderlessButton)
-            .frame(width: 22)
-            .help("Copy this skill to another project")
-            if skill.canEdit {
-                Button(action: { editingSkill = skill }) {
-                    Image(systemName: "pencil")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("Edit skill")
-            }
-            if skill.canRemove {
-                Button(action: {
-                    skillStore.remove(skill: skill, from: projectPath)
-                }) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 11))
-                        .foregroundColor(.red.opacity(0.8))
-                }
-                .buttonStyle(.plain)
-                .help("Remove this skill")
-            } else if let reason = skill.readOnlyReason {
-                Image(systemName: "lock")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                    .help(reason)
-            }
-        }
-        .padding(8)
-        .background(HubTheme.raised)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8)
-            .stroke(HubTheme.line.opacity(0.35), lineWidth: 0.5))
-    }
+                HStack(alignment: .center, spacing: 10) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(HubTheme.textFaint)
+                        .frame(width: 12)
 
-    // MARK: - Global library row
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(group.name)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(HubTheme.text)
+                            .lineLimit(1)
+                    }
 
-    /// `alreadyInstalled` is nil until the project scan lands. Treating that as false
-    /// would offer Install for a skill that is already there.
-    private func globalRow(_ skill: Skill, alreadyInstalled: Bool?, projectPath: String) -> some View {
-        let canInstall = !skillStore.installTargets(for: skill, projectPath: projectPath).isEmpty
-        let installed = alreadyInstalled == true
-        let undecided = alreadyInstalled == nil
-        let inert = installed || undecided || !canInstall
-        return HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(skill.name)
-                    .font(.system(size: 12, weight: .semibold))
-                    .lineLimit(1)
-                sourcePill(skill.source.label, color: sourceColor(skill.source))
-            }
-            Spacer()
-            Button(action: {
-                skillStore.install(skill: skill, to: projectPath)
-            }) {
-                Text(installed ? "Installed" : installLabel(for: skill))
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(inert ? .secondary : .white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(inert ? Color.secondary.opacity(0.15) : HubTheme.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .opacity(undecided ? 0.5 : 1)
+                    Spacer(minLength: 12)
+                    ProviderTileRow(toolIDs: ProviderFamily.uniqueTileIDs(from: group.providerIDs))
+                    Text(group.scopeSummary)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(HubTheme.textMid)
+                        .lineLimit(1)
+                    StatusLabel(
+                        status: group.hasInstalledOrigin ? status(for: group.state) : .neutral,
+                        text: group.availabilityLabel,
+                        font: HubFont.mono(9)
+                    )
+                }
+                .padding(.horizontal, HubTheme.contentPadding)
+                .frame(minHeight: HubTheme.listRowHeight)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(inert)
-            .help(canInstall ? installLabel(for: skill) : "No safe primary-tool install target for this skill source")
+            .accessibilityLabel("\(expanded ? "Collapse" : "Expand") \(group.name), \(group.scopeSummary)")
+
+            if expanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let description = group.description, !description.isEmpty {
+                        Text(description)
+                            .font(.system(size: 12))
+                            .foregroundStyle(HubTheme.textMid)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    ForEach(group.originDetails) { origin in
+                        originRow(origin)
+                    }
+                }
+                .padding(.horizontal, HubTheme.contentPadding)
+                .padding(.bottom, 12)
+            }
         }
-        .padding(8)
-        .background(HubTheme.raised)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8)
-            .stroke(HubTheme.line.opacity(0.35), lineWidth: 0.5))
     }
 
-    // MARK: - Empty states
+    private func originRow(_ origin: ProjectSkillOrigin) -> some View {
+        let skill = origin.installed
+        let copyTargets = projectStore.projects.filter { $0.path != project.path }
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 7) {
+                        Text(origin.scope.title)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(HubTheme.text)
+                        Text(skill.sourceLabel)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(HubTheme.textMid)
+                        StatusLabel(
+                            status: origin.availability == .available ? .neutral : status(for: skill.state),
+                            text: origin.statusLabel,
+                            font: HubFont.mono(9)
+                        )
+                    }
+                    Text(skill.path)
+                        .font(HubFont.machine)
+                        .foregroundStyle(HubTheme.textFaint)
+                        .lineLimit(2)
+                        .textSelection(.enabled)
+                }
+                Spacer(minLength: 10)
+                ProviderTileRow(toolIDs: ProviderFamily.uniqueTileIDs(from: origin.providerIDs))
+            }
 
-    private var scanningInstalled: some View {
-        VStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
-            Text("Reading installed skills…")
-                .font(.system(size: 12, weight: .semibold))
-            Text("Scanning this project's skill folders.")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
+            HStack(spacing: 12) {
+                if origin.canEdit {
+                    Button("Edit") { editingSkill = skill }
+                        .buttonStyle(.link)
+                        .accessibilityLabel("Edit \(skill.name), \(skill.sourceLabel), \(origin.scope.title), \(skill.path)")
+                }
+                Button("Reveal") { reveal(skill.path) }
+                    .buttonStyle(.link)
+                    .accessibilityLabel("Reveal \(skill.name), \(skill.sourceLabel), \(origin.scope.title), \(skill.path) in Finder")
+                Menu("Copy") {
+                    ForEach(copyTargets) { target in
+                        Button("Copy to \(target.displayName)") {
+                            if let source = origin.sourceSkill {
+                                skillStore.install(skill: source, to: target.path)
+                            } else {
+                                skillStore.copyInstalled(skill, to: target.path)
+                            }
+                        }
+                    }
+                    Button("Copy into all tool folders in this project") {
+                        skillStore.copyAcrossProviders(origin.sourceSkill ?? copySource(for: skill), in: project.path)
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .accessibilityLabel("Copy \(skill.name), \(skill.sourceLabel), \(origin.scope.title), \(skill.path)")
+                if origin.canRemove {
+                    Button("Remove", role: .destructive) {
+                        skillStore.remove(skill: skill, from: project.path)
+                    }
+                    .buttonStyle(.link)
+                    .accessibilityLabel("Remove \(skill.name), \(skill.sourceLabel), \(origin.scope.title), \(skill.path)")
+                } else if let reason = skill.readOnlyReason ?? availableSourceNote(origin) {
+                    Text(reason)
+                        .font(.system(size: 12))
+                        .foregroundStyle(HubTheme.textDim)
+                }
+                Spacer(minLength: 0)
+            }
+            .font(.system(size: 12, weight: .medium))
+        }
+        .padding(10)
+        .background(HubTheme.bg.opacity(0.55))
+        .clipShape(RoundedRectangle(cornerRadius: HubTheme.Radius.control))
+        .overlay(RoundedRectangle(cornerRadius: HubTheme.Radius.control).stroke(HubTheme.line.opacity(0.35), lineWidth: 0.5))
+    }
+
+    private var loadingState: some View {
+        VStack(spacing: 9) {
+            ProgressView().controlSize(.small)
+            Text("Reading project skills")
+                .font(.system(size: 13, weight: .semibold))
+            Text("Checking exact project, inherited, global, and provider origins.")
+                .font(.system(size: 12))
+                .foregroundStyle(HubTheme.textDim)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(20)
     }
 
-    private var emptyInstalled: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "book.closed")
-                .font(.system(size: 22))
-                .foregroundColor(.secondary)
-            Text("No skills installed")
-                .font(.system(size: 12, weight: .semibold))
-            Text("Install from the library →")
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(20)
+    private func emptyState(hasSkills: Bool) -> some View {
+        ContentUnavailableView(
+            hasSkills ? "No matching skills" : "No project skills",
+            systemImage: "book.closed",
+            description: Text(hasSkills ? "Try a different search or scope." : "Use Add skill to choose from your library.")
+        )
     }
 
-    private var emptyLibrary: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "tray")
-                .font(.system(size: 22))
-                .foregroundColor(.secondary)
-            Text("No global skills")
-                .font(.system(size: 12, weight: .semibold))
-            Text("Add skills to ~/.claude/skills or ~/.agents/skills.")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(20)
+    private func matchesSearch(_ group: ProjectSkillGroup) -> Bool {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return true }
+        return group.name.localizedCaseInsensitiveContains(query)
+            || (group.description?.localizedCaseInsensitiveContains(query) ?? false)
+            || group.originDetails.contains {
+                $0.installed.sourceLabel.localizedCaseInsensitiveContains(query)
+                    || $0.installed.path.localizedCaseInsensitiveContains(query)
+            }
     }
 
-    // MARK: - Helpers
-
-    private func sourcePill(_ label: String, color: Color) -> some View {
-        Text(label)
-            .font(.system(size: 9, weight: .bold))
-            .foregroundColor(color)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1)
-            .background(color.opacity(0.12))
-            .clipShape(Capsule())
-    }
-
-    private func sourceColor(_ source: SkillSource) -> Color {
-        switch source {
-        case .claudeGlobal: return .orange
-        case .codexGlobal:  return .purple
-        case .codexAdmin:   return .indigo
-        case .codexManaged: return .teal
-        case .cursorGlobal: return .blue
-        case .providerGlobal: return .mint
-        }
-    }
-
-    private func toolColor(_ label: String) -> Color {
-        if label.contains("Claude") { return .orange }
-        if label.contains("Codex") { return .purple }
-        return .secondary
-    }
-
-    private func stateColor(_ state: InstalledSkill.State) -> Color {
+    private func status(for state: InstalledSkill.State) -> HubStatus {
         switch state {
-        case .active: return .green
-        case .disabled: return .secondary
-        case .limited: return .yellow
-        case .invalid: return .red
+        case .active: .ok
+        case .limited: .warn
+        case .invalid: .bad
+        case .disabled: .neutral
         }
+    }
+
+    private func copySource(for skill: InstalledSkill) -> Skill {
+        let source: SkillSource = skill.codexPath != nil ? .codexGlobal
+            : skill.claudePath != nil ? .claudeGlobal : .cursorGlobal
+        return Skill(name: skill.name, description: skill.description, triggers: [], source: source, path: skill.path)
+    }
+
+    private func availableSourceNote(_ origin: ProjectSkillOrigin) -> String? {
+        guard origin.availability == .available else { return nil }
+        return origin.scope == .managed
+            ? "Available globally and managed by the provider. Reveal or copy this source."
+            : "Shared global source. Reveal it, or add a project link."
+    }
+
+    private func reveal(_ path: String) {
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    }
+}
+
+private struct ProjectSkillLibrarySheet: View {
+    let project: Project
+
+    @EnvironmentObject private var skillStore: SkillStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+
+    var body: some View {
+        let installed = skillStore.cachedInstalledSkills(for: project.path) ?? []
+        let projectInstalled = ProjectSkillGroup.projectInstalledOrigins(from: installed, projectPath: project.path)
+        let installedNames = SkillStore.nameIndex(projectInstalled)
+        let groups = skillStore.globalSkillGroups.filter(matchesSearch)
+
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Add skill")
+                        .font(.system(size: 17, weight: .bold))
+                    Text("Choose the exact library source and provider for \(project.displayName).")
+                        .font(.system(size: 12))
+                        .foregroundStyle(HubTheme.textDim)
+                }
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(HubTheme.contentPadding)
+
+            HStack {
+                TextField("Search the skill library", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                Text("\(groups.count) unique")
+                    .font(.system(size: 12))
+                    .foregroundStyle(HubTheme.textDim)
+            }
+            .padding(.horizontal, HubTheme.contentPadding)
+            .padding(.bottom, 10)
+
+            Rectangle().fill(HubTheme.line).frame(height: 1)
+
+            if groups.isEmpty {
+                ContentUnavailableView(
+                    "No matching library skills",
+                    systemImage: "magnifyingglass",
+                    description: Text("Try another name or description.")
+                )
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(groups) { group in
+                            libraryGroup(group, installedNames: installedNames)
+                        }
+                    }
+                    .padding(HubTheme.contentPadding)
+                }
+            }
+        }
+        .frame(minWidth: 620, idealWidth: 720, minHeight: 500, idealHeight: 620)
+        .background(HubTheme.bg)
+        .alert("Couldn't add skill", isPresented: Binding(
+            get: { skillStore.lastError != nil },
+            set: { if !$0 { skillStore.lastError = nil } }
+        )) {
+            Button("OK", role: .cancel) { skillStore.lastError = nil }
+        } message: {
+            Text(skillStore.lastError ?? "")
+        }
+    }
+
+    private func libraryGroup(
+        _ group: SkillStore.GlobalSkillGroup,
+        installedNames: SkillStore.InstalledNameIndex
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(group.name)
+                        .font(.system(size: 13, weight: .semibold))
+                    if !group.primaryDescription.isEmpty {
+                        Text(group.primaryDescription)
+                            .font(.system(size: 12))
+                            .foregroundStyle(HubTheme.textDim)
+                            .lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 12)
+                ProviderTileRow(toolIDs: group.tileIDs)
+            }
+
+            ForEach(group.skills, id: \.path) { skill in
+                libraryOrigin(skill, installed: installedNames.contains(skill))
+            }
+        }
+        .padding(12)
+        .hubCard()
+    }
+
+    private func libraryOrigin(_ skill: Skill, installed: Bool) -> some View {
+        let canInstall = !skillStore.installTargets(for: skill, projectPath: project.path).isEmpty
+        let providerID = SkillStore.GlobalSkillGroup.providerID(for: skill.source)
+        return HStack(spacing: 10) {
+            if let providerID {
+                ProviderTile(toolID: providerID)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(SkillStore.GlobalSkillGroup.sourceLabel(skill.source))
+                    .font(.system(size: 12, weight: .semibold))
+                Text(skill.path)
+                    .font(HubFont.machine)
+                    .foregroundStyle(HubTheme.textFaint)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 10)
+            Button(installed ? "Installed" : installLabel(for: skill)) {
+                skillStore.install(skill: skill, to: project.path)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(installed || !canInstall ? HubTheme.textFaint : HubTheme.accent)
+            .disabled(installed || !canInstall)
+            .accessibilityLabel("\(installed ? "Installed" : installLabel(for: skill)) \(skill.name) from \(SkillStore.GlobalSkillGroup.sourceLabel(skill.source))")
+        }
+        .padding(9)
+        .background(HubTheme.panelBg.opacity(0.65))
+        .clipShape(RoundedRectangle(cornerRadius: HubTheme.Radius.control))
+    }
+
+    private func matchesSearch(_ group: SkillStore.GlobalSkillGroup) -> Bool {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return true }
+        return group.name.localizedCaseInsensitiveContains(query)
+            || group.primaryDescription.localizedCaseInsensitiveContains(query)
+            || group.sourceLabels.contains { $0.localizedCaseInsensitiveContains(query) }
     }
 
     private func installLabel(for skill: Skill) -> String {
         switch skill.source {
-        case .claudeGlobal:
-            return "Install Claude"
-        case .codexGlobal, .codexAdmin, .codexManaged:
-            return "Install Codex"
-        case .cursorGlobal:
-            return "Install Cursor"
-        case .providerGlobal:
-            return "Install skill"
+        case .claudeGlobal: "Add to Claude"
+        case .codexGlobal, .codexAdmin, .codexManaged: "Add to Codex"
+        case .cursorGlobal: "Add to Cursor"
+        case .providerGlobal: "Add skill"
         }
     }
 }
@@ -1155,10 +1293,93 @@ struct GlobalSkillsView: View {
     }
 }
 
-private struct ProjectSkillGroup: Identifiable {
+enum SkillOriginScope: Equatable {
+    case project
+    case projectPrivate
+    case ancestor
+    case global
+    case managed
+    case unknown(String)
+
+    var title: String {
+        switch self {
+        case .project: "This project"
+        case .projectPrivate: "Project private"
+        case .ancestor: "Inherited"
+        case .global: "Global"
+        case .managed: "Provider managed"
+        case .unknown(let label): label.isEmpty ? "Other source" : label
+        }
+    }
+
+    fileprivate var sortOrder: Int {
+        switch self {
+        case .project: 0
+        case .projectPrivate: 1
+        case .ancestor: 2
+        case .global: 3
+        case .managed: 4
+        case .unknown: 5
+        }
+    }
+}
+
+enum ProjectSkillOriginAvailability: Equatable {
+    case installed
+    case available
+}
+
+struct ProjectSkillOrigin: Identifiable {
+    var id: String { installed.originID }
+    let installed: InstalledSkill
+    let scope: SkillOriginScope
+    let availability: ProjectSkillOriginAvailability
+    let sourceSkill: Skill?
+
+    init(
+        installed: InstalledSkill,
+        scope: SkillOriginScope,
+        availability: ProjectSkillOriginAvailability = .installed,
+        sourceSkill: Skill? = nil
+    ) {
+        self.installed = installed
+        self.scope = scope
+        self.availability = availability
+        self.sourceSkill = sourceSkill
+    }
+
+    var providerIDs: [String] {
+        ProjectSkillGroup.providerIDs(for: installed)
+    }
+
+    var canEdit: Bool { availability == .installed && installed.canEdit }
+    var canRemove: Bool { availability == .installed && installed.canRemove }
+    var statusLabel: String { availability == .available ? "available" : installed.state.label.lowercased() }
+}
+
+struct ProjectSkillGroup: Identifiable {
     var id: String { name.lowercased() }
     let name: String
-    let origins: [InstalledSkill]
+    let originDetails: [ProjectSkillOrigin]
+
+    init(name: String, originDetails: [ProjectSkillOrigin]) {
+        self.name = name
+        self.originDetails = originDetails
+    }
+
+    var origins: [InstalledSkill] {
+        originDetails.map(\.installed)
+    }
+
+    var installedOrigins: [ProjectSkillOrigin] {
+        originDetails.filter { $0.availability == .installed }
+    }
+
+    var hasInstalledOrigin: Bool { !installedOrigins.isEmpty }
+
+    var availabilityLabel: String {
+        hasInstalledOrigin ? state.label.lowercased() : "available"
+    }
 
     var description: String? {
         origins.first { !$0.description.isEmpty }?.description
@@ -1172,6 +1393,10 @@ private struct ProjectSkillGroup: Identifiable {
         unique(origins.map(\.scopeLabel))
     }
 
+    var scopeSummary: String {
+        unique(originDetails.map { $0.scope.title }).joined(separator: " · ")
+    }
+
     var stateLabels: [String] {
         unique(origins.map { $0.state.label })
     }
@@ -1183,9 +1408,10 @@ private struct ProjectSkillGroup: Identifiable {
     /// Worst state across origins — a skill is only "working" when nothing
     /// backing it is broken.
     var state: InstalledSkill.State {
-        if origins.contains(where: { $0.state == .invalid }) { return .invalid }
-        if !origins.isEmpty, origins.allSatisfy({ $0.state == .disabled }) { return .disabled }
-        if origins.contains(where: { $0.state == .limited }) { return .limited }
+        let installed = installedOrigins.map(\.installed)
+        if installed.contains(where: { $0.state == .invalid }) { return .invalid }
+        if !installed.isEmpty, installed.allSatisfy({ $0.state == .disabled }) { return .disabled }
+        if installed.contains(where: { $0.state == .limited }) { return .limited }
         return .active
     }
 
@@ -1205,16 +1431,24 @@ private struct ProjectSkillGroup: Identifiable {
     var providerIDs: [String] {
         var ids: [String] = []
         for origin in origins {
-            var matched = false
-            for entry in Self.providerDirectories where origin.path.contains(entry.directory) {
-                if !ids.contains(entry.id) { ids.append(entry.id) }
-                matched = true
+            for id in Self.providerIDs(for: origin) where !ids.contains(id) {
+                ids.append(id)
             }
-            if !matched {
-                for label in origin.toolLabels {
-                    if let id = ProjectSkillGroup.providerID(forLabel: label), !ids.contains(id) {
-                        ids.append(id)
-                    }
+        }
+        return ids
+    }
+
+    static func providerIDs(for origin: InstalledSkill) -> [String] {
+        var ids: [String] = []
+        var matched = false
+        for entry in providerDirectories where isWithin(origin.path, root: entry.directory) {
+            if !ids.contains(entry.id) { ids.append(entry.id) }
+            matched = true
+        }
+        if !matched {
+            for label in origin.toolLabels {
+                if let id = providerID(forLabel: label), !ids.contains(id) {
+                    ids.append(id)
                 }
             }
         }
@@ -1236,21 +1470,193 @@ private struct ProjectSkillGroup: Identifiable {
         return nil
     }
 
-    static func groups(from origins: [InstalledSkill]) -> [ProjectSkillGroup] {
-        Dictionary(grouping: origins, by: { $0.name.lowercased() })
+    static func groups(
+        from origins: [InstalledSkill],
+        projectPath: String? = nil,
+        globalRoots: [String] = defaultGlobalRoots
+    ) -> [ProjectSkillGroup] {
+        groups(from: origins.map {
+            origin(from: $0, projectPath: projectPath, globalRoots: globalRoots)
+        })
+    }
+
+    static func mergedGroups(
+        installed: [InstalledSkill],
+        globalSkills: [Skill],
+        projectPath: String,
+        globalRoots: [String] = defaultGlobalRoots
+    ) -> [ProjectSkillGroup] {
+        var details = installed.map {
+            origin(from: $0, projectPath: projectPath, globalRoots: globalRoots)
+        }
+        var seen = Set(details.map(dedupeKey))
+        for skill in globalSkills {
+            let available = availableOrigin(from: skill)
+            guard seen.insert(dedupeKey(available)).inserted else { continue }
+            details.append(available)
+        }
+        return groups(from: details)
+    }
+
+    private static func groups(from details: [ProjectSkillOrigin]) -> [ProjectSkillGroup] {
+        Dictionary(grouping: details, by: { $0.installed.name.lowercased() })
             .values
             .compactMap { group in
-                guard let first = group.sorted(by: originSort).first else { return nil }
-                return ProjectSkillGroup(name: first.name, origins: group.sorted(by: originSort))
+                let sorted = group.sorted(by: originSort)
+                guard let first = sorted.first else { return nil }
+                return ProjectSkillGroup(
+                    name: first.installed.name,
+                    originDetails: sorted
+                )
             }
             .sorted {
                 $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
             }
     }
 
-    private static func originSort(_ lhs: InstalledSkill, _ rhs: InstalledSkill) -> Bool {
-        if lhs.scopeLabel != rhs.scopeLabel { return lhs.scopeLabel < rhs.scopeLabel }
-        return lhs.path.localizedCaseInsensitiveCompare(rhs.path) == .orderedAscending
+    private static func availableOrigin(from skill: Skill) -> ProjectSkillOrigin {
+        let managed = skill.source == .codexAdmin || skill.source == .codexManaged
+        let sourceLabel = SkillStore.GlobalSkillGroup.sourceLabel(skill.source)
+        let installed = InstalledSkill(
+            originID: "available|\(skill.source.rawValue)|\(standardized(skill.path))",
+            name: skill.name,
+            description: skill.description,
+            claudePath: skill.source == .claudeGlobal ? skill.path : nil,
+            codexPath: [.codexGlobal, .codexAdmin, .codexManaged].contains(skill.source) ? skill.path : nil,
+            path: skill.path,
+            skillMDPath: (skill.path as NSString).appendingPathComponent("SKILL.md"),
+            sourceLabel: sourceLabel,
+            scopeLabel: managed ? "Managed" : "Global",
+            toolLabels: SkillStore.GlobalSkillGroup.toolLabels(for: skill.source),
+            state: .active,
+            version: nil,
+            diagnostics: [],
+            canEdit: false,
+            canRemove: false,
+            readOnlyReason: managed
+                ? "Available globally and managed by the provider. Reveal or copy this source."
+                : "Shared global source. Reveal it, or add a project link."
+        )
+        return ProjectSkillOrigin(
+            installed: installed,
+            scope: managed ? .managed : .global,
+            availability: .available,
+            sourceSkill: skill
+        )
+    }
+
+    private static func origin(
+        from installed: InstalledSkill,
+        projectPath: String?,
+        globalRoots: [String]
+    ) -> ProjectSkillOrigin {
+        let scope = classify(installed, projectPath: projectPath, globalRoots: globalRoots)
+        let availability: ProjectSkillOriginAvailability = scope == .global || scope == .managed
+            ? .available
+            : .installed
+        return ProjectSkillOrigin(installed: installed, scope: scope, availability: availability)
+    }
+
+    private static func dedupeKey(_ origin: ProjectSkillOrigin) -> String {
+        let providers = ProviderFamily.uniqueTileIDs(from: origin.providerIDs).sorted().joined(separator: ",")
+        return "\(origin.installed.name.lowercased())|\(standardized(origin.installed.path))|\(providers)"
+    }
+
+    static func classify(
+        _ origin: InstalledSkill,
+        projectPath: String?,
+        globalRoots: [String] = defaultGlobalRoots
+    ) -> SkillOriginScope {
+        let lowerPath = standardized(origin.path).lowercased()
+        let lowerSource = origin.sourceLabel.lowercased()
+        let lowerReason = origin.readOnlyReason?.lowercased() ?? ""
+        if lowerSource.contains("plugin")
+            || lowerReason.contains("plugin")
+            || lowerPath.contains("/plugins/cache/")
+            || lowerSource.contains("codex managed")
+            || lowerSource.contains("codex admin") {
+            return .managed
+        }
+
+        let scopeLabel = origin.scopeLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch scopeLabel.lowercased() {
+        case "project": return .project
+        case "private": return .projectPrivate
+        default: break
+        }
+
+        if let projectPath, isWithin(origin.path, root: projectPath) {
+            return .project
+        }
+        if globalRoots.contains(where: { isWithin(origin.path, root: $0) }) {
+            return .global
+        }
+        switch scopeLabel.lowercased() {
+        case "global": return .global
+        case "parent", "ancestor", "inherited":
+            if isAncestorProviderSkill(origin.path, of: projectPath) {
+                return .ancestor
+            }
+            if lowerSource.contains("additional-directory") || lowerSource.contains("additional directory") {
+                return .unknown("Additional folder")
+            }
+            return .unknown("Other source")
+        default: return .unknown(scopeLabel)
+        }
+    }
+
+    static func projectInstalledOrigins(
+        from origins: [InstalledSkill],
+        projectPath: String,
+        globalRoots: [String] = defaultGlobalRoots
+    ) -> [InstalledSkill] {
+        origins.filter {
+            let scope = classify($0, projectPath: projectPath, globalRoots: globalRoots)
+            return scope == .project || scope == .projectPrivate
+        }
+    }
+
+    static var defaultGlobalRoots: [String] {
+        var roots = ProviderCatalog.specs().flatMap(\.globalSkillDirs)
+        roots.append("/etc/codex/skills")
+        return uniqueStatic(roots)
+    }
+
+    private static func originSort(_ lhs: ProjectSkillOrigin, _ rhs: ProjectSkillOrigin) -> Bool {
+        if lhs.scope.sortOrder != rhs.scope.sortOrder { return lhs.scope.sortOrder < rhs.scope.sortOrder }
+        return lhs.installed.path.localizedCaseInsensitiveCompare(rhs.installed.path) == .orderedAscending
+    }
+
+    private static func isWithin(_ path: String, root: String) -> Bool {
+        let candidate = standardized(path)
+        let base = standardized(root)
+        return candidate == base || candidate.hasPrefix(base + "/")
+    }
+
+    private static func isAncestorProviderSkill(_ path: String, of projectPath: String?) -> Bool {
+        guard let projectPath else { return false }
+        let candidate = standardized(path)
+        let project = standardized(projectPath)
+        let projectSkillDirectories = uniqueStatic(ProviderCatalog.specs().flatMap(\.projectSkillDirs))
+        for relative in projectSkillDirectories {
+            let normalized = relative.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            let marker = "/\(normalized)/"
+            guard let range = candidate.range(of: marker) else { continue }
+            let owner = String(candidate[..<range.lowerBound])
+            if project == owner || project.hasPrefix(owner + "/") {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func standardized(_ path: String) -> String {
+        URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL.path
+    }
+
+    private static func uniqueStatic(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        return values.filter { seen.insert($0).inserted }
     }
 
     private func unique(_ values: [String]) -> [String] {
